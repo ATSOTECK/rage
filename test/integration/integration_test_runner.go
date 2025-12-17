@@ -10,9 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ATSOTECK/oink/internal/compiler"
-	"github.com/ATSOTECK/oink/internal/runtime"
-	"github.com/ATSOTECK/oink/internal/stdlib"
+	"github.com/ATSOTECK/oink/pkg/rage"
 )
 
 // TestResult holds the result of running a single test script
@@ -33,47 +31,48 @@ type MismatchDetail struct {
 	Actual   string `json:"actual"`
 }
 
-// convertValue converts a Python runtime Value to a Go interface{} for JSON comparison
-func convertValue(v runtime.Value) interface{} {
-	switch val := v.(type) {
-	case *runtime.PyNone:
+// convertValue converts a rage.Value to a Go interface{} for JSON comparison
+func convertValue(v rage.Value) interface{} {
+	if v == nil || rage.IsNone(v) {
 		return nil
-	case *runtime.PyBool:
-		return val.Value
-	case *runtime.PyInt:
-		return val.Value
-	case *runtime.PyFloat:
-		return val.Value
-	case *runtime.PyString:
-		return val.Value
-	case *runtime.PyList:
-		result := make([]interface{}, len(val.Items))
-		for i, item := range val.Items {
+	}
+
+	switch {
+	case rage.IsBool(v):
+		b, _ := rage.AsBool(v)
+		return b
+	case rage.IsInt(v):
+		i, _ := rage.AsInt(v)
+		return i
+	case rage.IsFloat(v):
+		f, _ := rage.AsFloat(v)
+		return f
+	case rage.IsString(v):
+		s, _ := rage.AsString(v)
+		return s
+	case rage.IsList(v):
+		items, _ := rage.AsList(v)
+		result := make([]interface{}, len(items))
+		for i, item := range items {
 			result[i] = convertValue(item)
 		}
 		return result
-	case *runtime.PyTuple:
-		result := make([]interface{}, len(val.Items))
-		for i, item := range val.Items {
+	case rage.IsTuple(v):
+		items, _ := rage.AsTuple(v)
+		result := make([]interface{}, len(items))
+		for i, item := range items {
 			result[i] = convertValue(item)
 		}
 		return result
-	case *runtime.PyDict:
+	case rage.IsDict(v):
+		items, _ := rage.AsDict(v)
 		result := make(map[string]interface{})
-		for k, v := range val.Items {
-			keyStr := fmt.Sprintf("%v", convertValue(k))
-			result[keyStr] = convertValue(v)
-		}
-		return result
-	case *runtime.PySet:
-		// Convert set to sorted list for comparison
-		result := make([]interface{}, 0, len(val.Items))
-		for k := range val.Items {
-			result = append(result, convertValue(k))
+		for k, val := range items {
+			result[k] = convertValue(val)
 		}
 		return result
 	default:
-		return fmt.Sprintf("%v", v)
+		return fmt.Sprintf("%v", v.GoValue())
 	}
 }
 
@@ -181,50 +180,31 @@ func runScript(scriptPath string, timeout time.Duration) (map[string]interface{}
 		return nil, fmt.Errorf("failed to read script: %w", err)
 	}
 
-	// Reset and initialize modules
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	// Compile
-	code, errs := compiler.CompileSource(string(source), scriptPath)
-	if len(errs) > 0 {
-		var errMsgs []string
-		for _, e := range errs {
-			errMsgs = append(errMsgs, e.Error())
-		}
-		return nil, fmt.Errorf("compilation errors: %s", strings.Join(errMsgs, "; "))
-	}
+	// Create a new state with all modules enabled
+	state := rage.NewState()
+	defer state.Close()
 
 	// Execute with timeout
-	vm := runtime.NewVM()
-	vm.SetCheckInterval(100)
-
-	_, err = vm.ExecuteWithTimeout(timeout, code)
+	_, err = state.RunWithTimeout(string(source), timeout)
 	if err != nil {
 		return nil, fmt.Errorf("execution error: %w", err)
 	}
 
 	// Extract results dictionary
-	resultsVal := vm.GetGlobal("results")
-	if resultsVal == nil || runtime.IsNone(resultsVal) {
+	resultsVal := state.GetGlobal("results")
+	if resultsVal == nil || rage.IsNone(resultsVal) {
 		return nil, fmt.Errorf("no 'results' dictionary found in script")
 	}
 
-	resultsDict, ok := resultsVal.(*runtime.PyDict)
-	if !ok {
+	if !rage.IsDict(resultsVal) {
 		return nil, fmt.Errorf("'results' is not a dictionary")
 	}
 
 	// Convert to Go map
+	dictItems, _ := rage.AsDict(resultsVal)
 	results := make(map[string]interface{})
-	for k, v := range resultsDict.Items {
-		keyStr := ""
-		if ks, ok := k.(*runtime.PyString); ok {
-			keyStr = ks.Value
-		} else {
-			keyStr = fmt.Sprintf("%v", convertValue(k))
-		}
-		results[keyStr] = convertValue(v)
+	for k, v := range dictItems {
+		results[k] = convertValue(v)
 	}
 
 	return results, nil

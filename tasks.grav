@@ -4,8 +4,8 @@ func tst()
     $go test ./...
 
 @task
-func main()
-    $go run ./cmd/oink/main.go
+func rage()
+    $go run ./cmd/rage/main.go
 
 @task
 func integration()
