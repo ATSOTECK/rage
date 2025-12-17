@@ -1,0 +1,8 @@
+
+@task
+func tst()
+    $go test ./...
+
+@task
+func main()
+    $go run ./cmd/oink/main.go
