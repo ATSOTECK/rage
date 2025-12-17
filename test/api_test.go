@@ -1,7 +1,9 @@
 package test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/ATSOTECK/oink/internal/compiler"
 	"github.com/ATSOTECK/oink/internal/runtime"
@@ -368,4 +370,133 @@ func TestCallableCheck(t *testing.T) {
 	assert.True(t, runtime.IsCallable(runtime.NewGoFunction("test", func(vm *runtime.VM) int { return 0 })))
 	assert.False(t, runtime.IsCallable(runtime.NewInt(42)))
 	assert.False(t, runtime.IsCallable(runtime.NewString("hello")))
+}
+
+// =====================================
+// Timeout Tests
+// =====================================
+
+// TestExecuteWithTimeoutSuccess tests that scripts complete within timeout
+func TestExecuteWithTimeoutSuccess(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+result = 0
+for i in range(100):
+    result = result + i
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	// Should complete well within 1 second
+	result, err := vm.ExecuteWithTimeout(1*time.Second, code)
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	sum := vm.GetGlobal("result").(*runtime.PyInt).Value
+	assert.Equal(t, int64(4950), sum)
+}
+
+// TestExecuteWithTimeoutExceeded tests that infinite loops are stopped
+func TestExecuteWithTimeoutExceeded(t *testing.T) {
+	vm := runtime.NewVM()
+	vm.SetCheckInterval(100) // Check more frequently for faster timeout detection
+
+	source := `
+x = 0
+while True:
+    x = x + 1
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	// Should timeout after 50ms
+	_, err := vm.ExecuteWithTimeout(50*time.Millisecond, code)
+	require.Error(t, err)
+
+	// Check it's a TimeoutError
+	_, ok := err.(*runtime.TimeoutError)
+	assert.True(t, ok, "expected TimeoutError, got %T: %v", err, err)
+}
+
+// TestExecuteWithContextCancellation tests context cancellation
+func TestExecuteWithContextCancellation(t *testing.T) {
+	vm := runtime.NewVM()
+	vm.SetCheckInterval(100) // Check more frequently
+
+	source := `
+x = 0
+while True:
+    x = x + 1
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel after a short delay
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := vm.ExecuteWithContext(ctx, code)
+	require.Error(t, err)
+
+	// Check it's a CancelledError
+	_, ok := err.(*runtime.CancelledError)
+	assert.True(t, ok, "expected CancelledError, got %T: %v", err, err)
+}
+
+// TestExecuteWithoutTimeoutNoOverhead tests that regular Execute still works
+func TestExecuteWithoutTimeoutNoOverhead(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `result = 1 + 2 + 3`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	result, err := vm.Execute(code)
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	sum := vm.GetGlobal("result").(*runtime.PyInt).Value
+	assert.Equal(t, int64(6), sum)
+}
+
+// TestSetCheckInterval tests configuring the check interval
+func TestSetCheckInterval(t *testing.T) {
+	vm := runtime.NewVM()
+
+	// Very low interval for fast timeout detection
+	vm.SetCheckInterval(1)
+
+	source := `
+x = 0
+while True:
+    x = x + 1
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	start := time.Now()
+	_, err := vm.ExecuteWithTimeout(20*time.Millisecond, code)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	// With checkInterval=1, timeout should be detected very quickly
+	assert.Less(t, elapsed, 100*time.Millisecond, "timeout detection should be fast")
+}
+
+// TestTimeoutErrorMessage tests the error message format
+func TestTimeoutErrorMessage(t *testing.T) {
+	err := &runtime.TimeoutError{Timeout: 5 * time.Second}
+	assert.Contains(t, err.Error(), "5s")
+	assert.Contains(t, err.Error(), "timed out")
+}
+
+// TestCancelledErrorMessage tests the cancellation error message
+func TestCancelledErrorMessage(t *testing.T) {
+	err := &runtime.CancelledError{}
+	assert.Contains(t, err.Error(), "cancelled")
 }

@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"time"
 )
 
 // Value represents a Python value
@@ -203,16 +205,48 @@ type VM struct {
 	frame    *Frame // Current frame
 	Globals  map[string]Value
 	builtins map[string]Value
+
+	// Execution control
+	ctx              context.Context
+	instructionCount int64
+	checkInterval    int64 // Check context every N instructions
+}
+
+// TimeoutError is returned when script execution exceeds the time limit
+type TimeoutError struct {
+	Timeout time.Duration
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("script execution timed out after %v", e.Timeout)
+}
+
+// CancelledError is returned when script execution is cancelled via context
+type CancelledError struct{}
+
+func (e *CancelledError) Error() string {
+	return "script execution was cancelled"
 }
 
 // NewVM creates a new virtual machine
 func NewVM() *VM {
 	vm := &VM{
-		Globals:  make(map[string]Value),
-		builtins: make(map[string]Value),
+		Globals:       make(map[string]Value),
+		builtins:      make(map[string]Value),
+		checkInterval: 1000, // Check context every 1000 instructions by default
 	}
 	vm.initBuiltins()
 	return vm
+}
+
+// SetCheckInterval sets how often the VM checks for timeout/cancellation.
+// Lower values are more responsive but have more overhead.
+// Default is 1000 instructions.
+func (vm *VM) SetCheckInterval(n int64) {
+	if n < 1 {
+		n = 1
+	}
+	vm.checkInterval = n
 }
 
 func (vm *VM) initBuiltins() {
@@ -548,6 +582,21 @@ func (i *PyIterator) String() string { return "<iterator>" }
 
 // Execute runs bytecode and returns the result
 func (vm *VM) Execute(code *CodeObject) (Value, error) {
+	return vm.ExecuteWithContext(context.Background(), code)
+}
+
+// ExecuteWithTimeout runs bytecode with a time limit.
+// Returns TimeoutError if the script exceeds the specified duration.
+func (vm *VM) ExecuteWithTimeout(timeout time.Duration, code *CodeObject) (Value, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return vm.ExecuteWithContext(ctx, code)
+}
+
+// ExecuteWithContext runs bytecode with a context for cancellation/timeout support.
+// The context is checked periodically during execution (see SetCheckInterval).
+// Returns CancelledError if the context is cancelled, or TimeoutError if it times out.
+func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, error) {
 	frame := &Frame{
 		Code:     code,
 		IP:       0,
@@ -559,6 +608,8 @@ func (vm *VM) Execute(code *CodeObject) (Value, error) {
 
 	vm.frames = append(vm.frames, frame)
 	vm.frame = frame
+	vm.ctx = ctx
+	vm.instructionCount = 0
 
 	return vm.run()
 }
@@ -567,6 +618,24 @@ func (vm *VM) run() (Value, error) {
 	frame := vm.frame
 
 	for frame.IP < len(frame.Code.Code) {
+		// Check for timeout/cancellation periodically
+		vm.instructionCount++
+		if vm.ctx != nil && vm.instructionCount%vm.checkInterval == 0 {
+			select {
+			case <-vm.ctx.Done():
+				if vm.ctx.Err() == context.DeadlineExceeded {
+					// Extract timeout duration from context if possible
+					if deadline, ok := vm.ctx.Deadline(); ok {
+						return nil, &TimeoutError{Timeout: time.Until(deadline) * -1}
+					}
+					return nil, &TimeoutError{}
+				}
+				return nil, &CancelledError{}
+			default:
+				// Context not done, continue execution
+			}
+		}
+
 		op := Opcode(frame.Code.Code[frame.IP])
 		frame.IP++
 
