@@ -437,8 +437,8 @@ func main() {
 	// Check if directories exist
 	if _, err := os.Stat(scriptsDir); os.IsNotExist(err) {
 		// Try from project root
-		scriptsDir = "test/scripts"
-		expectedDir = "test/project/expected_data"
+		scriptsDir = "test/integration/scripts"
+		expectedDir = "test/integration/expected_data"
 	}
 
 	// Parse command line

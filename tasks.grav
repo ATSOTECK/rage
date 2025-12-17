@@ -9,4 +9,4 @@ func main()
 
 @task
 func integration()
-    $ go run ./test/project/main.go
+    $ go run ./test/integration/integration_test_runner.go
