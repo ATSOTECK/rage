@@ -1,15 +1,20 @@
-github.com/AlDanial/cloc v 2.06  T=0.01 s (586.1 files/s, 399848.2 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.02 s (635.9 files/s, 496719.0 lines/s)
 -------------------------------------------------------------------------------------
 File                                              blank        comment           code
 -------------------------------------------------------------------------------------
-./internal/compiler/parser.go                       319             39           1711
+./internal/runtime/vm.go                            176             60           1736
+./internal/compiler/parser.go                       320             40           1728
+./internal/compiler/compiler.go                     253            128           1266
 ./internal/compiler/lexer.go                        127             47            735
 ./internal/model/ast.go                             151             84            640
 ./internal/compiler/parser_test.go                  135              0            629
+./test/integration_test.go                           97              0            500
 ./internal/compiler/lexer_test.go                    70              0            362
-./internal/model/token.go                            20             10            283
-./cmd/oink/main.go                                   10              1             84
+./internal/runtime/opcode.go                         38             29            356
+./internal/model/token.go                            20             10            285
+./internal/utils/ast.go                               4              0             58
+./cmd/oink/main.go                                   11              2             57
 ./test/scripts/basic/hello.py                         0              0              1
 -------------------------------------------------------------------------------------
-SUM:                                                832            181           4445
+SUM:                                               1402            400           8353
 -------------------------------------------------------------------------------------

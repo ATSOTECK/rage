@@ -221,6 +221,25 @@ func (p *Parser) parseExpressionStmt() model.Stmt {
 		return nil
 	}
 
+	// Check for tuple unpacking (a, b, c = ...)
+	if p.check(model.TK_Comma) {
+		elts := []model.Expr{expr}
+		startPos := expr.Pos()
+		for p.match(model.TK_Comma) {
+			if p.check(model.TK_Assign) || p.check(model.TK_Newline) || p.isAtEnd() {
+				break
+			}
+			elts = append(elts, p.parseExpression())
+		}
+		if len(elts) > 1 {
+			expr = &model.Tuple{
+				Elts:     elts,
+				StartPos: startPos,
+				EndPos:   elts[len(elts)-1].End(),
+			}
+		}
+	}
+
 	// Check for assignment
 	if p.check(model.TK_Assign) {
 		return p.parseAssignment(expr)
@@ -1976,10 +1995,10 @@ func (p *Parser) parseCompareExpr(left model.Expr) model.Expr {
 		// Handle 'not in' and 'is not'
 		if op == model.TK_Not && p.check(model.TK_In) {
 			p.advance()
-			op = model.TK_Not // We'll represent 'not in' specially
+			op = model.TK_NotIn
 		} else if op == model.TK_Is && p.check(model.TK_Not) {
 			p.advance()
-			op = model.TK_Is // We'll represent 'is not' specially
+			op = model.TK_IsNot
 		}
 
 		ops = append(ops, op)

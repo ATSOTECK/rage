@@ -87,6 +87,8 @@ const (
 	TK_Equal        // ==
 	TK_NotEqual     // !=
 	TK_Arrow        // ->
+	TK_NotIn        // not in (compound)
+	TK_IsNot        // is not (compound)
 
 	// Delimiters
 	TK_LParen            // (
