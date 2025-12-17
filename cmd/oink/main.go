@@ -5,9 +5,13 @@ import (
 
 	"github.com/ATSOTECK/oink/internal/compiler"
 	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/oink/internal/stdlib"
 )
 
 func main() {
+	// Initialize standard library modules
+	stdlib.InitAllModules()
+
 	source := `
 def factorial(n):
     if n <= 1:
@@ -40,9 +44,34 @@ if x > 5:
     print("x is greater than 5")
 else:
     print("x is not greater than 5")
+
+# Test module imports
+import math
+print("Pi =", math.pi)
+print("sqrt(16) =", math.sqrt(16))
+
+from math import sin, cos, pi
+print("sin(0) =", sin(0))
+print("cos(0) =", cos(0))
+
+# Test random module
+import random
+random.seed(42)
+print("Random number:", random.randint(1, 100))
+print("Random choice:", random.choice(["apple", "banana", "cherry"]))
+
+# Test string module
+import string
+print("Digits:", string.digits)
+print("Capwords:", string.capwords("hello world"))
+
+# Test sys module
+import sys
+print("Python version:", sys.version)
+print("Platform:", sys.platform)
 `
 
-	fmt.Println("=== Python 3.14 Demo ===")
+	fmt.Println("=== Oink (Python 3.14) Demo ===")
 	fmt.Println()
 	fmt.Println("Source:")
 	fmt.Println(source)

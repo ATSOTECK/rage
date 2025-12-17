@@ -965,6 +965,53 @@ func (vm *VM) run() (Value, error) {
 				return nil, fmt.Errorf("%v (caused by %v)", exc, cause)
 			}
 
+		case OpImportName:
+			name := frame.Code.Names[arg]
+			fromlist := vm.pop() // fromlist (list of names to import, or nil)
+			_ = vm.pop()         // level (for relative imports, not yet used)
+
+			// Try to import the module
+			mod, err := vm.ImportModule(name)
+			if err != nil {
+				return nil, err
+			}
+			vm.push(mod)
+
+			// If fromlist is provided and non-empty, we're doing "from X import Y"
+			// The actual attribute extraction is done by IMPORT_FROM
+			_ = fromlist
+
+		case OpImportFrom:
+			name := frame.Code.Names[arg]
+			// Top of stack is the module
+			mod := vm.top()
+			pyMod, ok := mod.(*PyModule)
+			if !ok {
+				return nil, fmt.Errorf("import from requires a module, got %s", vm.typeName(mod))
+			}
+
+			// Get the attribute from the module
+			value, exists := pyMod.Get(name)
+			if !exists {
+				return nil, fmt.Errorf("cannot import name '%s' from '%s'", name, pyMod.Name)
+			}
+			vm.push(value)
+
+		case OpImportStar:
+			// Top of stack is the module (don't pop - the compiler emits a POP after)
+			mod := vm.top()
+			pyMod, ok := mod.(*PyModule)
+			if !ok {
+				return nil, fmt.Errorf("import * requires a module, got %s", vm.typeName(mod))
+			}
+
+			// Import all public names (not starting with _) into globals
+			for name, value := range pyMod.Dict {
+				if len(name) == 0 || name[0] != '_' {
+					frame.Globals[name] = value
+				}
+			}
+
 		case OpNop:
 			// Do nothing
 
@@ -1170,6 +1217,8 @@ func (vm *VM) str(v Value) string {
 		return fmt.Sprintf("<go function %s>", val.Name)
 	case *PyUserData:
 		return fmt.Sprintf("<userdata %T>", val.Value)
+	case *PyModule:
+		return fmt.Sprintf("<module '%s'>", val.Name)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
@@ -1221,6 +1270,8 @@ func (vm *VM) typeName(v Value) string {
 			}
 		}
 		return "userdata"
+	case *PyModule:
+		return "module"
 	default:
 		return "object"
 	}
@@ -1590,6 +1641,11 @@ func (vm *VM) contains(container, item Value) bool {
 
 func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 	switch o := obj.(type) {
+	case *PyModule:
+		if val, ok := o.Dict[name]; ok {
+			return val, nil
+		}
+		return nil, fmt.Errorf("module '%s' has no attribute '%s'", o.Name, name)
 	case *PyUserData:
 		// Look up method in metatable by type name
 		if o.Metatable != nil {

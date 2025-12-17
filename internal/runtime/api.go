@@ -297,6 +297,16 @@ func (vm *VM) GetTypeMetatable(typeName string) *TypeMetatable {
 	return typeMetatables[typeName]
 }
 
+// RegisterTypeMetatable registers a type metatable globally (without VM instance)
+func RegisterTypeMetatable(typeName string, mt *TypeMetatable) {
+	typeMetatables[typeName] = mt
+}
+
+// GetRegisteredTypeMetatable retrieves a type metatable globally (without VM instance)
+func GetRegisteredTypeMetatable(typeName string) *TypeMetatable {
+	return typeMetatables[typeName]
+}
+
 // SetMethod sets a method on a type metatable
 func (mt *TypeMetatable) SetMethod(name string, fn GoFunction) {
 	mt.Methods[name] = fn
