@@ -595,3 +595,84 @@ func TestVMInOperator(t *testing.T) {
 		})
 	}
 }
+
+func TestVMClasses(t *testing.T) {
+	t.Run("simple class", func(t *testing.T) {
+		source := `
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def sum(self):
+        return self.x + self.y
+
+p = Point(3, 4)
+result = p.sum()
+`
+		code, errs := compiler.CompileSource(source, "<test>")
+		require.Empty(t, errs)
+
+		v := runtime.NewVM()
+		_, err := v.Execute(code)
+		require.NoError(t, err)
+
+		result, ok := v.Globals["result"].(*runtime.PyInt)
+		require.True(t, ok)
+		assert.Equal(t, int64(7), result.Value)
+	})
+
+	t.Run("class with inheritance", func(t *testing.T) {
+		source := `
+class Animal:
+    def __init__(self, name):
+        self.name = name
+
+    def speak(self):
+        return "sound"
+
+class Dog(Animal):
+    def speak(self):
+        return "Woof!"
+
+dog = Dog("Buddy")
+result = dog.speak()
+`
+		code, errs := compiler.CompileSource(source, "<test>")
+		require.Empty(t, errs)
+
+		v := runtime.NewVM()
+		_, err := v.Execute(code)
+		require.NoError(t, err)
+
+		result, ok := v.Globals["result"].(*runtime.PyString)
+		require.True(t, ok)
+		assert.Equal(t, "Woof!", result.Value)
+	})
+
+	t.Run("class accessing outer variable", func(t *testing.T) {
+		source := `
+multiplier = 10
+
+class Calculator:
+    def __init__(self, value):
+        self.value = value
+
+    def scaled(self):
+        return self.value * multiplier
+
+calc = Calculator(5)
+result = calc.scaled()
+`
+		code, errs := compiler.CompileSource(source, "<test>")
+		require.Empty(t, errs)
+
+		v := runtime.NewVM()
+		_, err := v.Execute(code)
+		require.NoError(t, err)
+
+		result, ok := v.Globals["result"].(*runtime.PyInt)
+		require.True(t, ok)
+		assert.Equal(t, int64(50), result.Value)
+	})
+}

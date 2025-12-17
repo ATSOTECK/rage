@@ -411,7 +411,7 @@ func printResults(results []TestResult, passed, failed int) {
 
 func main() {
 	// Get directories relative to where we're running
-	scriptsDir := "../scripts"
+	scriptsDir := "scripts"
 	expectedDir := "expected_data"
 
 	// Check if directories exist

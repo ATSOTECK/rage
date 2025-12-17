@@ -1,1 +1,25 @@
-{}
+{
+  "class_attr_x": 3,
+  "class_attr_y": 4,
+  "class_method_sum": 7,
+  "class_scale_x": 6,
+  "class_scale_y": 8,
+  "multi_instance_p3_x": 10,
+  "multi_instance_p4_x": 100,
+  "multi_instance_p3_sum": 30,
+  "multi_instance_p4_sum": 300,
+  "empty_class_created": true,
+  "counter_c1_name": "first",
+  "counter_c2_name": "second",
+  "dog_name": "Buddy",
+  "dog_speak": "Woof!",
+  "dog_fetch": "Buddy fetches the ball",
+  "cat_name": "Whiskers",
+  "cat_speak": "Meow!",
+  "calc_add_5": 15,
+  "calc_multiply_3": 30,
+  "builder_parts": ["a", "b", "c"],
+  "account_initial": 100,
+  "account_after_deposit": 150,
+  "account_after_withdraw": 120
+}

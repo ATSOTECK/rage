@@ -173,14 +173,15 @@ func (i *PyInstance) String() string { return fmt.Sprintf("<%s object>", i.Class
 
 // Frame represents a call frame
 type Frame struct {
-	Code       *CodeObject
-	IP         int              // Instruction pointer
-	Stack      []Value          // Operand stack
-	Locals     []Value          // Local variables
-	Globals    map[string]Value // Global variables
-	Builtins   map[string]Value // Built-in functions
-	Cells      []*PyCell        // Closure cells
-	BlockStack []Block          // Block stack for try/except/finally
+	Code             *CodeObject
+	IP               int              // Instruction pointer
+	Stack            []Value          // Operand stack
+	Locals           []Value          // Local variables
+	Globals          map[string]Value // Global variables
+	EnclosingGlobals map[string]Value // Enclosing globals (for class bodies)
+	Builtins         map[string]Value // Built-in functions
+	Cells            []*PyCell        // Closure cells
+	BlockStack       []Block          // Block stack for try/except/finally
 }
 
 // Block represents a control flow block
@@ -571,6 +572,80 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["None"] = None
 	vm.builtins["True"] = True
 	vm.builtins["False"] = False
+
+	// __build_class__ is used to create classes
+	vm.builtins["__build_class__"] = &PyBuiltinFunc{
+		Name: "__build_class__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 2 {
+				return nil, fmt.Errorf("__build_class__: not enough arguments")
+			}
+
+			// First arg is the class body function
+			bodyFunc, ok := args[0].(*PyFunction)
+			if !ok {
+				return nil, fmt.Errorf("__build_class__: first argument must be a function")
+			}
+
+			// Second arg is the class name
+			nameVal, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("__build_class__: second argument must be a string")
+			}
+			className := nameVal.Value
+
+			// Remaining args are base classes
+			var bases []*PyClass
+			for i := 2; i < len(args); i++ {
+				if base, ok := args[i].(*PyClass); ok {
+					bases = append(bases, base)
+				}
+			}
+
+			// Execute the class body to get the namespace
+			classDict, err := vm.callClassBody(bodyFunc)
+			if err != nil {
+				return nil, fmt.Errorf("__build_class__: error executing class body: %w", err)
+			}
+
+			// Create the class
+			class := &PyClass{
+				Name:  className,
+				Bases: bases,
+				Dict:  classDict,
+			}
+
+			// Build MRO (Method Resolution Order) - simple linearization
+			class.Mro = []*PyClass{class}
+			for _, base := range bases {
+				for _, mroClass := range base.Mro {
+					// Add if not already in MRO
+					found := false
+					for _, existing := range class.Mro {
+						if existing == mroClass {
+							found = true
+							break
+						}
+					}
+					if !found {
+						class.Mro = append(class.Mro, mroClass)
+					}
+				}
+			}
+
+			return class, nil
+		},
+	}
+
+	// object is the base class for all classes
+	vm.builtins["object"] = &PyClass{
+		Name:  "object",
+		Bases: nil,
+		Dict:  make(map[string]Value),
+		Mro:   nil,
+	}
+	// Set object's MRO to just itself
+	vm.builtins["object"].(*PyClass).Mro = []*PyClass{vm.builtins["object"].(*PyClass)}
 }
 
 // PyRange represents a range object
@@ -684,6 +759,14 @@ func (vm *VM) run() (Value, error) {
 			name := frame.Code.Names[arg]
 			if val, ok := frame.Globals[name]; ok {
 				vm.push(val)
+			} else if frame.EnclosingGlobals != nil {
+				if val, ok := frame.EnclosingGlobals[name]; ok {
+					vm.push(val)
+				} else if val, ok := frame.Builtins[name]; ok {
+					vm.push(val)
+				} else {
+					return nil, fmt.Errorf("name '%s' is not defined", name)
+				}
 			} else if val, ok := frame.Builtins[name]; ok {
 				vm.push(val)
 			} else {
@@ -967,9 +1050,15 @@ func (vm *VM) run() (Value, error) {
 			if arg&1 != 0 {
 				defaults = vm.pop().(*PyTuple)
 			}
+			// Use enclosing globals if available (for methods in class bodies)
+			// so they can access module-level variables
+			fnGlobals := frame.Globals
+			if frame.EnclosingGlobals != nil {
+				fnGlobals = frame.EnclosingGlobals
+			}
 			fn := &PyFunction{
 				Code:     code,
-				Globals:  frame.Globals,
+				Globals:  fnGlobals,
 				Defaults: defaults,
 				Name:     name,
 			}
@@ -1036,9 +1125,17 @@ func (vm *VM) run() (Value, error) {
 			}
 			method := vm.pop()
 			obj := vm.pop()
-			// Prepend self to args for bound methods
-			allArgs := append([]Value{obj}, args...)
-			result, err := vm.call(method, allArgs, nil)
+			var result Value
+			var err error
+			// Check if method is already bound (PyMethod)
+			if _, isBound := method.(*PyMethod); isBound {
+				// Bound method already has self, don't prepend again
+				result, err = vm.call(method, args, nil)
+			} else {
+				// Raw function, need to prepend self
+				allArgs := append([]Value{obj}, args...)
+				result, err = vm.call(method, allArgs, nil)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -1785,20 +1882,29 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
 	case *PyInstance:
+		// First check instance dict
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
 		}
-		if val, ok := o.Class.Dict[name]; ok {
-			// Bind method if it's a function
-			if fn, ok := val.(*PyFunction); ok {
-				return &PyMethod{Func: fn, Instance: obj}, nil
+		// Then check class MRO for methods/attributes
+		for _, cls := range o.Class.Mro {
+			if val, ok := cls.Dict[name]; ok {
+				// Bind method if it's a function
+				if fn, ok := val.(*PyFunction); ok {
+					return &PyMethod{Func: fn, Instance: obj}, nil
+				}
+				return val, nil
 			}
-			return val, nil
 		}
+		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Class.Name, name)
 	case *PyClass:
-		if val, ok := o.Dict[name]; ok {
-			return val, nil
+		// Check class dict and MRO
+		for _, cls := range o.Mro {
+			if val, ok := cls.Dict[name]; ok {
+				return val, nil
+			}
 		}
+		return nil, fmt.Errorf("type object '%s' has no attribute '%s'", o.Name, name)
 	case *PyDict:
 		if name == "get" {
 			return &PyBuiltinFunc{Name: "dict.get", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -2120,13 +2226,17 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 			Class: fn,
 			Dict:  make(map[string]Value),
 		}
-		if init, ok := fn.Dict["__init__"]; ok {
-			if initFn, ok := init.(*PyFunction); ok {
-				allArgs := append([]Value{instance}, args...)
-				_, err := vm.callFunction(initFn, allArgs, kwargs)
-				if err != nil {
-					return nil, err
+		// Look for __init__ in class MRO
+		for _, cls := range fn.Mro {
+			if init, ok := cls.Dict["__init__"]; ok {
+				if initFn, ok := init.(*PyFunction); ok {
+					allArgs := append([]Value{instance}, args...)
+					_, err := vm.callFunction(initFn, allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
 				}
+				break
 			}
 		}
 		return instance, nil
@@ -2236,6 +2346,44 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	vm.frame = oldFrame
 
 	return result, err
+}
+
+// callClassBody executes a class body function with a fresh namespace
+// and returns the namespace dict (not the function's return value)
+func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, error) {
+	code := fn.Code
+
+	// Create a fresh namespace for the class body
+	classNamespace := make(map[string]Value)
+
+	// Create new frame with the class namespace as its globals
+	// EnclosingGlobals allows the class body to access outer scope variables
+	frame := &Frame{
+		Code:             code,
+		IP:               0,
+		Stack:            make([]Value, 0, code.StackSize),
+		Locals:           make([]Value, len(code.VarNames)),
+		Globals:          classNamespace,
+		EnclosingGlobals: vm.Globals,
+		Builtins:         vm.builtins,
+	}
+
+	// Push frame
+	vm.frames = append(vm.frames, frame)
+	oldFrame := vm.frame
+	vm.frame = frame
+
+	// Execute the class body
+	_, err := vm.run()
+
+	// Pop frame
+	vm.frame = oldFrame
+
+	if err != nil {
+		return nil, err
+	}
+
+	return classNamespace, nil
 }
 
 // Run executes Python source code
