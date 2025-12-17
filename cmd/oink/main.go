@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"github.com/ATSOTECK/oink/internal/compiler"
+	"github.com/ATSOTECK/oink/internal/utils"
 )
 
 func main() {
 	source := `def factorial(n):
-    """Calculate the factorial of n."""
     if n <= 1:
         return 1
     return n * factorial(n - 1)
@@ -17,25 +17,24 @@ result = factorial(5)
 print(f"5! = {result}")
 `
 
-	fmt.Println("=== Oink Python 3.14 Lexer Demo ===")
+	fmt.Println("=== Python 3.14 Demo ===")
 	fmt.Println()
 	fmt.Println("Source:")
 	fmt.Println(source)
-	fmt.Println("Tokens:")
-	fmt.Println("--------")
 
-	lexer := compiler.NewLexer(source)
-	tokens, errors := lexer.Tokenize()
+	// Parse the source
+	parser := compiler.NewParser(source)
+	module, parseErrors := parser.Parse()
 
-	for _, tok := range tokens {
-		fmt.Println(tok)
-	}
-
-	if len(errors) > 0 {
-		fmt.Println()
-		fmt.Println("Errors:")
-		for _, err := range errors {
-			fmt.Println(err)
+	if len(parseErrors) > 0 {
+		fmt.Println("Parse Errors:")
+		for _, err := range parseErrors {
+			fmt.Println(" ", err)
 		}
+		return
 	}
+
+	fmt.Println("AST Structure:")
+	fmt.Println("--------------")
+	utils.PrintAST(module, 0)
 }
