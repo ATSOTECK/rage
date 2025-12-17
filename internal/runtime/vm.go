@@ -1166,13 +1166,17 @@ func (vm *VM) str(v Value) string {
 		return fmt.Sprintf("<function %s>", val.Name)
 	case *PyBuiltinFunc:
 		return fmt.Sprintf("<built-in function %s>", val.Name)
+	case *PyGoFunc:
+		return fmt.Sprintf("<go function %s>", val.Name)
+	case *PyUserData:
+		return fmt.Sprintf("<userdata %T>", val.Value)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
 }
 
 func (vm *VM) typeName(v Value) string {
-	switch v.(type) {
+	switch val := v.(type) {
 	case *PyNone:
 		return "NoneType"
 	case *PyBool:
@@ -1197,14 +1201,26 @@ func (vm *VM) typeName(v Value) string {
 		return "function"
 	case *PyBuiltinFunc:
 		return "builtin_function_or_method"
+	case *PyGoFunc:
+		return "builtin_function_or_method"
 	case *PyClass:
 		return "type"
 	case *PyInstance:
-		return v.(*PyInstance).Class.Name
+		return val.Class.Name
 	case *PyRange:
 		return "range"
 	case *PyIterator:
 		return "iterator"
+	case *PyUserData:
+		if val.Metatable != nil {
+			// Find __type__ key in metatable (iterate because Value keys use pointers)
+			for k, v := range val.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					return vm.str(v)
+				}
+			}
+		}
+		return "userdata"
 	default:
 		return "object"
 	}
@@ -1574,6 +1590,44 @@ func (vm *VM) contains(container, item Value) bool {
 
 func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 	switch o := obj.(type) {
+	case *PyUserData:
+		// Look up method in metatable by type name
+		if o.Metatable != nil {
+			// Find __type__ key in metatable (iterate because Value keys use pointers)
+			var typeName string
+			for k, v := range o.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					typeName = vm.str(v)
+					break
+				}
+			}
+			if typeName != "" {
+				mt := typeMetatables[typeName]
+				if mt != nil {
+					if method, ok := mt.Methods[name]; ok {
+						// Capture the userdata and method in closure
+						ud := o
+						m := method
+						// Return a bound method that includes the userdata as first arg
+						return &PyGoFunc{
+							Name: name,
+							Fn: func(vm *VM) int {
+								// Shift stack to insert userdata as first argument
+								top := vm.GetTop()
+								newStack := make([]Value, top+1)
+								newStack[0] = ud
+								for i := 0; i < top; i++ {
+									newStack[i+1] = vm.Get(i + 1)
+								}
+								vm.frame.Stack = newStack
+								return m(vm)
+							},
+						}, nil
+					}
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
 	case *PyInstance:
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
@@ -1892,6 +1946,10 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 	case *PyBuiltinFunc:
 		return fn.Fn(args, kwargs)
 
+	case *PyGoFunc:
+		// Call Go function with gopher-lua style stack-based API
+		return vm.callGoFunction(fn, args)
+
 	case *PyFunction:
 		return vm.callFunction(fn, args, kwargs)
 
@@ -1918,6 +1976,64 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 		return instance, nil
 	}
 	return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+}
+
+// callGoFunction calls a Go function with stack-based argument passing
+func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
+	// Save current frame state
+	oldFrame := vm.frame
+
+	// Create a temporary frame for the Go function call
+	tempFrame := &Frame{
+		Stack:    make([]Value, 0, len(args)+16),
+		Globals:  vm.Globals,
+		Builtins: vm.builtins,
+	}
+
+	// Push arguments onto the temporary frame's stack
+	for _, arg := range args {
+		tempFrame.Stack = append(tempFrame.Stack, arg)
+	}
+
+	vm.frame = tempFrame
+
+	// Call the Go function - it returns number of results
+	var nResults int
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Convert panic to error
+				nResults = 0
+				tempFrame.Stack = append(tempFrame.Stack, NewString(fmt.Sprintf("%v", r)))
+				nResults = -1 // Indicate error
+			}
+		}()
+		nResults = fn.Fn(vm)
+	}()
+
+	// Restore frame
+	vm.frame = oldFrame
+
+	// Handle error case
+	if nResults < 0 {
+		errVal := tempFrame.Stack[len(tempFrame.Stack)-1]
+		return nil, fmt.Errorf("%s", vm.str(errVal))
+	}
+
+	// Get results from stack
+	if nResults == 0 {
+		return None, nil
+	} else if nResults == 1 {
+		return tempFrame.Stack[len(tempFrame.Stack)-1], nil
+	} else {
+		// Multiple returns - return as tuple
+		results := make([]Value, nResults)
+		stackLen := len(tempFrame.Stack)
+		for i := 0; i < nResults; i++ {
+			results[i] = tempFrame.Stack[stackLen-nResults+i]
+		}
+		return &PyTuple{Items: results}, nil
+	}
 }
 
 func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value) (Value, error) {
