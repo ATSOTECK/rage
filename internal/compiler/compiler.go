@@ -1301,9 +1301,14 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 	// Build empty list
 	compCompiler.emitArg(runtime.OpBuildList, 0)
 
+	// The stack offset for LIST_APPEND is the number of generators
+	// because after the loops, stack is [list, iter1, iter2, ..., iterN, element]
+	// After popping element: [list, iter1, iter2, ..., iterN]
+	// peek(N) finds the list at the correct position
+	stackOffset := len(e.Generators)
 	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
 		compCompiler.compileExpr(e.Elt)
-		compCompiler.emit(runtime.OpListAppend)
+		compCompiler.emitArg(runtime.OpListAppend, stackOffset)
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)
@@ -1333,9 +1338,10 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 	compCompiler.symbolTable.Define(".0")
 	compCompiler.emitArg(runtime.OpBuildSet, 0)
 
+	stackOffset := len(e.Generators)
 	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
 		compCompiler.compileExpr(e.Elt)
-		compCompiler.emit(runtime.OpSetAdd)
+		compCompiler.emitArg(runtime.OpSetAdd, stackOffset)
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)
@@ -1364,10 +1370,11 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 	compCompiler.symbolTable.Define(".0")
 	compCompiler.emitArg(runtime.OpBuildMap, 0)
 
+	stackOffset := len(e.Generators)
 	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
 		compCompiler.compileExpr(e.Key)
 		compCompiler.compileExpr(e.Value)
-		compCompiler.emit(runtime.OpMapAdd)
+		compCompiler.emitArg(runtime.OpMapAdd, stackOffset)
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)

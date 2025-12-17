@@ -306,19 +306,18 @@ if err != nil {
 RAGE is under active development. Currently supported:
 
 ### Implemented
-- Basic data types: None, bool, int, float, str, list, tuple, dict, range
+- Basic data types: None, bool, int, float, str, list, tuple, dict, set, range
 - Operators: arithmetic, comparison, logical, bitwise
 - Control flow: if/elif/else, for, while, break, continue
 - Functions: def, lambda, recursion, closures, *args, **kwargs
+- Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
 - Imports: import, from...import (for stdlib modules)
-- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, type, isinstance, abs, min, max,
-sum, enumerate, zip, map, filter, any, all, reversed, repr
+- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, type, isinstance, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, repr
 
 ### Not Yet Implemented
 - Classes and objects
 - Exception handling (try/except/finally)
-- List/dict/set comprehensions
-- Generators and yield
+- Generator expressions and yield
 - Decorators
 - Async/await
 - File I/O

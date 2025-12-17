@@ -402,7 +402,17 @@ func (vm *VM) initBuiltins() {
 					return nil, err
 				}
 				for _, item := range items {
-					s.Items[item] = struct{}{}
+					// Check for value equality before adding
+					found := false
+					for k := range s.Items {
+						if vm.equal(k, item) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						s.Items[item] = struct{}{}
+					}
 				}
 			}
 			return s, nil
@@ -887,7 +897,18 @@ func (vm *VM) run() (Value, error) {
 		case OpBuildSet:
 			s := &PySet{Items: make(map[Value]struct{})}
 			for i := 0; i < arg; i++ {
-				s.Items[vm.pop()] = struct{}{}
+				val := vm.pop()
+				// Check for value equality before adding
+				found := false
+				for k := range s.Items {
+					if vm.equal(k, val) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					s.Items[val] = struct{}{}
+				}
 			}
 			vm.push(s)
 
@@ -921,7 +942,17 @@ func (vm *VM) run() (Value, error) {
 		case OpSetAdd:
 			val := vm.pop()
 			set := vm.peek(arg).(*PySet)
-			set.Items[val] = struct{}{}
+			// Check if an equivalent value already exists (for proper value equality)
+			found := false
+			for k := range set.Items {
+				if vm.equal(k, val) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				set.Items[val] = struct{}{}
+			}
 
 		case OpMapAdd:
 			val := vm.pop()
