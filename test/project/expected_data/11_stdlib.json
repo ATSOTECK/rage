@@ -1,0 +1,23 @@
+{
+  "math_ceil": 4,
+  "math_e_exists": true,
+  "math_fabs": 5.5,
+  "math_factorial": 120,
+  "math_floor": 3,
+  "math_pi_exists": true,
+  "math_pow": 1024,
+  "math_sqrt": 4,
+  "random_choice": 10,
+  "random_randint": 6,
+  "random_range": true,
+  "random_shuffle_len": 5,
+  "random_shuffle_sum": 15,
+  "string_ascii_lower": "abcdefghijklmnopqrstuvwxyz",
+  "string_ascii_upper": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "string_digits": "0123456789",
+  "sys_platform_exists": true,
+  "sys_version_exists": true,
+  "time_monotonic_order": true,
+  "time_perf_counter_order": true,
+  "time_time_positive": true
+}

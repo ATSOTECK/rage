@@ -1,0 +1,40 @@
+{
+  "dict_get_default": 99,
+  "dict_get_exists": null,
+  "dict_get_key": 1,
+  "dict_get_none": null,
+  "dict_in_key": true,
+  "dict_len": 3,
+  "dict_not_in_key": true,
+  "list_after_pop": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "list_append": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "list_extend": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "list_in": true,
+  "list_neg_index": 4,
+  "list_not_in": true,
+  "list_pop_last": 5,
+  "tuple_in": true,
+  "tuple_neg_index": 5,
+  "tuple_single": 1,
+  "tuple_unpack": [
+    1,
+    2,
+    3
+  ]
+}

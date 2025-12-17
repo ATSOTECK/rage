@@ -1,4 +1,8 @@
-# oink
-Python In Go -> PIG -> Oink
+# RAGE
 
-Aims to be compatible with python 3.14
+Really
+Adequate
+Go-python
+Engine
+
+RAGE aims to be compatible with python 3.14

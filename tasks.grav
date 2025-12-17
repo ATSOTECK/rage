@@ -6,3 +6,7 @@ func tst()
 @task
 func main()
     $go run ./cmd/oink/main.go
+
+@task
+func integration()
+    $ go run ./test/project/main.go

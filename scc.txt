@@ -1,20 +1,45 @@
-github.com/AlDanial/cloc v 2.06  T=0.02 s (635.9 files/s, 496719.0 lines/s)
--------------------------------------------------------------------------------------
-File                                              blank        comment           code
--------------------------------------------------------------------------------------
-./internal/runtime/vm.go                            176             60           1736
-./internal/compiler/parser.go                       320             40           1728
-./internal/compiler/compiler.go                     253            128           1266
-./internal/compiler/lexer.go                        127             47            735
-./internal/model/ast.go                             151             84            640
-./internal/compiler/parser_test.go                  135              0            629
-./test/integration_test.go                           97              0            500
-./internal/compiler/lexer_test.go                    70              0            362
-./internal/runtime/opcode.go                         38             29            356
-./internal/model/token.go                            20             10            285
-./internal/utils/ast.go                               4              0             58
-./cmd/oink/main.go                                   11              2             57
-./test/scripts/basic/hello.py                         0              0              1
--------------------------------------------------------------------------------------
-SUM:                                               1402            400           8353
--------------------------------------------------------------------------------------
+github.com/AlDanial/cloc v 2.06  T=0.03 s (1151.4 files/s, 524481.2 lines/s)
+--------------------------------------------------------------------------------------
+File                                               blank        comment           code
+--------------------------------------------------------------------------------------
+./internal/runtime/vm.go                             201             98           1914
+./internal/compiler/parser.go                        320             40           1728
+./internal/compiler/compiler.go                      253            128           1266
+./internal/stdlib/collections.go                     120             77            761
+./internal/compiler/lexer.go                         127             47            735
+./test/stdlib_test.go                                225             26            714
+./internal/model/ast.go                              151             84            640
+./internal/compiler/parser_test.go                   135              0            629
+./internal/stdlib/re.go                              100             34            522
+./test/integration_test.go                            97              0            500
+./test/project/main.go                                65             34            379
+./test/api_test.go                                    87             43            372
+./internal/compiler/lexer_test.go                     70              0            362
+./internal/runtime/opcode.go                          38             29            356
+./internal/runtime/api.go                             81            111            355
+./internal/stdlib/time.go                             36             27            351
+./test/module_test.go                                 71             20            289
+./internal/model/token.go                             20             10            285
+./internal/stdlib/random.go                           42             24            254
+./internal/stdlib/math.go                             36             12            204
+./internal/stdlib/sys.go                              24             32            189
+./internal/runtime/module.go                          33             36            120
+./test/scripts/02_operators.py                        25             18             98
+./cmd/oink/main.go                                    17              3             79
+./test/scripts/03_control_flow.py                     15             15             72
+./test/scripts/04_functions.py                        28             14             61
+./internal/utils/ast.go                                4              0             58
+./test/scripts/01_data_types.py                       12             12             58
+./internal/stdlib/string.go                            8              8             49
+./test/scripts/08_builtins.py                         15             10             49
+./test/scripts/11_stdlib.py                           21             28             40
+./test/scripts/10_collections.py                      18             24             33
+./test/scripts/09_strings.py                          14             14             31
+./internal/stdlib/init.go                              1              7             10
+./test/scripts/05_classes.py                           1             43              2
+./test/scripts/06_exceptions.py                        1             68              2
+./test/scripts/07_comprehensions.py                    1             51              2
+./test/scripts/basic/hello.py                          0              0              1
+--------------------------------------------------------------------------------------
+SUM:                                                2513           1227          13570
+--------------------------------------------------------------------------------------

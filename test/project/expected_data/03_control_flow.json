@@ -1,0 +1,25 @@
+{
+  "break_in_for": 7,
+  "break_in_while": 5,
+  "continue_in_for": [
+    0,
+    2,
+    4,
+    6,
+    8
+  ],
+  "find_primes": [
+    2,
+    3,
+    3
+  ],
+  "for_list": 15,
+  "for_range": 10,
+  "for_string": "hello",
+  "if_elif": "equal",
+  "if_else": "not greater",
+  "if_simple": "greater",
+  "nested_for": 9,
+  "nested_if": "both",
+  "while_simple": 5
+}
