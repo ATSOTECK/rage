@@ -828,6 +828,499 @@ func (vm *VM) run() (Value, error) {
 		case OpDeleteFast:
 			frame.Locals[arg] = nil
 
+		// ==========================================
+		// Specialized opcodes (no argument fetch needed)
+		// ==========================================
+
+		case OpLoadFast0:
+			frame.Stack[frame.SP] = frame.Locals[0]
+			frame.SP++
+
+		case OpLoadFast1:
+			frame.Stack[frame.SP] = frame.Locals[1]
+			frame.SP++
+
+		case OpLoadFast2:
+			frame.Stack[frame.SP] = frame.Locals[2]
+			frame.SP++
+
+		case OpLoadFast3:
+			frame.Stack[frame.SP] = frame.Locals[3]
+			frame.SP++
+
+		case OpStoreFast0:
+			frame.SP--
+			frame.Locals[0] = frame.Stack[frame.SP]
+
+		case OpStoreFast1:
+			frame.SP--
+			frame.Locals[1] = frame.Stack[frame.SP]
+
+		case OpStoreFast2:
+			frame.SP--
+			frame.Locals[2] = frame.Stack[frame.SP]
+
+		case OpStoreFast3:
+			frame.SP--
+			frame.Locals[3] = frame.Stack[frame.SP]
+
+		case OpLoadNone:
+			frame.Stack[frame.SP] = None
+			frame.SP++
+
+		case OpLoadTrue:
+			frame.Stack[frame.SP] = True
+			frame.SP++
+
+		case OpLoadFalse:
+			frame.Stack[frame.SP] = False
+			frame.SP++
+
+		case OpLoadZero:
+			frame.Stack[frame.SP] = MakeInt(0)
+			frame.SP++
+
+		case OpLoadOne:
+			frame.Stack[frame.SP] = MakeInt(1)
+			frame.SP++
+
+		case OpIncrementFast:
+			// Increment local variable by 1
+			if v, ok := frame.Locals[arg].(*PyInt); ok {
+				frame.Locals[arg] = MakeInt(v.Value + 1)
+			} else {
+				// Fallback for non-int
+				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
+				if err != nil {
+					return nil, err
+				}
+				frame.Locals[arg] = result
+			}
+
+		case OpDecrementFast:
+			// Decrement local variable by 1
+			if v, ok := frame.Locals[arg].(*PyInt); ok {
+				frame.Locals[arg] = MakeInt(v.Value - 1)
+			} else {
+				result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
+				if err != nil {
+					return nil, err
+				}
+				frame.Locals[arg] = result
+			}
+
+		case OpLoadFastLoadFast:
+			// Load two locals: arg contains packed indices (low byte = first, high byte = second)
+			idx1 := arg & 0xFF
+			idx2 := (arg >> 8) & 0xFF
+			frame.Stack[frame.SP] = frame.Locals[idx1]
+			frame.SP++
+			frame.Stack[frame.SP] = frame.Locals[idx2]
+			frame.SP++
+
+		case OpLoadFastLoadConst:
+			// Load local then const: arg contains packed indices
+			localIdx := arg & 0xFF
+			constIdx := (arg >> 8) & 0xFF
+			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			frame.SP++
+			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.SP++
+
+		case OpStoreFastLoadFast:
+			// Store to local then load another: arg contains packed indices
+			storeIdx := arg & 0xFF
+			loadIdx := (arg >> 8) & 0xFF
+			frame.SP--
+			frame.Locals[storeIdx] = frame.Stack[frame.SP]
+			frame.Stack[frame.SP] = frame.Locals[loadIdx]
+			frame.SP++
+
+		case OpBinaryAddInt:
+			// Optimized int + int (assumes both are ints, falls back if not)
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			// Fallback
+			result, err := vm.binaryOp(OpBinaryAdd, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinarySubtractInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			result, err := vm.binaryOp(OpBinarySubtract, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinaryMultiplyInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			result, err := vm.binaryOp(OpBinaryMultiply, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpCompareLtInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value < bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareLt, a, b)
+			frame.SP++
+
+		case OpCompareLeInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value <= bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareLe, a, b)
+			frame.SP++
+
+		case OpCompareGtInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value > bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareGt, a, b)
+			frame.SP++
+
+		case OpCompareGeInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value >= bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareGe, a, b)
+			frame.SP++
+
+		case OpCompareEqInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value == bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareEq, a, b)
+			frame.SP++
+
+		case OpCompareNeInt:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value != bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			frame.Stack[frame.SP] = vm.compareOp(OpCompareNe, a, b)
+			frame.SP++
+
+		// ==========================================
+		// Empty collection opcodes
+		// ==========================================
+
+		case OpLoadEmptyList:
+			frame.Stack[frame.SP] = &PyList{Items: []Value{}}
+			frame.SP++
+
+		case OpLoadEmptyTuple:
+			frame.Stack[frame.SP] = &PyTuple{Items: []Value{}}
+			frame.SP++
+
+		case OpLoadEmptyDict:
+			frame.Stack[frame.SP] = &PyDict{Items: make(map[Value]Value)}
+			frame.SP++
+
+		// ==========================================
+		// Combined compare+jump opcodes
+		// ==========================================
+
+		case OpCompareLtJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := false
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					result = ai.Value < bi.Value
+				} else {
+					result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+				}
+			} else {
+				result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+			}
+			if !result {
+				frame.IP = arg
+			}
+
+		case OpCompareLeJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := false
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					result = ai.Value <= bi.Value
+				} else {
+					result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+				}
+			} else {
+				result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+			}
+			if !result {
+				frame.IP = arg
+			}
+
+		case OpCompareGtJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := false
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					result = ai.Value > bi.Value
+				} else {
+					result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+				}
+			} else {
+				result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+			}
+			if !result {
+				frame.IP = arg
+			}
+
+		case OpCompareGeJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := false
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					result = ai.Value >= bi.Value
+				} else {
+					result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+				}
+			} else {
+				result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+			}
+			if !result {
+				frame.IP = arg
+			}
+
+		case OpCompareEqJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := vm.equal(a, b)
+			if !result {
+				frame.IP = arg
+			}
+
+		case OpCompareNeJump:
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			result := !vm.equal(a, b)
+			if !result {
+				frame.IP = arg
+			}
+
+		// ==========================================
+		// Inline len() opcodes
+		// ==========================================
+
+		case OpLenList:
+			frame.SP--
+			obj := frame.Stack[frame.SP]
+			if list, ok := obj.(*PyList); ok {
+				frame.Stack[frame.SP] = MakeInt(int64(len(list.Items)))
+				frame.SP++
+			} else {
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+
+		case OpLenString:
+			frame.SP--
+			obj := frame.Stack[frame.SP]
+			if str, ok := obj.(*PyString); ok {
+				frame.Stack[frame.SP] = MakeInt(int64(len(str.Value)))
+				frame.SP++
+			} else {
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+
+		case OpLenTuple:
+			frame.SP--
+			obj := frame.Stack[frame.SP]
+			if tup, ok := obj.(*PyTuple); ok {
+				frame.Stack[frame.SP] = MakeInt(int64(len(tup.Items)))
+				frame.SP++
+			} else {
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+
+		case OpLenDict:
+			frame.SP--
+			obj := frame.Stack[frame.SP]
+			if dict, ok := obj.(*PyDict); ok {
+				frame.Stack[frame.SP] = MakeInt(int64(len(dict.Items)))
+				frame.SP++
+			} else {
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+
+		case OpLenGeneric:
+			frame.SP--
+			obj := frame.Stack[frame.SP]
+			var length int64
+			switch v := obj.(type) {
+			case *PyString:
+				length = int64(len(v.Value))
+			case *PyList:
+				length = int64(len(v.Items))
+			case *PyTuple:
+				length = int64(len(v.Items))
+			case *PyDict:
+				length = int64(len(v.Items))
+			case *PySet:
+				length = int64(len(v.Items))
+			case *PyBytes:
+				length = int64(len(v.Value))
+			default:
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+			frame.Stack[frame.SP] = MakeInt(length)
+			frame.SP++
+
+		// ==========================================
+		// More superinstructions
+		// ==========================================
+
+		case OpLoadConstLoadFast:
+			// Load const then local: arg contains packed indices (high byte = const, low byte = local)
+			constIdx := (arg >> 8) & 0xFF
+			localIdx := arg & 0xFF
+			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.SP++
+			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			frame.SP++
+
+		case OpLoadGlobalLoadFast:
+			// Load global then local: arg contains packed indices (high byte = name, low byte = local)
+			nameIdx := (arg >> 8) & 0xFF
+			localIdx := arg & 0xFF
+			name := frame.Code.Names[nameIdx]
+			if val, ok := frame.Globals[name]; ok {
+				frame.Stack[frame.SP] = val
+			} else if val, ok := frame.Builtins[name]; ok {
+				frame.Stack[frame.SP] = val
+			} else {
+				return nil, fmt.Errorf("name '%s' is not defined", name)
+			}
+			frame.SP++
+			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			frame.SP++
+
 		case OpLoadGlobal:
 			name := frame.Code.Names[arg]
 			if val, ok := frame.Globals[name]; ok {

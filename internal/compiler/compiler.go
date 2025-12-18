@@ -134,12 +134,14 @@ type Compiler struct {
 	errors      []CompileError
 	loopStack   []loopInfo
 	filename    string
+	optimizer   *Optimizer
 }
 
 type loopInfo struct {
 	startOffset   int
 	breakJumps    []int
 	continueJumps []int
+	isForLoop     bool // true for 'for' loops (iterator on stack), false for 'while' loops
 }
 
 // NewCompiler creates a new compiler
@@ -153,21 +155,27 @@ func NewCompiler(filename string) *Compiler {
 		code:        code,
 		symbolTable: NewSymbolTable(ScopeModule, nil),
 		filename:    filename,
+		optimizer:   NewOptimizer(),
 	}
 }
 
 // Compile compiles a module to bytecode
 func (c *Compiler) Compile(module *model.Module) (*runtime.CodeObject, []CompileError) {
-	for _, stmt := range module.Body {
+	stmts := module.Body
+
+	for _, stmt := range stmts {
 		c.compileStmt(stmt)
 	}
 
 	// Add implicit return None at end of module
-	c.emitLoadConst(nil) // None
+	c.emit(runtime.OpLoadNone) // Use optimized opcode
 	c.emit(runtime.OpReturn)
 
 	// Build names and varnames lists
 	c.finalizeCode()
+
+	// Apply peephole optimizations
+	c.optimizer.PeepholeOptimize(c.code)
 
 	return c.code, c.errors
 }
@@ -289,6 +297,11 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 		if len(c.loopStack) == 0 {
 			c.error(s.StartPos, "'break' outside loop")
 			return
+		}
+		// Pop the iterator from stack if breaking from a for loop
+		loop := c.loopStack[len(c.loopStack)-1]
+		if loop.isForLoop {
+			c.emit(runtime.OpPop)
 		}
 		jump := c.emitJump(runtime.OpJump)
 		c.loopStack[len(c.loopStack)-1].breakJumps = append(
@@ -415,6 +428,7 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 // Expression compilation
 
 func (c *Compiler) compileExpr(expr model.Expr) {
+
 	switch e := expr.(type) {
 	case *model.IntLit:
 		val, _ := strconv.ParseInt(e.Value, 0, 64)
@@ -750,7 +764,14 @@ func (c *Compiler) compileLoad(name string) {
 func (c *Compiler) compileStore(target model.Expr) {
 	switch t := target.(type) {
 	case *model.Identifier:
-		sym, _ := c.symbolTable.Resolve(t.Name)
+		sym, found := c.symbolTable.Resolve(t.Name)
+		// In function scope, if variable not found or resolved as global but not explicitly declared global,
+		// define it as a local variable
+		if c.symbolTable.scopeType == ScopeFunction || c.symbolTable.scopeType == ScopeComprehension {
+			if !found || (sym.Scope == ScopeGlobal && !c.symbolTable.globals[t.Name]) {
+				sym = c.symbolTable.Define(t.Name)
+			}
+		}
 		switch sym.Scope {
 		case ScopeLocal:
 			if sym.Index < 0 {
@@ -942,7 +963,7 @@ func (c *Compiler) compileFor(s *model.For) {
 	c.emit(runtime.OpGetIter)
 
 	loopStart := c.currentOffset()
-	c.loopStack = append(c.loopStack, loopInfo{startOffset: loopStart})
+	c.loopStack = append(c.loopStack, loopInfo{startOffset: loopStart, isForLoop: true})
 
 	// FOR_ITER jumps to end when exhausted
 	exitJump := c.emitJump(runtime.OpForIter)
@@ -1100,6 +1121,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		},
 		symbolTable: NewSymbolTable(ScopeFunction, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	// Define parameters
@@ -1130,6 +1152,11 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	funcCompiler.emitLoadConst(nil)
 	funcCompiler.emit(runtime.OpReturn)
 	funcCompiler.finalizeCode()
+
+	// Apply peephole optimizations to function body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(funcCompiler.code)
+	}
 
 	// Set up code object
 	funcCode := funcCompiler.code
@@ -1188,6 +1215,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 		},
 		symbolTable: NewSymbolTable(ScopeClass, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	// Compile class body
@@ -1197,6 +1225,11 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 	classCompiler.emit(runtime.OpLoadLocals)
 	classCompiler.emit(runtime.OpReturn)
 	classCompiler.finalizeCode()
+
+	// Apply peephole optimizations to class body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(classCompiler.code)
+	}
 
 	c.emitLoadConst(classCompiler.code)
 	c.emitLoadConst(s.Name.Name)
@@ -1244,6 +1277,7 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 		},
 		symbolTable: NewSymbolTable(ScopeFunction, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	// Define parameters
@@ -1257,6 +1291,11 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 	lambdaCompiler.compileExpr(e.Body)
 	lambdaCompiler.emit(runtime.OpReturn)
 	lambdaCompiler.finalizeCode()
+
+	// Apply peephole optimizations to lambda body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(lambdaCompiler.code)
+	}
 
 	lambdaCode := lambdaCompiler.code
 	if e.Args != nil {
@@ -1293,6 +1332,7 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 		},
 		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	// The outermost iterable is passed as argument
@@ -1314,6 +1354,11 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finalizeCode()
 
+	// Apply peephole optimizations to comprehension body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(compCompiler.code)
+	}
+
 	// Make function and call with iterator
 	c.compileExpr(e.Generators[0].Iter)
 	c.emit(runtime.OpGetIter)
@@ -1333,6 +1378,7 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 		},
 		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	compCompiler.symbolTable.Define(".0")
@@ -1346,6 +1392,11 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finalizeCode()
+
+	// Apply peephole optimizations to comprehension body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(compCompiler.code)
+	}
 
 	c.compileExpr(e.Generators[0].Iter)
 	c.emit(runtime.OpGetIter)
@@ -1365,6 +1416,7 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 		},
 		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	compCompiler.symbolTable.Define(".0")
@@ -1379,6 +1431,11 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finalizeCode()
+
+	// Apply peephole optimizations to comprehension body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(compCompiler.code)
+	}
 
 	c.compileExpr(e.Generators[0].Iter)
 	c.emit(runtime.OpGetIter)
@@ -1399,6 +1456,7 @@ func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 		},
 		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
 		filename:    c.filename,
+		optimizer:   c.optimizer,
 	}
 
 	compCompiler.symbolTable.Define(".0")
@@ -1411,6 +1469,11 @@ func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 	compCompiler.emitLoadConst(nil)
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finalizeCode()
+
+	// Apply peephole optimizations to comprehension body
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(compCompiler.code)
+	}
 
 	c.compileExpr(e.Generators[0].Iter)
 	c.emit(runtime.OpGetIter)

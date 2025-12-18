@@ -151,6 +151,71 @@ const (
 	OpNop        // No operation
 	OpPrintExpr  // Print expression result (REPL)
 	OpLoadLocals // Load locals dict
+
+	// ==========================================
+	// Specialized/Optimized opcodes (no args)
+	// ==========================================
+
+	// Specialized LOAD_FAST for common indices (no arg needed)
+	OpLoadFast0 // Load local variable 0
+	OpLoadFast1 // Load local variable 1
+	OpLoadFast2 // Load local variable 2
+	OpLoadFast3 // Load local variable 3
+
+	// Specialized STORE_FAST for common indices (no arg needed)
+	OpStoreFast0 // Store to local variable 0
+	OpStoreFast1 // Store to local variable 1
+	OpStoreFast2 // Store to local variable 2
+	OpStoreFast3 // Store to local variable 3
+
+	// Specialized constant loading (no arg needed)
+	OpLoadNone  // Load None
+	OpLoadTrue  // Load True
+	OpLoadFalse // Load False
+	OpLoadZero  // Load integer 0
+	OpLoadOne   // Load integer 1
+
+	// Specialized arithmetic (no arg needed)
+	OpIncrementFast // Increment local by 1 (arg: local index) - has arg!
+	OpDecrementFast // Decrement local by 1 (arg: local index) - has arg!
+
+	// Superinstructions - combined operations
+	OpLoadFastLoadFast   // Load two locals (arg: packed indices)
+	OpLoadFastLoadConst  // Load local then const (arg: packed indices)
+	OpStoreFastLoadFast  // Store then load (arg: packed indices)
+	OpBinaryAddInt       // Add two ints (optimized path)
+	OpBinarySubtractInt  // Subtract two ints (optimized path)
+	OpBinaryMultiplyInt  // Multiply two ints (optimized path)
+	OpCompareLtInt       // Compare less than for ints
+	OpCompareLeInt       // Compare less than or equal for ints
+	OpCompareGtInt       // Compare greater than for ints
+	OpCompareGeInt       // Compare greater than or equal for ints
+	OpCompareEqInt       // Compare equal for ints
+	OpCompareNeInt       // Compare not equal for ints
+
+	// Empty collection loading (no arg needed)
+	OpLoadEmptyList  // Load empty list []
+	OpLoadEmptyTuple // Load empty tuple ()
+	OpLoadEmptyDict  // Load empty dict {}
+
+	// Combined compare and jump (superinstructions)
+	OpCompareLtJump // Compare < and jump if false (arg: offset)
+	OpCompareLeJump // Compare <= and jump if false (arg: offset)
+	OpCompareGtJump // Compare > and jump if false (arg: offset)
+	OpCompareGeJump // Compare >= and jump if false (arg: offset)
+	OpCompareEqJump // Compare == and jump if false (arg: offset)
+	OpCompareNeJump // Compare != and jump if false (arg: offset)
+
+	// Inline builtins (no function call overhead)
+	OpLenList   // len(list) - inline
+	OpLenString // len(string) - inline
+	OpLenTuple  // len(tuple) - inline
+	OpLenDict   // len(dict) - inline
+	OpLenGeneric // len() - generic but optimized path
+
+	// More superinstructions
+	OpLoadConstLoadFast  // Load const then local (arg: packed indices)
+	OpLoadGlobalLoadFast // Load global then local (arg: packed indices)
 )
 
 // OpcodeNames maps opcodes to their string names for debugging
@@ -260,6 +325,50 @@ var OpcodeNames = map[Opcode]string{
 	OpNop:              "NOP",
 	OpPrintExpr:        "PRINT_EXPR",
 	OpLoadLocals:       "LOAD_LOCALS",
+	// Specialized opcodes
+	OpLoadFast0:         "LOAD_FAST_0",
+	OpLoadFast1:         "LOAD_FAST_1",
+	OpLoadFast2:         "LOAD_FAST_2",
+	OpLoadFast3:         "LOAD_FAST_3",
+	OpStoreFast0:        "STORE_FAST_0",
+	OpStoreFast1:        "STORE_FAST_1",
+	OpStoreFast2:        "STORE_FAST_2",
+	OpStoreFast3:        "STORE_FAST_3",
+	OpLoadNone:          "LOAD_NONE",
+	OpLoadTrue:          "LOAD_TRUE",
+	OpLoadFalse:         "LOAD_FALSE",
+	OpLoadZero:          "LOAD_ZERO",
+	OpLoadOne:           "LOAD_ONE",
+	OpIncrementFast:     "INCREMENT_FAST",
+	OpDecrementFast:     "DECREMENT_FAST",
+	OpLoadFastLoadFast:  "LOAD_FAST_LOAD_FAST",
+	OpLoadFastLoadConst: "LOAD_FAST_LOAD_CONST",
+	OpStoreFastLoadFast: "STORE_FAST_LOAD_FAST",
+	OpBinaryAddInt:      "BINARY_ADD_INT",
+	OpBinarySubtractInt: "BINARY_SUBTRACT_INT",
+	OpBinaryMultiplyInt: "BINARY_MULTIPLY_INT",
+	OpCompareLtInt:       "COMPARE_LT_INT",
+	OpCompareLeInt:       "COMPARE_LE_INT",
+	OpCompareGtInt:       "COMPARE_GT_INT",
+	OpCompareGeInt:       "COMPARE_GE_INT",
+	OpCompareEqInt:       "COMPARE_EQ_INT",
+	OpCompareNeInt:       "COMPARE_NE_INT",
+	OpLoadEmptyList:      "LOAD_EMPTY_LIST",
+	OpLoadEmptyTuple:     "LOAD_EMPTY_TUPLE",
+	OpLoadEmptyDict:      "LOAD_EMPTY_DICT",
+	OpCompareLtJump:      "COMPARE_LT_JUMP",
+	OpCompareLeJump:      "COMPARE_LE_JUMP",
+	OpCompareGtJump:      "COMPARE_GT_JUMP",
+	OpCompareGeJump:      "COMPARE_GE_JUMP",
+	OpCompareEqJump:      "COMPARE_EQ_JUMP",
+	OpCompareNeJump:      "COMPARE_NE_JUMP",
+	OpLenList:            "LEN_LIST",
+	OpLenString:          "LEN_STRING",
+	OpLenTuple:           "LEN_TUPLE",
+	OpLenDict:            "LEN_DICT",
+	OpLenGeneric:         "LEN_GENERIC",
+	OpLoadConstLoadFast:  "LOAD_CONST_LOAD_FAST",
+	OpLoadGlobalLoadFast: "LOAD_GLOBAL_LOAD_FAST",
 }
 
 func (op Opcode) String() string {
@@ -296,6 +405,16 @@ func init() {
 		OpPopExcept, OpEndFinally, OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
 		OpImportStar,
+		// Specialized no-arg opcodes
+		OpLoadFast0, OpLoadFast1, OpLoadFast2, OpLoadFast3,
+		OpStoreFast0, OpStoreFast1, OpStoreFast2, OpStoreFast3,
+		OpLoadNone, OpLoadTrue, OpLoadFalse, OpLoadZero, OpLoadOne,
+		OpBinaryAddInt, OpBinarySubtractInt, OpBinaryMultiplyInt,
+		OpCompareLtInt, OpCompareLeInt, OpCompareGtInt, OpCompareGeInt, OpCompareEqInt, OpCompareNeInt,
+		// Empty collection opcodes (no args)
+		OpLoadEmptyList, OpLoadEmptyTuple, OpLoadEmptyDict,
+		// Inline len opcodes (no args - operate on TOS)
+		OpLenList, OpLenString, OpLenTuple, OpLenDict, OpLenGeneric,
 	}
 	for _, op := range noArgOpcodes {
 		hasArgTable[op] = false
