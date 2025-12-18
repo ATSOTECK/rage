@@ -851,6 +851,9 @@ func (o *Optimizer) PeepholeOptimize(code *runtime.CodeObject) {
 		// Optimize compare+jump sequences
 		changed = o.optimizeCompareJump(instrs) || changed
 
+		// Detect compare-local-jump fusion (for while loop conditions)
+		changed = o.detectCompareLtLocalJump(instrs, code) || changed
+
 		// Store-load elimination (STORE x; LOAD x -> DUP; STORE x)
 		changed = o.eliminateStoreLoad(instrs) || changed
 
@@ -1845,6 +1848,95 @@ func (o *Optimizer) SpecializeBinaryOps(instrs []*instruction, code *runtime.Cod
 				changed = true
 			}
 		}
+
+		// Always specialize BINARY_DIVIDE to BINARY_DIVIDE_FLOAT
+		// (true division in Python always returns float)
+		if instrs[i].op == runtime.OpBinaryDivide {
+			instrs[i].op = runtime.OpBinaryDivideFloat
+			changed = true
+		}
+
+		// Specialize float addition when we know one operand is float
+		// Pattern: ... BINARY_ADD after float operations
+		if i >= 1 && instrs[i].op == runtime.OpBinaryAdd {
+			// Check if previous result was from a division (which always produces float)
+			for j := i - 1; j >= 0; j-- {
+				if instrs[j].removed {
+					continue
+				}
+				if instrs[j].op == runtime.OpBinaryDivideFloat || instrs[j].op == runtime.OpBinaryDivide {
+					instrs[i].op = runtime.OpBinaryAddFloat
+					changed = true
+				}
+				break
+			}
+		}
+	}
+	return changed
+}
+
+// Simple loop unrolling for very small loops
+// This optimization unrolls loops with constant small iteration counts
+func (o *Optimizer) unrollSmallLoops(instrs []*instruction, code *runtime.CodeObject) bool {
+	// Look for patterns like:
+	// LOAD_CONST small_int
+	// GET_ITER
+	// FOR_ITER exit
+	// ... body ...
+	// JUMP back
+	//
+	// For now, this is a placeholder - true loop unrolling requires
+	// tracking loop boundaries and duplicating the body, which is complex
+	// at the bytecode level. The real benefit would come from AST-level
+	// unrolling before bytecode generation.
+	return false
+}
+
+func (o *Optimizer) detectCompareLtLocalJump(instrs []*instruction, code *runtime.CodeObject) bool {
+	// Pattern: LOAD_FAST x, LOAD_FAST y, COMPARE_LT, POP_JUMP_IF_FALSE target
+	// -> COMPARE_LT_LOCAL_JUMP (x, y, target)
+	changed := false
+	for i := 0; i < len(instrs)-3; i++ {
+		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+			continue
+		}
+
+		// Get first local index
+		local1 := o.getLoadFastIndex(instrs[i])
+		if local1 < 0 || local1 > 255 {
+			continue
+		}
+
+		// Get second local index
+		local2 := o.getLoadFastIndex(instrs[i+1])
+		if local2 < 0 || local2 > 255 {
+			continue
+		}
+
+		// Check for COMPARE_LT
+		if instrs[i+2].op != runtime.OpCompareLt && instrs[i+2].op != runtime.OpCompareLtInt {
+			continue
+		}
+
+		// Check for POP_JUMP_IF_FALSE
+		if instrs[i+3].op != runtime.OpPopJumpIfFalse {
+			continue
+		}
+
+		jumpTarget := instrs[i+3].arg
+		// Jump target must fit in remaining bits (16 bits after two 8-bit indices)
+		if jumpTarget > 0xFFFF {
+			continue
+		}
+
+		// Convert to COMPARE_LT_LOCAL_JUMP
+		// Pack: bits 0-7 = local1, bits 8-15 = local2, bits 16-31 = jump target
+		instrs[i].op = runtime.OpCompareLtLocalJump
+		instrs[i].arg = local1 | (local2 << 8) | (jumpTarget << 16)
+		instrs[i+1].removed = true
+		instrs[i+2].removed = true
+		instrs[i+3].removed = true
+		changed = true
 	}
 	return changed
 }

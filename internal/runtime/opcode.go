@@ -178,8 +178,9 @@ const (
 	// Specialized arithmetic (no arg needed)
 	OpIncrementFast // Increment local by 1 (arg: local index) - has arg!
 	OpDecrementFast // Decrement local by 1 (arg: local index) - has arg!
-	OpNegateFast    // Negate local in place (arg: local index) - for sign = -sign
-	OpAddConstFast  // Add constant to local (arg: packed local index + const index)
+	OpNegateFast      // Negate local in place (arg: local index) - for sign = -sign
+	OpAddConstFast    // Add constant to local (arg: packed local index + const index)
+	OpAccumulateFast  // Add TOS to local (arg: local index) - for x = x + expr
 
 	// Superinstructions - combined operations
 	OpLoadFastLoadFast   // Load two locals (arg: packed indices)
@@ -188,6 +189,8 @@ const (
 	OpBinaryAddInt       // Add two ints (optimized path)
 	OpBinarySubtractInt  // Subtract two ints (optimized path)
 	OpBinaryMultiplyInt  // Multiply two ints (optimized path)
+	OpBinaryDivideFloat  // True division (always returns float)
+	OpBinaryAddFloat     // Float addition
 	OpCompareLtInt       // Compare less than for ints
 	OpCompareLeInt       // Compare less than or equal for ints
 	OpCompareGtInt       // Compare greater than for ints
@@ -207,6 +210,10 @@ const (
 	OpCompareGeJump // Compare >= and jump if false (arg: offset)
 	OpCompareEqJump // Compare == and jump if false (arg: offset)
 	OpCompareNeJump // Compare != and jump if false (arg: offset)
+
+	// Compare two locals and jump (ultra-optimized loop conditions)
+	// arg format: low 4 bits = local1, next 4 bits = local2, remaining = jump offset >> 4
+	OpCompareLtLocalJump // local1 < local2, jump if false
 
 	// Inline builtins (no function call overhead)
 	OpLenList   // len(list) - inline
@@ -345,12 +352,15 @@ var OpcodeNames = map[Opcode]string{
 	OpDecrementFast:     "DECREMENT_FAST",
 	OpNegateFast:        "NEGATE_FAST",
 	OpAddConstFast:      "ADD_CONST_FAST",
+	OpAccumulateFast:    "ACCUMULATE_FAST",
 	OpLoadFastLoadFast:  "LOAD_FAST_LOAD_FAST",
 	OpLoadFastLoadConst: "LOAD_FAST_LOAD_CONST",
 	OpStoreFastLoadFast: "STORE_FAST_LOAD_FAST",
 	OpBinaryAddInt:      "BINARY_ADD_INT",
 	OpBinarySubtractInt: "BINARY_SUBTRACT_INT",
-	OpBinaryMultiplyInt: "BINARY_MULTIPLY_INT",
+	OpBinaryMultiplyInt:  "BINARY_MULTIPLY_INT",
+	OpBinaryDivideFloat:  "BINARY_DIVIDE_FLOAT",
+	OpBinaryAddFloat:     "BINARY_ADD_FLOAT",
 	OpCompareLtInt:       "COMPARE_LT_INT",
 	OpCompareLeInt:       "COMPARE_LE_INT",
 	OpCompareGtInt:       "COMPARE_GT_INT",
@@ -366,6 +376,7 @@ var OpcodeNames = map[Opcode]string{
 	OpCompareGeJump:      "COMPARE_GE_JUMP",
 	OpCompareEqJump:      "COMPARE_EQ_JUMP",
 	OpCompareNeJump:      "COMPARE_NE_JUMP",
+	OpCompareLtLocalJump: "COMPARE_LT_LOCAL_JUMP",
 	OpLenList:            "LEN_LIST",
 	OpLenString:          "LEN_STRING",
 	OpLenTuple:           "LEN_TUPLE",
@@ -413,7 +424,7 @@ func init() {
 		OpLoadFast0, OpLoadFast1, OpLoadFast2, OpLoadFast3,
 		OpStoreFast0, OpStoreFast1, OpStoreFast2, OpStoreFast3,
 		OpLoadNone, OpLoadTrue, OpLoadFalse, OpLoadZero, OpLoadOne,
-		OpBinaryAddInt, OpBinarySubtractInt, OpBinaryMultiplyInt,
+		OpBinaryAddInt, OpBinarySubtractInt, OpBinaryMultiplyInt, OpBinaryDivideFloat, OpBinaryAddFloat,
 		OpCompareLtInt, OpCompareLeInt, OpCompareGtInt, OpCompareGeInt, OpCompareEqInt, OpCompareNeInt,
 		// Empty collection opcodes (no args)
 		OpLoadEmptyList, OpLoadEmptyTuple, OpLoadEmptyDict,

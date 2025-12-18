@@ -944,6 +944,40 @@ func (vm *VM) run() (Value, error) {
 			}
 			frame.Locals[localIdx] = result
 
+		case OpAccumulateFast:
+			// Accumulate TOS to local: local[arg] = local[arg] + TOS
+			frame.SP--
+			addend := frame.Stack[frame.SP]
+			localVal := frame.Locals[arg]
+			// Fast path for float accumulation (common in numerical code)
+			if lf, ok := localVal.(*PyFloat); ok {
+				if af, ok := addend.(*PyFloat); ok {
+					frame.Locals[arg] = &PyFloat{Value: lf.Value + af.Value}
+					break
+				}
+				if ai, ok := addend.(*PyInt); ok {
+					frame.Locals[arg] = &PyFloat{Value: lf.Value + float64(ai.Value)}
+					break
+				}
+			}
+			// Fast path for int accumulation
+			if li, ok := localVal.(*PyInt); ok {
+				if ai, ok := addend.(*PyInt); ok {
+					frame.Locals[arg] = MakeInt(li.Value + ai.Value)
+					break
+				}
+				if af, ok := addend.(*PyFloat); ok {
+					frame.Locals[arg] = &PyFloat{Value: float64(li.Value) + af.Value}
+					break
+				}
+			}
+			// Fallback
+			result, err := vm.binaryOp(OpBinaryAdd, localVal, addend)
+			if err != nil {
+				return nil, err
+			}
+			frame.Locals[arg] = result
+
 		case OpLoadFastLoadFast:
 			// Load two locals: arg contains packed indices (low byte = first, high byte = second)
 			idx1 := arg & 0xFF
@@ -1024,6 +1058,90 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			result, err := vm.binaryOp(OpBinaryMultiply, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinaryDivideFloat:
+			// Optimized true division (always returns float)
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			// Fast path for int/int division
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if bi.Value == 0 {
+						return nil, fmt.Errorf("division by zero")
+					}
+					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}
+					frame.SP++
+					break
+				}
+				if bf, ok := b.(*PyFloat); ok {
+					if bf.Value == 0 {
+						return nil, fmt.Errorf("division by zero")
+					}
+					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) / bf.Value}
+					frame.SP++
+					break
+				}
+			}
+			if af, ok := a.(*PyFloat); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if bi.Value == 0 {
+						return nil, fmt.Errorf("division by zero")
+					}
+					frame.Stack[frame.SP] = &PyFloat{Value: af.Value / float64(bi.Value)}
+					frame.SP++
+					break
+				}
+				if bf, ok := b.(*PyFloat); ok {
+					if bf.Value == 0 {
+						return nil, fmt.Errorf("division by zero")
+					}
+					frame.Stack[frame.SP] = &PyFloat{Value: af.Value / bf.Value}
+					frame.SP++
+					break
+				}
+			}
+			// Fallback
+			result, err := vm.binaryOp(OpBinaryDivide, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinaryAddFloat:
+			// Optimized float addition
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if af, ok := a.(*PyFloat); ok {
+				if bf, ok := b.(*PyFloat); ok {
+					frame.Stack[frame.SP] = &PyFloat{Value: af.Value + bf.Value}
+					frame.SP++
+					break
+				}
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = &PyFloat{Value: af.Value + float64(bi.Value)}
+					frame.SP++
+					break
+				}
+			}
+			if ai, ok := a.(*PyInt); ok {
+				if bf, ok := b.(*PyFloat); ok {
+					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) + bf.Value}
+					frame.SP++
+					break
+				}
+			}
+			// Fallback
+			result, err := vm.binaryOp(OpBinaryAdd, a, b)
 			if err != nil {
 				return nil, err
 			}
@@ -1258,6 +1376,29 @@ func (vm *VM) run() (Value, error) {
 			result := !vm.equal(a, b)
 			if !result {
 				frame.IP = arg
+			}
+
+		case OpCompareLtLocalJump:
+			// Ultra-optimized: compare two locals and jump if false
+			// arg format: bits 0-7 = local1, bits 8-15 = local2, bits 16+ = jump offset
+			local1 := arg & 0xFF
+			local2 := (arg >> 8) & 0xFF
+			jumpOffset := arg >> 16
+			a := frame.Locals[local1]
+			b := frame.Locals[local2]
+			// Fast path for ints
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value >= bi.Value {
+						frame.IP = jumpOffset
+					}
+					break
+				}
+			}
+			// Fallback to generic comparison
+			cmp := vm.compareOp(OpCompareLt, a, b)
+			if cmp == False || cmp == nil {
+				frame.IP = jumpOffset
 			}
 
 		// ==========================================
