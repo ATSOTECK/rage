@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,30 @@ type PyInt struct {
 
 func (i *PyInt) Type() string   { return "int" }
 func (i *PyInt) String() string { return fmt.Sprintf("%d", i.Value) }
+
+// Small integer cache for common values (-5 to 256)
+// This avoids allocations for frequently used integers
+const (
+	smallIntMin   = -5
+	smallIntMax   = 256
+	smallIntCount = smallIntMax - smallIntMin + 1
+)
+
+var smallIntCache [smallIntCount]*PyInt
+
+func init() {
+	for i := 0; i < smallIntCount; i++ {
+		smallIntCache[i] = &PyInt{Value: int64(i + smallIntMin)}
+	}
+}
+
+// MakeInt returns a PyInt, using cached values for small integers
+func MakeInt(v int64) *PyInt {
+	if v >= smallIntMin && v <= smallIntMax {
+		return smallIntCache[v-smallIntMin]
+	}
+	return &PyInt{Value: v}
+}
 
 // PyFloat represents a Python float
 type PyFloat struct {
@@ -175,7 +200,8 @@ func (i *PyInstance) String() string { return fmt.Sprintf("<%s object>", i.Class
 type Frame struct {
 	Code             *CodeObject
 	IP               int              // Instruction pointer
-	Stack            []Value          // Operand stack
+	Stack            []Value          // Operand stack (pre-allocated)
+	SP               int              // Stack pointer (index of next free slot)
 	Locals           []Value          // Local variables
 	Globals          map[string]Value // Global variables
 	EnclosingGlobals map[string]Value // Enclosing globals (for class bodies)
@@ -208,9 +234,9 @@ type VM struct {
 	builtins map[string]Value
 
 	// Execution control
-	ctx              context.Context
-	instructionCount int64
-	checkInterval    int64 // Check context every N instructions
+	ctx           context.Context
+	checkCounter  int64 // Counts down to next context check
+	checkInterval int64 // Check context every N instructions
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
@@ -235,6 +261,7 @@ func NewVM() *VM {
 		Globals:       make(map[string]Value),
 		builtins:      make(map[string]Value),
 		checkInterval: 1000, // Check context every 1000 instructions by default
+		checkCounter:  1000, // Initialize counter
 	}
 	vm.initBuiltins()
 	return vm
@@ -248,6 +275,7 @@ func (vm *VM) SetCheckInterval(n int64) {
 		n = 1
 	}
 	vm.checkInterval = n
+	vm.checkCounter = n
 }
 
 func (vm *VM) initBuiltins() {
@@ -273,17 +301,17 @@ func (vm *VM) initBuiltins() {
 			}
 			switch v := args[0].(type) {
 			case *PyString:
-				return &PyInt{Value: int64(len(v.Value))}, nil
+				return MakeInt(int64(len(v.Value))), nil
 			case *PyList:
-				return &PyInt{Value: int64(len(v.Items))}, nil
+				return MakeInt(int64(len(v.Items))), nil
 			case *PyTuple:
-				return &PyInt{Value: int64(len(v.Items))}, nil
+				return MakeInt(int64(len(v.Items))), nil
 			case *PyDict:
-				return &PyInt{Value: int64(len(v.Items))}, nil
+				return MakeInt(int64(len(v.Items))), nil
 			case *PySet:
-				return &PyInt{Value: int64(len(v.Items))}, nil
+				return MakeInt(int64(len(v.Items))), nil
 			case *PyBytes:
-				return &PyInt{Value: int64(len(v.Value))}, nil
+				return MakeInt(int64(len(v.Value))), nil
 			default:
 				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(v))
 			}
@@ -315,9 +343,9 @@ func (vm *VM) initBuiltins() {
 		Name: "int",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) == 0 {
-				return &PyInt{Value: 0}, nil
+				return MakeInt(0), nil
 			}
-			return &PyInt{Value: vm.toInt(args[0])}, nil
+			return MakeInt(vm.toInt(args[0])), nil
 		},
 	}
 
@@ -450,7 +478,7 @@ func (vm *VM) initBuiltins() {
 			switch v := args[0].(type) {
 			case *PyInt:
 				if v.Value < 0 {
-					return &PyInt{Value: -v.Value}, nil
+					return MakeInt(-v.Value), nil
 				}
 				return v, nil
 			case *PyFloat:
@@ -517,7 +545,7 @@ func (vm *VM) initBuiltins() {
 			if err != nil {
 				return nil, err
 			}
-			var start Value = &PyInt{Value: 0}
+			var start Value = MakeInt(0)
 			if len(args) > 1 {
 				start = args[1]
 			}
@@ -554,7 +582,7 @@ func (vm *VM) initBuiltins() {
 			if !ok || len(s.Value) != 1 {
 				return nil, fmt.Errorf("ord() expected a character")
 			}
-			return &PyInt{Value: int64(s.Value[0])}, nil
+			return MakeInt(int64(s.Value[0])), nil
 		},
 	}
 
@@ -685,7 +713,8 @@ func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, 
 	frame := &Frame{
 		Code:     code,
 		IP:       0,
-		Stack:    make([]Value, 0, code.StackSize),
+		Stack:    make([]Value, code.StackSize+16), // Pre-allocate with small buffer
+		SP:       0,
 		Locals:   make([]Value, len(code.VarNames)),
 		Globals:  vm.Globals,
 		Builtins: vm.builtins,
@@ -694,7 +723,7 @@ func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, 
 	vm.frames = append(vm.frames, frame)
 	vm.frame = frame
 	vm.ctx = ctx
-	vm.instructionCount = 0
+	vm.checkCounter = vm.checkInterval // Reset counter for new execution
 
 	return vm.run()
 }
@@ -703,21 +732,24 @@ func (vm *VM) run() (Value, error) {
 	frame := vm.frame
 
 	for frame.IP < len(frame.Code.Code) {
-		// Check for timeout/cancellation periodically
-		vm.instructionCount++
-		if vm.ctx != nil && vm.instructionCount%vm.checkInterval == 0 {
-			select {
-			case <-vm.ctx.Done():
-				if vm.ctx.Err() == context.DeadlineExceeded {
-					// Extract timeout duration from context if possible
-					if deadline, ok := vm.ctx.Deadline(); ok {
-						return nil, &TimeoutError{Timeout: time.Until(deadline) * -1}
+		// Check for timeout/cancellation periodically (counter decrement is faster than modulo)
+		if vm.ctx != nil {
+			vm.checkCounter--
+			if vm.checkCounter <= 0 {
+				vm.checkCounter = vm.checkInterval
+				select {
+				case <-vm.ctx.Done():
+					if vm.ctx.Err() == context.DeadlineExceeded {
+						// Extract timeout duration from context if possible
+						if deadline, ok := vm.ctx.Deadline(); ok {
+							return nil, &TimeoutError{Timeout: time.Until(deadline) * -1}
+						}
+						return nil, &TimeoutError{}
 					}
-					return nil, &TimeoutError{}
+					return nil, &CancelledError{}
+				default:
+					// Context not done, continue execution
 				}
-				return nil, &CancelledError{}
-			default:
-				// Context not done, continue execution
 			}
 		}
 
@@ -753,7 +785,9 @@ func (vm *VM) run() (Value, error) {
 			vm.push(b)
 
 		case OpLoadConst:
-			vm.push(vm.toValue(frame.Code.Constants[arg]))
+			// Inline push for constant load
+			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[arg])
+			frame.SP++
 
 		case OpLoadName:
 			name := frame.Code.Names[arg]
@@ -782,10 +816,14 @@ func (vm *VM) run() (Value, error) {
 			delete(frame.Globals, name)
 
 		case OpLoadFast:
-			vm.push(frame.Locals[arg])
+			// Inline push for local variable load
+			frame.Stack[frame.SP] = frame.Locals[arg]
+			frame.SP++
 
 		case OpStoreFast:
-			frame.Locals[arg] = vm.pop()
+			// Inline pop for local variable store
+			frame.SP--
+			frame.Locals[arg] = frame.Stack[frame.SP]
 
 		case OpDeleteFast:
 			frame.Locals[arg] = nil
@@ -876,8 +914,68 @@ func (vm *VM) run() (Value, error) {
 			}
 			vm.push(result)
 
-		case OpBinaryAdd, OpBinarySubtract, OpBinaryMultiply, OpBinaryDivide,
-			OpBinaryFloorDiv, OpBinaryModulo, OpBinaryPower, OpBinaryMatMul,
+		case OpBinaryAdd:
+			// Inline fast path for int + int (most common case)
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			// Fall back to general case
+			result, err := vm.binaryOp(op, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinarySubtract:
+			// Inline fast path for int - int
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			result, err := vm.binaryOp(op, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinaryMultiply:
+			// Inline fast path for int * int
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+					frame.SP++
+					break
+				}
+			}
+			result, err := vm.binaryOp(op, a, b)
+			if err != nil {
+				return nil, err
+			}
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpBinaryDivide, OpBinaryFloorDiv, OpBinaryModulo, OpBinaryPower, OpBinaryMatMul,
 			OpBinaryLShift, OpBinaryRShift, OpBinaryAnd, OpBinaryOr, OpBinaryXor:
 			b := vm.pop()
 			a := vm.pop()
@@ -900,7 +998,28 @@ func (vm *VM) run() (Value, error) {
 			}
 			vm.push(result)
 
-		case OpCompareEq, OpCompareNe, OpCompareLt, OpCompareLe,
+		case OpCompareLt:
+			// Inline fast path for int < int (very common in loops)
+			frame.SP--
+			b := frame.Stack[frame.SP]
+			frame.SP--
+			a := frame.Stack[frame.SP]
+			if ai, ok := a.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok {
+					if ai.Value < bi.Value {
+						frame.Stack[frame.SP] = True
+					} else {
+						frame.Stack[frame.SP] = False
+					}
+					frame.SP++
+					break
+				}
+			}
+			result := vm.compareOp(op, a, b)
+			frame.Stack[frame.SP] = result
+			frame.SP++
+
+		case OpCompareEq, OpCompareNe, OpCompareLe,
 			OpCompareGt, OpCompareGe, OpCompareIs, OpCompareIsNot,
 			OpCompareIn, OpCompareNotIn:
 			b := vm.pop()
@@ -927,7 +1046,14 @@ func (vm *VM) run() (Value, error) {
 			}
 
 		case OpPopJumpIfFalse:
-			if !vm.truthy(vm.pop()) {
+			// Inline pop and fast path for PyBool (result of comparisons)
+			frame.SP--
+			val := frame.Stack[frame.SP]
+			if b, ok := val.(*PyBool); ok {
+				if !b.Value {
+					frame.IP = arg
+				}
+			} else if !vm.truthy(val) {
 				frame.IP = arg
 			}
 
@@ -1097,7 +1223,9 @@ func (vm *VM) run() (Value, error) {
 			vm.push(result)
 
 		case OpReturn:
-			result := vm.pop()
+			// Inline pop for return
+			frame.SP--
+			result := frame.Stack[frame.SP]
 			vm.frames = vm.frames[:len(vm.frames)-1]
 			if len(vm.frames) > 0 {
 				vm.frame = vm.frames[len(vm.frames)-1]
@@ -1221,25 +1349,25 @@ func (vm *VM) run() (Value, error) {
 	return None, nil
 }
 
-// Stack operations
+// Stack operations - using stack pointer with pre-allocated slice
 
 func (vm *VM) push(v Value) {
-	vm.frame.Stack = append(vm.frame.Stack, v)
+	f := vm.frame
+	f.Stack[f.SP] = v
+	f.SP++
 }
 
 func (vm *VM) pop() Value {
-	n := len(vm.frame.Stack) - 1
-	v := vm.frame.Stack[n]
-	vm.frame.Stack = vm.frame.Stack[:n]
-	return v
+	vm.frame.SP--
+	return vm.frame.Stack[vm.frame.SP]
 }
 
 func (vm *VM) top() Value {
-	return vm.frame.Stack[len(vm.frame.Stack)-1]
+	return vm.frame.Stack[vm.frame.SP-1]
 }
 
 func (vm *VM) peek(n int) Value {
-	return vm.frame.Stack[len(vm.frame.Stack)-1-n]
+	return vm.frame.Stack[vm.frame.SP-1-n]
 }
 
 // Type conversions
@@ -1255,9 +1383,9 @@ func (vm *VM) toValue(v interface{}) Value {
 		}
 		return False
 	case int:
-		return &PyInt{Value: int64(val)}
+		return MakeInt(int64(val))
 	case int64:
-		return &PyInt{Value: val}
+		return MakeInt(val)
 	case float64:
 		return &PyFloat{Value: val}
 	case string:
@@ -1334,7 +1462,7 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 	case *PyRange:
 		var items []Value
 		for i := val.Start; (val.Step > 0 && i < val.Stop) || (val.Step < 0 && i > val.Stop); i += val.Step {
-			items = append(items, &PyInt{Value: i})
+			items = append(items, MakeInt(i))
 		}
 		return items, nil
 	case *PySet:
@@ -1481,19 +1609,60 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 	case OpUnaryNegative:
 		switch v := a.(type) {
 		case *PyInt:
-			return &PyInt{Value: -v.Value}, nil
+			return MakeInt(-v.Value), nil
 		case *PyFloat:
 			return &PyFloat{Value: -v.Value}, nil
 		}
 	case OpUnaryInvert:
 		if v, ok := a.(*PyInt); ok {
-			return &PyInt{Value: ^v.Value}, nil
+			return MakeInt(^v.Value), nil
 		}
 	}
 	return nil, fmt.Errorf("bad operand type for unary %s: '%s'", op.String(), vm.typeName(a))
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	// Fast path: int op int (most common case in numeric code)
+	if ai, ok := a.(*PyInt); ok {
+		if bi, ok := b.(*PyInt); ok {
+			switch op {
+			case OpBinaryAdd:
+				return MakeInt(ai.Value + bi.Value), nil
+			case OpBinarySubtract:
+				return MakeInt(ai.Value - bi.Value), nil
+			case OpBinaryMultiply:
+				return MakeInt(ai.Value * bi.Value), nil
+			case OpBinaryDivide:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("division by zero")
+				}
+				return &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}, nil
+			case OpBinaryFloorDiv:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("integer division by zero")
+				}
+				return MakeInt(ai.Value / bi.Value), nil
+			case OpBinaryModulo:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("integer modulo by zero")
+				}
+				return MakeInt(ai.Value % bi.Value), nil
+			case OpBinaryPower:
+				return MakeInt(int64(math.Pow(float64(ai.Value), float64(bi.Value)))), nil
+			case OpBinaryLShift:
+				return MakeInt(ai.Value << bi.Value), nil
+			case OpBinaryRShift:
+				return MakeInt(ai.Value >> bi.Value), nil
+			case OpBinaryAnd:
+				return MakeInt(ai.Value & bi.Value), nil
+			case OpBinaryOr:
+				return MakeInt(ai.Value | bi.Value), nil
+			case OpBinaryXor:
+				return MakeInt(ai.Value ^ bi.Value), nil
+			}
+		}
+	}
+
 	// Handle string concatenation
 	if op == OpBinaryAdd {
 		if as, ok := a.(*PyString); ok {
@@ -1512,31 +1681,33 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		}
 	}
 
-	// String repetition
+	// String repetition - use strings.Repeat for O(n) instead of O(n²)
 	if op == OpBinaryMultiply {
 		if as, ok := a.(*PyString); ok {
 			if bi, ok := b.(*PyInt); ok {
-				result := ""
-				for i := int64(0); i < bi.Value; i++ {
-					result += as.Value
+				if bi.Value <= 0 {
+					return &PyString{Value: ""}, nil
 				}
-				return &PyString{Value: result}, nil
+				return &PyString{Value: strings.Repeat(as.Value, int(bi.Value))}, nil
 			}
 		}
 		if as, ok := b.(*PyString); ok {
 			if ai, ok := a.(*PyInt); ok {
-				result := ""
-				for i := int64(0); i < ai.Value; i++ {
-					result += as.Value
+				if ai.Value <= 0 {
+					return &PyString{Value: ""}, nil
 				}
-				return &PyString{Value: result}, nil
+				return &PyString{Value: strings.Repeat(as.Value, int(ai.Value))}, nil
 			}
 		}
-		// List repetition
+		// List repetition - pre-allocate for efficiency
 		if al, ok := a.(*PyList); ok {
 			if bi, ok := b.(*PyInt); ok {
-				var items []Value
-				for i := int64(0); i < bi.Value; i++ {
+				if bi.Value <= 0 {
+					return &PyList{Items: []Value{}}, nil
+				}
+				count := int(bi.Value)
+				items := make([]Value, 0, len(al.Items)*count)
+				for i := 0; i < count; i++ {
 					items = append(items, al.Items...)
 				}
 				return &PyList{Items: items}, nil
@@ -1544,64 +1715,22 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		}
 	}
 
-	// Numeric operations
-	ai, aIsInt := a.(*PyInt)
-	bi, bIsInt := b.(*PyInt)
+	// Float operations (including int+float and float+int)
 	af, aIsFloat := a.(*PyFloat)
 	bf, bIsFloat := b.(*PyFloat)
+	ai, aIsInt := a.(*PyInt)
+	bi, bIsInt := b.(*PyInt)
 
-	// Convert to float if needed
+	// Convert to float if mixed types
 	if aIsInt && bIsFloat {
 		af = &PyFloat{Value: float64(ai.Value)}
 		aIsFloat = true
-		aIsInt = false
 	}
 	if aIsFloat && bIsInt {
 		bf = &PyFloat{Value: float64(bi.Value)}
 		bIsFloat = true
-		bIsInt = false
 	}
 
-	// Integer operations
-	if aIsInt && bIsInt {
-		switch op {
-		case OpBinaryAdd:
-			return &PyInt{Value: ai.Value + bi.Value}, nil
-		case OpBinarySubtract:
-			return &PyInt{Value: ai.Value - bi.Value}, nil
-		case OpBinaryMultiply:
-			return &PyInt{Value: ai.Value * bi.Value}, nil
-		case OpBinaryDivide:
-			if bi.Value == 0 {
-				return nil, fmt.Errorf("division by zero")
-			}
-			return &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}, nil
-		case OpBinaryFloorDiv:
-			if bi.Value == 0 {
-				return nil, fmt.Errorf("integer division by zero")
-			}
-			return &PyInt{Value: ai.Value / bi.Value}, nil
-		case OpBinaryModulo:
-			if bi.Value == 0 {
-				return nil, fmt.Errorf("integer modulo by zero")
-			}
-			return &PyInt{Value: ai.Value % bi.Value}, nil
-		case OpBinaryPower:
-			return &PyInt{Value: int64(math.Pow(float64(ai.Value), float64(bi.Value)))}, nil
-		case OpBinaryLShift:
-			return &PyInt{Value: ai.Value << bi.Value}, nil
-		case OpBinaryRShift:
-			return &PyInt{Value: ai.Value >> bi.Value}, nil
-		case OpBinaryAnd:
-			return &PyInt{Value: ai.Value & bi.Value}, nil
-		case OpBinaryOr:
-			return &PyInt{Value: ai.Value | bi.Value}, nil
-		case OpBinaryXor:
-			return &PyInt{Value: ai.Value ^ bi.Value}, nil
-		}
-	}
-
-	// Float operations
 	if aIsFloat && bIsFloat {
 		switch op {
 		case OpBinaryAdd:
@@ -1635,6 +1764,44 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 }
 
 func (vm *VM) compareOp(op Opcode, a, b Value) Value {
+	// Fast path: int vs int comparisons (most common case)
+	if ai, ok := a.(*PyInt); ok {
+		if bi, ok := b.(*PyInt); ok {
+			switch op {
+			case OpCompareEq:
+				if ai.Value == bi.Value {
+					return True
+				}
+				return False
+			case OpCompareNe:
+				if ai.Value != bi.Value {
+					return True
+				}
+				return False
+			case OpCompareLt:
+				if ai.Value < bi.Value {
+					return True
+				}
+				return False
+			case OpCompareLe:
+				if ai.Value <= bi.Value {
+					return True
+				}
+				return False
+			case OpCompareGt:
+				if ai.Value > bi.Value {
+					return True
+				}
+				return False
+			case OpCompareGe:
+				if ai.Value >= bi.Value {
+					return True
+				}
+				return False
+			}
+		}
+	}
+
 	switch op {
 	case OpCompareEq:
 		if vm.equal(a, b) {
@@ -1867,12 +2034,13 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 							Fn: func(vm *VM) int {
 								// Shift stack to insert userdata as first argument
 								top := vm.GetTop()
-								newStack := make([]Value, top+1)
+								newStack := make([]Value, top+17) // Extra space for stack operations
 								newStack[0] = ud
 								for i := 0; i < top; i++ {
 									newStack[i+1] = vm.Get(i + 1)
 								}
 								vm.frame.Stack = newStack
+								vm.frame.SP = top + 1
 								return m(vm)
 							},
 						}, nil
@@ -2251,14 +2419,16 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 
 	// Create a temporary frame for the Go function call
 	tempFrame := &Frame{
-		Stack:    make([]Value, 0, len(args)+16),
+		Stack:    make([]Value, len(args)+16),
+		SP:       0,
 		Globals:  vm.Globals,
 		Builtins: vm.builtins,
 	}
 
 	// Push arguments onto the temporary frame's stack
 	for _, arg := range args {
-		tempFrame.Stack = append(tempFrame.Stack, arg)
+		tempFrame.Stack[tempFrame.SP] = arg
+		tempFrame.SP++
 	}
 
 	vm.frame = tempFrame
@@ -2268,9 +2438,9 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Convert panic to error
-				nResults = 0
-				tempFrame.Stack = append(tempFrame.Stack, NewString(fmt.Sprintf("%v", r)))
+				// Convert panic to error - push error onto stack
+				tempFrame.Stack[tempFrame.SP] = NewString(fmt.Sprintf("%v", r))
+				tempFrame.SP++
 				nResults = -1 // Indicate error
 			}
 		}()
@@ -2282,7 +2452,7 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 
 	// Handle error case
 	if nResults < 0 {
-		errVal := tempFrame.Stack[len(tempFrame.Stack)-1]
+		errVal := tempFrame.Stack[tempFrame.SP-1]
 		return nil, fmt.Errorf("%s", vm.str(errVal))
 	}
 
@@ -2290,13 +2460,12 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 	if nResults == 0 {
 		return None, nil
 	} else if nResults == 1 {
-		return tempFrame.Stack[len(tempFrame.Stack)-1], nil
+		return tempFrame.Stack[tempFrame.SP-1], nil
 	} else {
 		// Multiple returns - return as tuple
 		results := make([]Value, nResults)
-		stackLen := len(tempFrame.Stack)
 		for i := 0; i < nResults; i++ {
-			results[i] = tempFrame.Stack[stackLen-nResults+i]
+			results[i] = tempFrame.Stack[tempFrame.SP-nResults+i]
 		}
 		return &PyTuple{Items: results}, nil
 	}
@@ -2309,7 +2478,8 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	frame := &Frame{
 		Code:     code,
 		IP:       0,
-		Stack:    make([]Value, 0, code.StackSize),
+		Stack:    make([]Value, code.StackSize+16), // Pre-allocate
+		SP:       0,
 		Locals:   make([]Value, len(code.VarNames)),
 		Globals:  fn.Globals,
 		Builtins: vm.builtins,
@@ -2361,7 +2531,8 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, error) {
 	frame := &Frame{
 		Code:             code,
 		IP:               0,
-		Stack:            make([]Value, 0, code.StackSize),
+		Stack:            make([]Value, code.StackSize+16), // Pre-allocate
+		SP:               0,
 		Locals:           make([]Value, len(code.VarNames)),
 		Globals:          classNamespace,
 		EnclosingGlobals: vm.Globals,

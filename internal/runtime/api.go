@@ -97,19 +97,18 @@ func (vm *VM) Pop() Value {
 
 // GetTop returns the index of the top element (number of elements on stack)
 func (vm *VM) GetTop() int {
-	return len(vm.frame.Stack)
+	return vm.frame.SP
 }
 
 // SetTop sets the stack top to a specific index
 func (vm *VM) SetTop(n int) {
 	if n < 0 {
-		vm.frame.Stack = vm.frame.Stack[:len(vm.frame.Stack)+n+1]
-	} else if n < len(vm.frame.Stack) {
-		vm.frame.Stack = vm.frame.Stack[:n]
-	} else {
-		for len(vm.frame.Stack) < n {
-			vm.frame.Stack = append(vm.frame.Stack, None)
+		vm.frame.SP = vm.frame.SP + n + 1
+		if vm.frame.SP < 0 {
+			vm.frame.SP = 0
 		}
+	} else {
+		vm.frame.SP = n
 	}
 }
 
@@ -118,12 +117,12 @@ func (vm *VM) SetTop(n int) {
 func (vm *VM) Get(idx int) Value {
 	if idx > 0 {
 		// Positive index: from bottom (1-based)
-		if idx <= len(vm.frame.Stack) {
+		if idx <= vm.frame.SP {
 			return vm.frame.Stack[idx-1]
 		}
 	} else if idx < 0 {
 		// Negative index: from top
-		realIdx := len(vm.frame.Stack) + idx
+		realIdx := vm.frame.SP + idx
 		if realIdx >= 0 {
 			return vm.frame.Stack[realIdx]
 		}

@@ -269,10 +269,18 @@ func (op Opcode) String() string {
 	return "UNKNOWN"
 }
 
-// HasArg returns true if the opcode takes an argument
-func (op Opcode) HasArg() bool {
-	switch op {
-	case OpPop, OpDup, OpRot2, OpRot3,
+// hasArgTable is a lookup table for opcodes that take arguments
+// Indexed by opcode value, true = has argument, false = no argument
+var hasArgTable [256]bool
+
+func init() {
+	// By default, all opcodes have arguments (true)
+	for i := range hasArgTable {
+		hasArgTable[i] = true
+	}
+	// Mark opcodes that don't have arguments
+	noArgOpcodes := []Opcode{
+		OpPop, OpDup, OpRot2, OpRot3,
 		OpUnaryPositive, OpUnaryNegative, OpUnaryNot, OpUnaryInvert,
 		OpBinaryAdd, OpBinarySubtract, OpBinaryMultiply, OpBinaryDivide,
 		OpBinaryFloorDiv, OpBinaryModulo, OpBinaryPower, OpBinaryMatMul,
@@ -287,11 +295,17 @@ func (op Opcode) HasArg() bool {
 		OpGetIter, OpReturn,
 		OpPopExcept, OpEndFinally, OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
-		OpImportStar:
-		return false
-	default:
-		return true
+		OpImportStar,
 	}
+	for _, op := range noArgOpcodes {
+		hasArgTable[op] = false
+	}
+}
+
+// HasArg returns true if the opcode takes an argument
+// Uses a lookup table for O(1) performance
+func (op Opcode) HasArg() bool {
+	return hasArgTable[op]
 }
 
 // Instruction represents a single bytecode instruction with its argument
