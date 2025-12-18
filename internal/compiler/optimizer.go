@@ -827,6 +827,12 @@ func (o *Optimizer) PeepholeOptimize(code *runtime.CodeObject) {
 		// Detect and convert decrement patterns
 		changed = o.detectDecrementPattern(instrs, code) || changed
 
+		// Detect and convert negate-in-place patterns (sign = -sign)
+		changed = o.detectNegatePattern(instrs, code) || changed
+
+		// Detect and convert add-const patterns (x = x + const)
+		changed = o.detectAddConstPattern(instrs, code) || changed
+
 		// Detect LOAD_FAST LOAD_FAST superinstruction
 		changed = o.detectLoadFastLoadFast(instrs) || changed
 
@@ -1187,6 +1193,103 @@ func (o *Optimizer) detectDecrementPattern(instrs []*instruction, code *runtime.
 		// Convert to DECREMENT_FAST
 		instrs[i].op = runtime.OpDecrementFast
 		instrs[i].arg = localIdx
+		instrs[i+1].removed = true
+		instrs[i+2].removed = true
+		instrs[i+3].removed = true
+		changed = true
+	}
+	return changed
+}
+
+func (o *Optimizer) detectNegatePattern(instrs []*instruction, code *runtime.CodeObject) bool {
+	// Pattern: LOAD_FAST x, UNARY_NEGATIVE, STORE_FAST x -> NEGATE_FAST x
+	changed := false
+	for i := 0; i < len(instrs)-2; i++ {
+		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed {
+			continue
+		}
+
+		// Check for LOAD_FAST or specialized version
+		localIdx := o.getLoadFastIndex(instrs[i])
+		if localIdx < 0 {
+			continue
+		}
+
+		// Check for UNARY_NEGATIVE
+		if instrs[i+1].op != runtime.OpUnaryNegative {
+			continue
+		}
+
+		// Check for STORE_FAST to same variable
+		storeIdx := o.getStoreFastIndex(instrs[i+2])
+		if storeIdx < 0 || localIdx != storeIdx {
+			continue
+		}
+
+		// Convert to NEGATE_FAST
+		instrs[i].op = runtime.OpNegateFast
+		instrs[i].arg = localIdx
+		instrs[i+1].removed = true
+		instrs[i+2].removed = true
+		changed = true
+	}
+	return changed
+}
+
+func (o *Optimizer) detectAddConstPattern(instrs []*instruction, code *runtime.CodeObject) bool {
+	// Pattern: LOAD_FAST x, LOAD_CONST c, BINARY_ADD, STORE_FAST x -> ADD_CONST_FAST (x, c)
+	// Skip if c == 1 (handled by INCREMENT_FAST)
+	changed := false
+	for i := 0; i < len(instrs)-3; i++ {
+		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+			continue
+		}
+
+		// Check for LOAD_FAST or specialized version
+		localIdx := o.getLoadFastIndex(instrs[i])
+		if localIdx < 0 {
+			continue
+		}
+
+		// Check for LOAD_CONST (but not 1, which is handled by INCREMENT_FAST)
+		if instrs[i+1].op != runtime.OpLoadConst {
+			continue
+		}
+		constIdx := instrs[i+1].arg
+		// Skip if it's loading 1 (use INCREMENT_FAST instead)
+		if o.isLoadOne(instrs[i+1], code) {
+			continue
+		}
+		// Only optimize for integer constants
+		if constIdx >= len(code.Constants) {
+			continue
+		}
+		switch code.Constants[constIdx].(type) {
+		case int64, int:
+			// OK, it's an integer
+		default:
+			continue
+		}
+
+		// Check for BINARY_ADD
+		if instrs[i+2].op != runtime.OpBinaryAdd && instrs[i+2].op != runtime.OpBinaryAddInt {
+			continue
+		}
+
+		// Check for STORE_FAST to same variable
+		storeIdx := o.getStoreFastIndex(instrs[i+3])
+		if storeIdx < 0 || localIdx != storeIdx {
+			continue
+		}
+
+		// Only encode if indices fit in packed format (8 bits each)
+		if localIdx > 255 || constIdx > 255 {
+			continue
+		}
+
+		// Convert to ADD_CONST_FAST
+		instrs[i].op = runtime.OpAddConstFast
+		instrs[i].arg = localIdx | (constIdx << 8)
 		instrs[i+1].removed = true
 		instrs[i+2].removed = true
 		instrs[i+3].removed = true

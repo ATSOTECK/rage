@@ -178,6 +178,8 @@ const (
 	// Specialized arithmetic (no arg needed)
 	OpIncrementFast // Increment local by 1 (arg: local index) - has arg!
 	OpDecrementFast // Decrement local by 1 (arg: local index) - has arg!
+	OpNegateFast    // Negate local in place (arg: local index) - for sign = -sign
+	OpAddConstFast  // Add constant to local (arg: packed local index + const index)
 
 	// Superinstructions - combined operations
 	OpLoadFastLoadFast   // Load two locals (arg: packed indices)
@@ -341,6 +343,8 @@ var OpcodeNames = map[Opcode]string{
 	OpLoadOne:           "LOAD_ONE",
 	OpIncrementFast:     "INCREMENT_FAST",
 	OpDecrementFast:     "DECREMENT_FAST",
+	OpNegateFast:        "NEGATE_FAST",
+	OpAddConstFast:      "ADD_CONST_FAST",
 	OpLoadFastLoadFast:  "LOAD_FAST_LOAD_FAST",
 	OpLoadFastLoadConst: "LOAD_FAST_LOAD_CONST",
 	OpStoreFastLoadFast: "STORE_FAST_LOAD_FAST",

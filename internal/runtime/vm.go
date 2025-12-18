@@ -909,6 +909,41 @@ func (vm *VM) run() (Value, error) {
 				frame.Locals[arg] = result
 			}
 
+		case OpNegateFast:
+			// Negate local variable in place: sign = -sign
+			if v, ok := frame.Locals[arg].(*PyInt); ok {
+				frame.Locals[arg] = MakeInt(-v.Value)
+			} else if v, ok := frame.Locals[arg].(*PyFloat); ok {
+				frame.Locals[arg] = &PyFloat{Value: -v.Value}
+			} else {
+				// Fallback
+				result, err := vm.unaryOp(OpUnaryNegative, frame.Locals[arg])
+				if err != nil {
+					return nil, err
+				}
+				frame.Locals[arg] = result
+			}
+
+		case OpAddConstFast:
+			// Add constant to local: x = x + const
+			// arg contains packed indices: low byte = local index, high byte = const index
+			localIdx := arg & 0xFF
+			constIdx := (arg >> 8) & 0xFF
+			constVal := vm.toValue(frame.Code.Constants[constIdx])
+			localVal := frame.Locals[localIdx]
+			if li, ok := localVal.(*PyInt); ok {
+				if ci, ok := constVal.(*PyInt); ok {
+					frame.Locals[localIdx] = MakeInt(li.Value + ci.Value)
+					break
+				}
+			}
+			// Fallback
+			result, err := vm.binaryOp(OpBinaryAdd, localVal, constVal)
+			if err != nil {
+				return nil, err
+			}
+			frame.Locals[localIdx] = result
+
 		case OpLoadFastLoadFast:
 			// Load two locals: arg contains packed indices (low byte = first, high byte = second)
 			idx1 := arg & 0xFF
