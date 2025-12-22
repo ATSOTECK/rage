@@ -196,6 +196,27 @@ type PyInstance struct {
 func (i *PyInstance) Type() string   { return i.Class.Name }
 func (i *PyInstance) String() string { return fmt.Sprintf("<%s object>", i.Class.Name) }
 
+// PyException represents a Python exception
+type PyException struct {
+	ExcType   *PyClass         // Exception class (e.g., ValueError, TypeError)
+	Args      *PyTuple         // Exception arguments
+	Message   string           // String representation
+	Cause     *PyException     // __cause__ for chained exceptions (raise X from Y)
+	Context   *PyException     // __context__ for implicit chaining
+	Traceback []TracebackEntry // Traceback frames
+}
+
+func (e *PyException) Type() string   { return e.ExcType.Name }
+func (e *PyException) String() string { return e.Message }
+func (e *PyException) Error() string  { return e.Message }
+
+// TracebackEntry represents a single frame in a traceback
+type TracebackEntry struct {
+	Filename string
+	Line     int
+	Function string
+}
+
 // Frame represents a call frame
 type Frame struct {
 	Code             *CodeObject
@@ -237,6 +258,10 @@ type VM struct {
 	ctx           context.Context
 	checkCounter  int64 // Counts down to next context check
 	checkInterval int64 // Check context every N instructions
+
+	// Exception handling state
+	currentException *PyException // Currently active exception being handled
+	lastException    *PyException // Last raised exception (for bare raise)
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
@@ -674,6 +699,74 @@ func (vm *VM) initBuiltins() {
 	}
 	// Set object's MRO to just itself
 	vm.builtins["object"].(*PyClass).Mro = []*PyClass{vm.builtins["object"].(*PyClass)}
+
+	// Initialize exception class hierarchy
+	vm.initExceptionClasses()
+}
+
+// initExceptionClasses sets up the exception class hierarchy
+func (vm *VM) initExceptionClasses() {
+	// BaseException is the root of all exceptions
+	baseException := &PyClass{
+		Name:  "BaseException",
+		Bases: nil,
+		Dict:  make(map[string]Value),
+	}
+	baseException.Mro = []*PyClass{baseException}
+	vm.builtins["BaseException"] = baseException
+
+	// Exception inherits from BaseException (most exceptions derive from this)
+	exception := &PyClass{
+		Name:  "Exception",
+		Bases: []*PyClass{baseException},
+		Dict:  make(map[string]Value),
+	}
+	exception.Mro = []*PyClass{exception, baseException}
+	vm.builtins["Exception"] = exception
+
+	// Helper to create exception class inheriting from Exception
+	makeExc := func(name string, parent *PyClass) *PyClass {
+		cls := &PyClass{
+			Name:  name,
+			Bases: []*PyClass{parent},
+			Dict:  make(map[string]Value),
+		}
+		// Build MRO by prepending self to parent's MRO
+		cls.Mro = append([]*PyClass{cls}, parent.Mro...)
+		vm.builtins[name] = cls
+		return cls
+	}
+
+	// Standard exceptions inheriting from Exception
+	makeExc("ValueError", exception)
+	makeExc("TypeError", exception)
+	makeExc("KeyError", exception)
+	makeExc("IndexError", exception)
+	makeExc("AttributeError", exception)
+	makeExc("NameError", exception)
+	makeExc("RuntimeError", exception)
+	makeExc("ZeroDivisionError", exception)
+	makeExc("AssertionError", exception)
+	makeExc("StopIteration", exception)
+	makeExc("NotImplementedError", exception)
+	makeExc("RecursionError", exception)
+
+	// OSError and its subclasses
+	osError := makeExc("OSError", exception)
+	makeExc("FileNotFoundError", osError)
+	makeExc("PermissionError", osError)
+
+	// ImportError and its subclass
+	importError := makeExc("ImportError", exception)
+	makeExc("ModuleNotFoundError", importError)
+
+	// LookupError (base for KeyError and IndexError - for compatibility)
+	lookupError := makeExc("LookupError", exception)
+	_ = lookupError // We already created KeyError and IndexError above
+
+	// ArithmeticError (base for ZeroDivisionError - for compatibility)
+	arithmeticError := makeExc("ArithmeticError", exception)
+	_ = arithmeticError // We already created ZeroDivisionError above
 }
 
 // PyRange represents a range object
@@ -1947,17 +2040,97 @@ func (vm *VM) run() (Value, error) {
 			}
 			vm.push(locals)
 
-		case OpRaiseVarargs:
-			if arg == 0 {
-				return nil, fmt.Errorf("no active exception to re-raise")
-			} else if arg == 1 {
-				exc := vm.pop()
-				return nil, fmt.Errorf("%v", exc)
-			} else {
-				cause := vm.pop()
-				exc := vm.pop()
-				return nil, fmt.Errorf("%v (caused by %v)", exc, cause)
+		case OpSetupExcept:
+			// Push exception handler block onto block stack
+			block := Block{
+				Type:    BlockExcept,
+				Handler: arg,
+				Level:   frame.SP,
 			}
+			frame.BlockStack = append(frame.BlockStack, block)
+
+		case OpSetupFinally:
+			// Push finally handler block onto block stack
+			block := Block{
+				Type:    BlockFinally,
+				Handler: arg,
+				Level:   frame.SP,
+			}
+			frame.BlockStack = append(frame.BlockStack, block)
+
+		case OpPopExcept:
+			// Pop exception handler from block stack (try block completed normally)
+			if len(frame.BlockStack) > 0 {
+				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			}
+			vm.currentException = nil
+
+		case OpClearException:
+			// Clear the current exception state (when handler catches exception)
+			// Does NOT pop the block stack (block was already popped by handleException)
+			vm.currentException = nil
+
+		case OpEndFinally:
+			// End finally block - re-raise exception if one was active
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				// Try to find an exception handler
+				result, err := vm.handleException(exc)
+				if err != nil {
+					// No handler found, propagate exception
+					return nil, err
+				}
+				// Handler found, continue execution
+				_ = result
+			}
+
+		case OpExceptionMatch:
+			// Check if exception matches type for except clause
+			// Stack: [..., exception, type] -> [..., exception, bool]
+			excType := vm.pop()
+			exc := vm.top() // Peek, don't pop
+			if pyExc, ok := exc.(*PyException); ok {
+				if vm.exceptionMatches(pyExc, excType) {
+					vm.push(True)
+				} else {
+					vm.push(False)
+				}
+			} else {
+				vm.push(False)
+			}
+
+		case OpRaiseVarargs:
+			var exc *PyException
+			if arg == 0 {
+				// Bare raise - re-raise current/last exception
+				if vm.lastException != nil {
+					exc = vm.lastException
+				} else {
+					return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
+				}
+			} else if arg == 1 {
+				// raise exc
+				excVal := vm.pop()
+				exc = vm.createException(excVal, nil)
+			} else if arg >= 2 {
+				// raise exc from cause
+				cause := vm.pop()
+				excVal := vm.pop()
+				exc = vm.createException(excVal, cause)
+			}
+
+			// Build traceback
+			exc.Traceback = vm.buildTraceback()
+
+			// Try to find an exception handler
+			result, err := vm.handleException(exc)
+			if err != nil {
+				// No handler found, propagate exception
+				return nil, err
+			}
+			// Handler found, continue execution
+			_ = result
 
 		case OpImportName:
 			name := frame.Code.Names[arg]
@@ -2037,6 +2210,204 @@ func (vm *VM) top() Value {
 
 func (vm *VM) peek(n int) Value {
 	return vm.frame.Stack[vm.frame.SP-1-n]
+}
+
+// Exception handling helpers
+
+// createException creates a PyException from a value
+func (vm *VM) createException(excVal Value, cause Value) *PyException {
+	exc := &PyException{}
+
+	switch v := excVal.(type) {
+	case *PyException:
+		// Already an exception, return as-is
+		return v
+	case *PyClass:
+		// Exception class without arguments: raise ValueError
+		if vm.isExceptionClass(v) {
+			exc.ExcType = v
+			exc.Args = &PyTuple{Items: []Value{}}
+			exc.Message = v.Name
+		} else {
+			// Not an exception class
+			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
+			exc.Message = "TypeError: exceptions must derive from BaseException"
+		}
+	case *PyInstance:
+		// Already instantiated exception
+		if vm.isExceptionClass(v.Class) {
+			exc.ExcType = v.Class
+			if args, ok := v.Dict["args"]; ok {
+				if t, ok := args.(*PyTuple); ok {
+					exc.Args = t
+				}
+			}
+			if exc.Args == nil {
+				exc.Args = &PyTuple{Items: []Value{}}
+			}
+			exc.Message = vm.str(v)
+		} else {
+			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
+			exc.Message = "TypeError: exceptions must derive from BaseException"
+		}
+	case *PyString:
+		// String used as exception (legacy style, but we'll support it)
+		exc.ExcType = vm.builtins["Exception"].(*PyClass)
+		exc.Args = &PyTuple{Items: []Value{v}}
+		exc.Message = v.Value
+	default:
+		exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+		exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
+		exc.Message = "TypeError: exceptions must derive from BaseException"
+	}
+
+	if cause != nil {
+		exc.Cause = vm.createException(cause, nil)
+	}
+
+	return exc
+}
+
+// isExceptionClass checks if a class is an exception class (inherits from BaseException)
+func (vm *VM) isExceptionClass(cls *PyClass) bool {
+	baseExc, ok := vm.builtins["BaseException"].(*PyClass)
+	if !ok {
+		return false
+	}
+	for _, mroClass := range cls.Mro {
+		if mroClass == baseExc {
+			return true
+		}
+	}
+	return false
+}
+
+// exceptionMatches checks if an exception matches a type for except clause
+func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
+	switch t := exceptionType.(type) {
+	case *PyClass:
+		// Check if exc.ExcType is t or subclass of t
+		for _, mroClass := range exc.ExcType.Mro {
+			if mroClass == t {
+				return true
+			}
+		}
+		return false
+	case *PyTuple:
+		// Tuple of exception types - match any
+		for _, item := range t.Items {
+			if vm.exceptionMatches(exc, item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// buildTraceback builds a traceback from current frame stack
+func (vm *VM) buildTraceback() []TracebackEntry {
+	var tb []TracebackEntry
+	for i := len(vm.frames) - 1; i >= 0; i-- {
+		f := vm.frames[i]
+		line := f.Code.LineForOffset(f.IP)
+		tb = append(tb, TracebackEntry{
+			Filename: f.Code.Filename,
+			Line:     line,
+			Function: f.Code.Name,
+		})
+	}
+	return tb
+}
+
+// handleException unwinds the stack looking for exception handlers
+// Returns (nil, nil) if a handler was found and we should continue execution
+// Returns (nil, error) if no handler was found
+func (vm *VM) handleException(exc *PyException) (Value, error) {
+	vm.currentException = exc
+	vm.lastException = exc
+
+	for len(vm.frames) > 0 {
+		frame := vm.frame
+
+		// Search block stack for exception handler
+		for len(frame.BlockStack) > 0 {
+			block := frame.BlockStack[len(frame.BlockStack)-1]
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+
+			switch block.Type {
+			case BlockExcept:
+				// Found exception handler - restore stack and jump to handler
+				frame.SP = block.Level
+				frame.IP = block.Handler
+				vm.push(exc) // Push exception onto stack for handler
+				return nil, nil // Continue execution at handler
+
+			case BlockFinally:
+				// Must execute finally block first
+				frame.SP = block.Level
+				frame.IP = block.Handler
+				vm.push(exc) // Push exception for finally to potentially re-raise
+				return nil, nil // Continue execution at finally
+
+			case BlockLoop:
+				// Skip loop blocks when unwinding for exception
+				continue
+			}
+		}
+
+		// No handler in this frame, pop frame and continue unwinding
+		vm.frames = vm.frames[:len(vm.frames)-1]
+		if len(vm.frames) > 0 {
+			vm.frame = vm.frames[len(vm.frames)-1]
+		}
+	}
+
+	// No handler found anywhere - exception propagates to caller
+	return nil, exc
+}
+
+// wrapGoError converts a Go error to a Python exception
+func (vm *VM) wrapGoError(err error) *PyException {
+	if pyExc, ok := err.(*PyException); ok {
+		return pyExc
+	}
+
+	errStr := err.Error()
+
+	// Try to detect exception type from error message prefix
+	var excClass *PyClass
+	switch {
+	case len(errStr) >= 17 && errStr[:17] == "ZeroDivisionError":
+		excClass = vm.builtins["ZeroDivisionError"].(*PyClass)
+	case len(errStr) >= 8 && errStr[:8] == "KeyError":
+		excClass = vm.builtins["KeyError"].(*PyClass)
+	case len(errStr) >= 10 && errStr[:10] == "IndexError":
+		excClass = vm.builtins["IndexError"].(*PyClass)
+	case len(errStr) >= 9 && errStr[:9] == "TypeError":
+		excClass = vm.builtins["TypeError"].(*PyClass)
+	case len(errStr) >= 10 && errStr[:10] == "ValueError":
+		excClass = vm.builtins["ValueError"].(*PyClass)
+	case len(errStr) >= 14 && errStr[:14] == "AttributeError":
+		excClass = vm.builtins["AttributeError"].(*PyClass)
+	case len(errStr) >= 9 && errStr[:9] == "NameError":
+		excClass = vm.builtins["NameError"].(*PyClass)
+	case len(errStr) >= 19 && errStr[:19] == "ModuleNotFoundError":
+		excClass = vm.builtins["ModuleNotFoundError"].(*PyClass)
+	case len(errStr) >= 11 && errStr[:11] == "ImportError":
+		excClass = vm.builtins["ImportError"].(*PyClass)
+	default:
+		excClass = vm.builtins["RuntimeError"].(*PyClass)
+	}
+
+	return &PyException{
+		ExcType: excClass,
+		Args:    &PyTuple{Items: []Value{&PyString{Value: errStr}}},
+		Message: errStr,
+	}
 }
 
 // Type conversions

@@ -1000,70 +1000,109 @@ func (c *Compiler) compileFor(s *model.For) {
 }
 
 func (c *Compiler) compileTry(s *model.Try) {
-	// Setup exception handler
-	handlerJump := c.emitJump(runtime.OpSetupExcept)
+	hasFinally := len(s.FinalBody) > 0
+	hasExcept := len(s.Handlers) > 0
+
+	// If we have a finally block, set it up first (it wraps everything)
+	var finallyJump int
+	if hasFinally {
+		finallyJump = c.emitJump(runtime.OpSetupFinally)
+	}
+
+	// Setup exception handler only if we have except clauses
+	var handlerJump int
+	if hasExcept {
+		handlerJump = c.emitJump(runtime.OpSetupExcept)
+	}
 
 	// Compile try body
 	for _, stmt := range s.Body {
 		c.compileStmt(stmt)
 	}
-	c.emit(runtime.OpPopExcept)
+
+	// Pop exception handler if we set one up
+	if hasExcept {
+		c.emit(runtime.OpPopExcept)
+	}
 	successJump := c.emitJump(runtime.OpJump)
 
-	// Exception handlers
-	c.patchJump(handlerJump, c.currentOffset())
-
+	// Exception handlers start here (only if we have handlers)
 	var handlerEnds []int
-	for _, handler := range s.Handlers {
-		if handler.Type != nil {
-			// Check exception type
-			c.emit(runtime.OpDup)
-			c.compileExpr(handler.Type)
-			// isinstance check would go here
-			c.emit(runtime.OpCompareIs) // Simplified
-			nextHandler := c.emitJump(runtime.OpPopJumpIfFalse)
+	if hasExcept {
+		c.patchJump(handlerJump, c.currentOffset())
 
-			if handler.Name != nil {
-				c.compileStore(handler.Name)
+		for _, handler := range s.Handlers {
+			if handler.Type != nil {
+				// Check exception type using OpExceptionMatch
+				c.emit(runtime.OpDup)
+				c.compileExpr(handler.Type)
+				c.emit(runtime.OpExceptionMatch)
+				nextHandler := c.emitJump(runtime.OpPopJumpIfFalse)
+
+				// Exception matched - clear the current exception state
+				// Use OpClearException instead of OpPopExcept because the block was
+				// already popped by handleException in the VM
+				c.emit(runtime.OpClearException)
+
+				// Pop the exception if we're not storing it
+				if handler.Name != nil {
+					c.compileStore(handler.Name)
+				} else {
+					c.emit(runtime.OpPop)
+				}
+
+				// Compile handler body
+				for _, stmt := range handler.Body {
+					c.compileStmt(stmt)
+				}
+
+				// Clear exception variable after handler (Python 3 semantics)
+				if handler.Name != nil {
+					c.emit(runtime.OpLoadNone)
+					c.compileStore(handler.Name)
+				}
+
+				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
+				c.patchJump(nextHandler, c.currentOffset())
 			} else {
+				// Bare except - catches everything
+				c.emit(runtime.OpClearException) // Clear the current exception state
 				c.emit(runtime.OpPop)
+				for _, stmt := range handler.Body {
+					c.compileStmt(stmt)
+				}
+				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 			}
-
-			for _, stmt := range handler.Body {
-				c.compileStmt(stmt)
-			}
-			handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
-
-			c.patchJump(nextHandler, c.currentOffset())
-		} else {
-			// Bare except
-			c.emit(runtime.OpPop)
-			for _, stmt := range handler.Body {
-				c.compileStmt(stmt)
-			}
-			handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 		}
+
+		// Re-raise if no handler matched (will be caught by finally if present)
+		c.emitArg(runtime.OpRaiseVarargs, 0)
 	}
 
-	// Re-raise if no handler matched
-	c.emitArg(runtime.OpRaiseVarargs, 0)
-
-	// Else clause (runs if no exception)
+	// Else clause (runs if no exception was raised)
 	c.patchJump(successJump, c.currentOffset())
 	for _, stmt := range s.OrElse {
 		c.compileStmt(stmt)
 	}
 
-	// Patch all handler ends
+	// All handler ends jump here
+	endOfHandlers := c.currentOffset()
 	for _, jump := range handlerEnds {
-		c.patchJump(jump, c.currentOffset())
+		c.patchJump(jump, endOfHandlers)
 	}
 
 	// Finally clause
-	if len(s.FinalBody) > 0 {
+	if hasFinally {
+		// Patch the finally setup to jump here
+		c.patchJump(finallyJump, c.currentOffset())
+
+		// Compile finally body
 		for _, stmt := range s.FinalBody {
 			c.compileStmt(stmt)
 		}
+
+		// End finally - will re-raise exception if one was active
+		c.emit(runtime.OpEndFinally)
 	}
 }
 

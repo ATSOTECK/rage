@@ -127,11 +127,13 @@ const (
 	OpImportStar // Import * from module
 
 	// Exception handling
-	OpSetupExcept  // Setup exception handler (arg: handler offset)
-	OpSetupFinally // Setup finally handler (arg: handler offset)
-	OpPopExcept    // Pop exception handler
-	OpEndFinally   // End finally block
-	OpRaiseVarargs // Raise exception (arg: count 0-3)
+	OpSetupExcept     // Setup exception handler (arg: handler offset)
+	OpSetupFinally    // Setup finally handler (arg: handler offset)
+	OpPopExcept       // Pop exception handler from block stack
+	OpEndFinally      // End finally block
+	OpRaiseVarargs    // Raise exception (arg: count 0-3)
+	OpExceptionMatch  // Check if exception matches type for except clause
+	OpClearException  // Clear current exception state (for handler entry)
 
 	// With statement
 	OpSetupWith   // Setup with statement (arg: cleanup offset)
@@ -323,6 +325,8 @@ var OpcodeNames = map[Opcode]string{
 	OpPopExcept:        "POP_EXCEPT",
 	OpEndFinally:       "END_FINALLY",
 	OpRaiseVarargs:     "RAISE_VARARGS",
+	OpExceptionMatch:   "EXCEPTION_MATCH",
+	OpClearException:   "CLEAR_EXCEPTION",
 	OpSetupWith:        "SETUP_WITH",
 	OpWithCleanup:      "WITH_CLEANUP",
 	OpAssert:           "ASSERT",
@@ -417,7 +421,7 @@ func init() {
 		OpCompareIn, OpCompareNotIn,
 		OpBinarySubscr, OpStoreSubscr, OpDeleteSubscr,
 		OpGetIter, OpReturn,
-		OpPopExcept, OpEndFinally, OpWithCleanup,
+		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException, OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
 		OpImportStar,
 		// Specialized no-arg opcodes
