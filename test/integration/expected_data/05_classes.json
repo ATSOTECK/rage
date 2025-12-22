@@ -21,5 +21,21 @@
   "builder_parts": ["a", "b", "c"],
   "account_initial": 100,
   "account_after_deposit": 150,
-  "account_after_withdraw": 120
+  "account_after_withdraw": 120,
+  "mi_duck_fly": "Flying",
+  "mi_duck_swim": "Swimming",
+  "mi_duck_quack": "Quack!",
+  "mi_diamond_method": "Left",
+  "mi_diamond2_method": "Right2",
+  "mi_mro_d_value": "B",
+  "mi_mro_e_value": "C",
+  "mi_mixin_json": "json:test",
+  "mi_mixin_xml": "xml:test",
+  "mi_mixin_data": "test",
+  "mi_three_show": "Printable",
+  "mi_three_save": "Saved",
+  "mi_three_load": "Loaded",
+  "mi_three_content": "Hello",
+  "mi_person_name": "Alice",
+  "mi_person_age": 30
 }

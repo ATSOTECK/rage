@@ -668,23 +668,12 @@ func (vm *VM) initBuiltins() {
 				Dict:  classDict,
 			}
 
-			// Build MRO (Method Resolution Order) - simple linearization
-			class.Mro = []*PyClass{class}
-			for _, base := range bases {
-				for _, mroClass := range base.Mro {
-					// Add if not already in MRO
-					found := false
-					for _, existing := range class.Mro {
-						if existing == mroClass {
-							found = true
-							break
-						}
-					}
-					if !found {
-						class.Mro = append(class.Mro, mroClass)
-					}
-				}
+			// Build MRO using C3 linearization for proper multiple inheritance
+			mro, err := vm.computeC3MRO(class, bases)
+			if err != nil {
+				return nil, err
 			}
+			class.Mro = mro
 
 			return class, nil
 		},
@@ -767,6 +756,105 @@ func (vm *VM) initExceptionClasses() {
 	// ArithmeticError (base for ZeroDivisionError - for compatibility)
 	arithmeticError := makeExc("ArithmeticError", exception)
 	_ = arithmeticError // We already created ZeroDivisionError above
+}
+
+// computeC3MRO computes the Method Resolution Order using C3 linearization algorithm.
+// This properly handles multiple inheritance and detects inconsistent hierarchies.
+func (vm *VM) computeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error) {
+	// Base case: no bases
+	if len(bases) == 0 {
+		return []*PyClass{class}, nil
+	}
+
+	// Collect linearizations of all bases plus the list of bases itself
+	// We need to copy slices to avoid modifying the originals
+	var toMerge [][]*PyClass
+	for _, base := range bases {
+		// Copy the base's MRO
+		baseMRO := make([]*PyClass, len(base.Mro))
+		copy(baseMRO, base.Mro)
+		toMerge = append(toMerge, baseMRO)
+	}
+	// Add the list of direct bases
+	basesCopy := make([]*PyClass, len(bases))
+	copy(basesCopy, bases)
+	toMerge = append(toMerge, basesCopy)
+
+	// Start with the class itself
+	result := []*PyClass{class}
+
+	// Merge until all lists are empty
+	for {
+		// Remove empty lists
+		var nonEmpty [][]*PyClass
+		for _, list := range toMerge {
+			if len(list) > 0 {
+				nonEmpty = append(nonEmpty, list)
+			}
+		}
+		toMerge = nonEmpty
+
+		if len(toMerge) == 0 {
+			break
+		}
+
+		// Find a good head: a class that is not in the tail of any list
+		var candidate *PyClass
+		for _, list := range toMerge {
+			head := list[0]
+			inTail := false
+			for _, other := range toMerge {
+				// Check if head appears in the tail (positions 1+) of other
+				for i := 1; i < len(other); i++ {
+					if other[i] == head {
+						inTail = true
+						break
+					}
+				}
+				if inTail {
+					break
+				}
+			}
+			if !inTail {
+				candidate = head
+				break
+			}
+		}
+
+		if candidate == nil {
+			// No valid candidate found - inconsistent hierarchy
+			return nil, fmt.Errorf("TypeError: Cannot create a consistent method resolution order (MRO) for bases %s",
+				vm.formatBases(bases))
+		}
+
+		// Add candidate to result
+		result = append(result, candidate)
+
+		// Remove candidate from the head of all lists where it appears
+		for i := range toMerge {
+			if len(toMerge[i]) > 0 && toMerge[i][0] == candidate {
+				toMerge[i] = toMerge[i][1:]
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// formatBases formats a list of base classes for error messages
+func (vm *VM) formatBases(bases []*PyClass) string {
+	if len(bases) == 0 {
+		return ""
+	}
+	names := make([]string, len(bases))
+	for i, b := range bases {
+		names[i] = b.Name
+	}
+	result := names[0]
+	for i := 1; i < len(names); i++ {
+		result += ", " + names[i]
+	}
+	return result
 }
 
 // PyRange represents a range object
@@ -878,7 +966,10 @@ func (vm *VM) run() (Value, error) {
 			vm.push(b)
 
 		case OpLoadConst:
-			// Inline push for constant load
+			// Inline push for constant load - grow stack if needed
+			if frame.SP >= len(frame.Stack) {
+				vm.ensureStack(1)
+			}
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[arg])
 			frame.SP++
 
@@ -1075,6 +1166,7 @@ func (vm *VM) run() (Value, error) {
 			// Load two locals: arg contains packed indices (low byte = first, high byte = second)
 			idx1 := arg & 0xFF
 			idx2 := (arg >> 8) & 0xFF
+			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = frame.Locals[idx1]
 			frame.SP++
 			frame.Stack[frame.SP] = frame.Locals[idx2]
@@ -1084,6 +1176,7 @@ func (vm *VM) run() (Value, error) {
 			// Load local then const: arg contains packed indices
 			localIdx := arg & 0xFF
 			constIdx := (arg >> 8) & 0xFF
+			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = frame.Locals[localIdx]
 			frame.SP++
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
@@ -1569,6 +1662,7 @@ func (vm *VM) run() (Value, error) {
 			// Load const then local: arg contains packed indices (high byte = const, low byte = local)
 			constIdx := (arg >> 8) & 0xFF
 			localIdx := arg & 0xFF
+			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
 			frame.SP++
 			frame.Stack[frame.SP] = frame.Locals[localIdx]
@@ -2195,8 +2289,29 @@ func (vm *VM) run() (Value, error) {
 
 func (vm *VM) push(v Value) {
 	f := vm.frame
+	// Grow stack if needed
+	if f.SP >= len(f.Stack) {
+		newStack := make([]Value, len(f.Stack)*2)
+		copy(newStack, f.Stack)
+		f.Stack = newStack
+	}
 	f.Stack[f.SP] = v
 	f.SP++
+}
+
+// ensureStack ensures the stack has at least n additional slots available
+func (vm *VM) ensureStack(n int) {
+	f := vm.frame
+	needed := f.SP + n
+	if needed > len(f.Stack) {
+		newSize := len(f.Stack) * 2
+		if newSize < needed {
+			newSize = needed + 16
+		}
+		newStack := make([]Value, newSize)
+		copy(newStack, f.Stack)
+		f.Stack = newStack
+	}
 }
 
 func (vm *VM) pop() Value {
