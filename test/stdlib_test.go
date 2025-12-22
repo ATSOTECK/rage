@@ -3,9 +3,9 @@ package test
 import (
 	"testing"
 
-	"github.com/ATSOTECK/oink/internal/compiler"
-	"github.com/ATSOTECK/oink/internal/runtime"
-	"github.com/ATSOTECK/oink/internal/stdlib"
+	"github.com/ATSOTECK/RAGE/internal/compiler"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -307,7 +307,7 @@ version = sys.version
 
 	version := vm.GetGlobal("version").(*runtime.PyString).Value
 	assert.Contains(t, version, "3.14")
-	assert.Contains(t, version, "oink")
+	assert.Contains(t, version, "RAGE")
 }
 
 func TestSysVersionInfo(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/ATSOTECK/oink/internal/model"
+	"github.com/ATSOTECK/RAGE/internal/model"
 )
 
 // Lexer tokenizes Python source code.

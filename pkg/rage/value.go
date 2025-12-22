@@ -3,7 +3,7 @@ package rage
 import (
 	"fmt"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // Value represents a Python value.
@@ -29,9 +29,9 @@ type Value interface {
 // NoneValue represents Python's None
 type NoneValue struct{}
 
-func (v NoneValue) Type() string            { return "NoneType" }
-func (v NoneValue) String() string          { return "None" }
-func (v NoneValue) GoValue() interface{}    { return nil }
+func (v NoneValue) Type() string             { return "NoneType" }
+func (v NoneValue) String() string           { return "None" }
+func (v NoneValue) GoValue() interface{}     { return nil }
 func (v NoneValue) toRuntime() runtime.Value { return runtime.None }
 
 // None is the singleton None value
@@ -42,10 +42,10 @@ type BoolValue struct {
 	value bool
 }
 
-func (v BoolValue) Type() string            { return "bool" }
-func (v BoolValue) String() string          { return fmt.Sprintf("%v", v.value) }
-func (v BoolValue) GoValue() interface{}    { return v.value }
-func (v BoolValue) Bool() bool              { return v.value }
+func (v BoolValue) Type() string             { return "bool" }
+func (v BoolValue) String() string           { return fmt.Sprintf("%v", v.value) }
+func (v BoolValue) GoValue() interface{}     { return v.value }
+func (v BoolValue) Bool() bool               { return v.value }
 func (v BoolValue) toRuntime() runtime.Value { return runtime.NewBool(v.value) }
 
 // True and False are the singleton bool values
@@ -59,10 +59,10 @@ type IntValue struct {
 	value int64
 }
 
-func (v IntValue) Type() string            { return "int" }
-func (v IntValue) String() string          { return fmt.Sprintf("%d", v.value) }
-func (v IntValue) GoValue() interface{}    { return v.value }
-func (v IntValue) Int() int64              { return v.value }
+func (v IntValue) Type() string             { return "int" }
+func (v IntValue) String() string           { return fmt.Sprintf("%d", v.value) }
+func (v IntValue) GoValue() interface{}     { return v.value }
+func (v IntValue) Int() int64               { return v.value }
 func (v IntValue) toRuntime() runtime.Value { return runtime.NewInt(v.value) }
 
 // FloatValue represents a Python float
@@ -70,10 +70,10 @@ type FloatValue struct {
 	value float64
 }
 
-func (v FloatValue) Type() string            { return "float" }
-func (v FloatValue) String() string          { return fmt.Sprintf("%g", v.value) }
-func (v FloatValue) GoValue() interface{}    { return v.value }
-func (v FloatValue) Float() float64          { return v.value }
+func (v FloatValue) Type() string             { return "float" }
+func (v FloatValue) String() string           { return fmt.Sprintf("%g", v.value) }
+func (v FloatValue) GoValue() interface{}     { return v.value }
+func (v FloatValue) Float() float64           { return v.value }
 func (v FloatValue) toRuntime() runtime.Value { return runtime.NewFloat(v.value) }
 
 // StringValue represents a Python str
@@ -81,10 +81,10 @@ type StringValue struct {
 	value string
 }
 
-func (v StringValue) Type() string            { return "str" }
-func (v StringValue) String() string          { return v.value }
-func (v StringValue) GoValue() interface{}    { return v.value }
-func (v StringValue) Str() string             { return v.value }
+func (v StringValue) Type() string             { return "str" }
+func (v StringValue) String() string           { return v.value }
+func (v StringValue) GoValue() interface{}     { return v.value }
+func (v StringValue) Str() string              { return v.value }
 func (v StringValue) toRuntime() runtime.Value { return runtime.NewString(v.value) }
 
 // ListValue represents a Python list
@@ -188,9 +188,9 @@ type UserDataValue struct {
 	value interface{}
 }
 
-func (v UserDataValue) Type() string            { return "userdata" }
-func (v UserDataValue) String() string          { return fmt.Sprintf("<userdata %T>", v.value) }
-func (v UserDataValue) GoValue() interface{}    { return v.value }
+func (v UserDataValue) Type() string             { return "userdata" }
+func (v UserDataValue) String() string           { return fmt.Sprintf("<userdata %T>", v.value) }
+func (v UserDataValue) GoValue() interface{}     { return v.value }
 func (v UserDataValue) toRuntime() runtime.Value { return runtime.NewUserData(v.value) }
 
 // FunctionValue represents a Python function (for introspection)
@@ -199,10 +199,10 @@ type FunctionValue struct {
 	rv   runtime.Value
 }
 
-func (v FunctionValue) Type() string            { return "function" }
-func (v FunctionValue) String() string          { return fmt.Sprintf("<function %s>", v.name) }
-func (v FunctionValue) GoValue() interface{}    { return nil }
-func (v FunctionValue) Name() string            { return v.name }
+func (v FunctionValue) Type() string             { return "function" }
+func (v FunctionValue) String() string           { return fmt.Sprintf("<function %s>", v.name) }
+func (v FunctionValue) GoValue() interface{}     { return nil }
+func (v FunctionValue) Name() string             { return v.name }
 func (v FunctionValue) toRuntime() runtime.Value { return v.rv }
 
 // =====================================

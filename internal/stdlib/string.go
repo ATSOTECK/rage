@@ -3,7 +3,7 @@ package stdlib
 import (
 	"strings"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // String constants matching Python's string module

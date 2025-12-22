@@ -17,7 +17,7 @@ applications without any external dependencies or CGO.
 ## Installation
 
 ```bash
-go get github.com/ATSOTECK/oink
+go get github.com/ATSOTECK/RAGE
 ```
 
 ## Quick Start
@@ -31,7 +31,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/ATSOTECK/oink/pkg/rage"
+    "github.com/ATSOTECK/RAGE/pkg/rage"
 )
 
 func main() {
@@ -59,7 +59,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/ATSOTECK/oink/pkg/rage"
+    "github.com/ATSOTECK/RAGE/pkg/rage"
 )
 
 func main() {
@@ -98,7 +98,7 @@ import (
     "fmt"
     "strings"
 
-    "github.com/ATSOTECK/oink/pkg/rage"
+    "github.com/ATSOTECK/RAGE/pkg/rage"
 )
 
 func main() {
@@ -130,7 +130,7 @@ import (
     "fmt"
     "time"
 
-    "github.com/ATSOTECK/oink/pkg/rage"
+    "github.com/ATSOTECK/RAGE/pkg/rage"
 )
 
 func main() {

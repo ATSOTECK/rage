@@ -1,5 +1,5 @@
 /*
-Package rage provides a public API for embedding the oink Python runtime in Go applications.
+Package rage provides a public API for embedding the RAGE Python runtime in Go applications.
 
 # Quick Start
 

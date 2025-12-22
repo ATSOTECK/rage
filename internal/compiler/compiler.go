@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/ATSOTECK/oink/internal/model"
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/model"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // CompileError represents a compilation error

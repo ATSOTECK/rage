@@ -1,4 +1,4 @@
-// Package stdlib provides standard library modules for the oink Python runtime.
+// Package stdlib provides standard library modules for the RAGE Python runtime.
 package stdlib
 
 // InitAllModules initializes all standard library modules.

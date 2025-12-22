@@ -3,7 +3,7 @@ package stdlib
 import (
 	"fmt"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // InitCollectionsModule registers the collections module
@@ -25,21 +25,21 @@ func InitCollectionsModule() {
 	dequeMT := &runtime.TypeMetatable{
 		Name: "deque",
 		Methods: map[string]runtime.GoFunction{
-			"append":      dequeAppend,
-			"appendleft":  dequeAppendLeft,
-			"pop":         dequePop,
-			"popleft":     dequePopLeft,
-			"extend":      dequeExtend,
-			"extendleft":  dequeExtendLeft,
-			"rotate":      dequeRotate,
-			"clear":       dequeClear,
-			"count":       dequeCount,
-			"index":       dequeIndex,
-			"insert":      dequeInsert,
-			"remove":      dequeRemove,
-			"reverse":     dequeReverse,
-			"copy":        dequeCopy,
-			"maxlen":      dequeMaxlen,
+			"append":     dequeAppend,
+			"appendleft": dequeAppendLeft,
+			"pop":        dequePop,
+			"popleft":    dequePopLeft,
+			"extend":     dequeExtend,
+			"extendleft": dequeExtendLeft,
+			"rotate":     dequeRotate,
+			"clear":      dequeClear,
+			"count":      dequeCount,
+			"index":      dequeIndex,
+			"insert":     dequeInsert,
+			"remove":     dequeRemove,
+			"reverse":    dequeReverse,
+			"copy":       dequeCopy,
+			"maxlen":     dequeMaxlen,
 		},
 	}
 	runtime.RegisterTypeMetatable("deque", dequeMT)

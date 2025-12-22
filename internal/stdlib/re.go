@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // PyPattern represents a compiled regular expression

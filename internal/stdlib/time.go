@@ -3,7 +3,7 @@ package stdlib
 import (
 	"time"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // InitTimeModule registers the time module

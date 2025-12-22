@@ -1,4 +1,4 @@
-module github.com/ATSOTECK/oink
+module github.com/ATSOTECK/RAGE
 
 go 1.25.5
 

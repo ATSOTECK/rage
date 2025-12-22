@@ -1,4 +1,4 @@
-// Package rage provides a public API for embedding the oink Python runtime in Go applications.
+// Package rage provides a public API for embedding the RAGE Python runtime in Go applications.
 //
 // Basic usage:
 //
@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ATSOTECK/oink/internal/compiler"
-	"github.com/ATSOTECK/oink/internal/runtime"
-	"github.com/ATSOTECK/oink/internal/stdlib"
+	"github.com/ATSOTECK/RAGE/internal/compiler"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/stdlib"
 )
 
 // Module represents a standard library module that can be enabled.

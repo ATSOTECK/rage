@@ -3,7 +3,7 @@ package stdlib
 import (
 	"math"
 
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // InitMathModule registers the math module

@@ -3,7 +3,7 @@ package utils
 import (
 	"fmt"
 
-	"github.com/ATSOTECK/oink/internal/model"
+	"github.com/ATSOTECK/RAGE/internal/model"
 )
 
 func PrintAST(node model.Node, indent int) {

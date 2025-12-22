@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/ATSOTECK/oink/internal/model"
+	"github.com/ATSOTECK/RAGE/internal/model"
 )
 
 // Precedence levels for Pratt parsing.

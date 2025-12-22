@@ -4,8 +4,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/ATSOTECK/oink/internal/model"
-	"github.com/ATSOTECK/oink/internal/runtime"
+	"github.com/ATSOTECK/RAGE/internal/model"
+	"github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // Optimizer performs various compile-time optimizations

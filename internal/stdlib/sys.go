@@ -6,7 +6,7 @@ import (
 	goruntime "runtime"
 	"unsafe"
 
-	gopherpy "github.com/ATSOTECK/oink/internal/runtime"
+	gopherpy "github.com/ATSOTECK/RAGE/internal/runtime"
 )
 
 // Version information
@@ -55,15 +55,15 @@ func InitSysModule() {
 
 	// Build implementation info
 	implementation := gopherpy.NewModuleBuilder("sys.implementation").
-		Const("name", gopherpy.NewString("oink")).
+		Const("name", gopherpy.NewString("RAGE")).
 		Const("version", versionInfo).
-		Const("cache_tag", gopherpy.NewString("oink-314")).
+		Const("cache_tag", gopherpy.NewString("RAGE-314")).
 		Build()
 
 	gopherpy.NewModuleBuilder("sys").
 		Doc("System-specific parameters and functions.").
 		// Version info
-		Const("version", gopherpy.NewString("3.14.0 (oink)")).
+		Const("version", gopherpy.NewString("3.14.0 (RAGE)")).
 		Const("version_info", versionInfo).
 		Const("hexversion", gopherpy.NewInt(0x030e00a1)). // 3.14.0a1
 		Const("implementation", implementation).
