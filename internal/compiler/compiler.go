@@ -41,9 +41,10 @@ const (
 
 // Symbol represents a variable in a scope
 type Symbol struct {
-	Name  string
-	Scope SymbolScope
-	Index int
+	Name          string
+	Scope         SymbolScope
+	Index         int
+	OriginalIndex int // Original local index before becoming a cell (-1 if N/A)
 }
 
 // SymbolTable tracks variables in a scope
@@ -51,6 +52,7 @@ type SymbolTable struct {
 	outer     *SymbolTable
 	symbols   map[string]*Symbol
 	freeSyms  []*Symbol
+	cellSyms  []*Symbol // Variables captured by inner functions
 	numDefs   int
 	scopeType ScopeType
 	globals   map[string]bool
@@ -68,7 +70,7 @@ func NewSymbolTable(scopeType ScopeType, outer *SymbolTable) *SymbolTable {
 }
 
 func (st *SymbolTable) Define(name string) *Symbol {
-	sym := &Symbol{Name: name, Scope: ScopeLocal, Index: st.numDefs}
+	sym := &Symbol{Name: name, Scope: ScopeLocal, Index: st.numDefs, OriginalIndex: -1}
 	st.symbols[name] = sym
 	st.numDefs++
 	return sym
@@ -117,7 +119,18 @@ func (st *SymbolTable) Resolve(name string) (*Symbol, bool) {
 			return sym, true
 		}
 
-		// Create a free variable
+		// The outer scope has this variable (either as local, free, or cell)
+		// We need to capture it as a free variable in our scope
+		// And ensure the outer scope makes it available (marks it as a cell if needed)
+
+		// If the outer scope has this as a local, it needs to become a cell
+		// so inner scopes can capture it
+		if sym.Scope == ScopeLocal {
+			// Mark it as a cell in the outer scope so we can capture it
+			st.outer.MarkAsCell(name)
+		}
+
+		// Create a free variable in our scope
 		free := &Symbol{Name: name, Scope: ScopeFree, Index: len(st.freeSyms)}
 		st.freeSyms = append(st.freeSyms, free)
 		st.symbols[name] = free
@@ -125,6 +138,24 @@ func (st *SymbolTable) Resolve(name string) (*Symbol, bool) {
 	}
 
 	return &Symbol{Name: name, Scope: ScopeGlobal, Index: -1}, true
+}
+
+// MarkAsCell marks a variable as needing to be stored in a cell
+// (because it's captured by an inner scope)
+func (st *SymbolTable) MarkAsCell(name string) {
+	if sym, ok := st.symbols[name]; ok {
+		if sym.Scope == ScopeLocal {
+			// Convert from local to cell, preserving original index
+			sym.OriginalIndex = sym.Index // Remember the original local index
+			sym.Scope = ScopeCell
+			sym.Index = len(st.cellSyms)
+			st.cellSyms = append(st.cellSyms, sym)
+		} else if sym.Scope == ScopeFree {
+			// This is a free variable that's also captured by an even-inner scope
+			// It stays as a free variable but also needs to be passed on
+			// The VM will handle this case by looking in the closure
+		}
+	}
 }
 
 // Compiler compiles AST to bytecode
@@ -1684,7 +1715,7 @@ func (c *Compiler) compilePattern(pattern model.Pattern) {
 }
 
 func (c *Compiler) finalizeCode() {
-	// Build VarNames list
+	// Build VarNames list for local variables
 	for name, sym := range c.symbolTable.symbols {
 		if sym.Scope == ScopeLocal && sym.Index >= 0 {
 			// Ensure VarNames has enough capacity
@@ -1692,6 +1723,20 @@ func (c *Compiler) finalizeCode() {
 				c.code.VarNames = append(c.code.VarNames, "")
 			}
 			c.code.VarNames[sym.Index] = name
+		}
+	}
+
+	// Build CellVars list (variables captured by inner functions)
+	// Also add cell variables to VarNames at their original positions
+	// so the VM can match parameter names to cells
+	for _, sym := range c.symbolTable.cellSyms {
+		c.code.CellVars = append(c.code.CellVars, sym.Name)
+		// Add to VarNames at the original position (before it became a cell)
+		if sym.OriginalIndex >= 0 {
+			for len(c.code.VarNames) <= sym.OriginalIndex {
+				c.code.VarNames = append(c.code.VarNames, "")
+			}
+			c.code.VarNames[sym.OriginalIndex] = sym.Name
 		}
 	}
 

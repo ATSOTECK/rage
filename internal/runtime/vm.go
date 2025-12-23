@@ -1012,6 +1012,41 @@ func (vm *VM) run() (Value, error) {
 		case OpDeleteFast:
 			frame.Locals[arg] = nil
 
+		case OpLoadDeref:
+			// Load from closure cell
+			// arg indexes into cells: first CellVars, then FreeVars
+			if arg < len(frame.Cells) {
+				cell := frame.Cells[arg]
+				if cell != nil {
+					vm.push(cell.Value)
+				} else {
+					return nil, fmt.Errorf("cell is nil at index %d", arg)
+				}
+			} else {
+				return nil, fmt.Errorf("cell index %d out of range (have %d cells)", arg, len(frame.Cells))
+			}
+
+		case OpStoreDeref:
+			// Store to closure cell
+			val := vm.pop()
+			if arg < len(frame.Cells) {
+				if frame.Cells[arg] == nil {
+					frame.Cells[arg] = &PyCell{}
+				}
+				frame.Cells[arg].Value = val
+			} else {
+				return nil, fmt.Errorf("cell index %d out of range for store (have %d cells)", arg, len(frame.Cells))
+			}
+
+		case OpLoadClosure:
+			// Load a cell to build a closure tuple
+			// arg indexes into cells (CellVars first, then FreeVars)
+			if arg < len(frame.Cells) {
+				vm.push(frame.Cells[arg])
+			} else {
+				return nil, fmt.Errorf("closure cell index %d out of range", arg)
+			}
+
 		// ==========================================
 		// Specialized opcodes (no argument fetch needed)
 		// ==========================================
@@ -2029,9 +2064,88 @@ func (vm *VM) run() (Value, error) {
 			name := vm.pop().(*PyString).Value
 			code := vm.pop().(*CodeObject)
 			var defaults *PyTuple
+			var closure []*PyCell
+			if arg&8 != 0 {
+				// Has closure - pop tuple of cells
+				closureTuple := vm.pop().(*PyTuple)
+				closure = make([]*PyCell, len(closureTuple.Items))
+				for i, item := range closureTuple.Items {
+					closure[i] = item.(*PyCell)
+				}
+			}
 			if arg&1 != 0 {
 				defaults = vm.pop().(*PyTuple)
 			}
+
+			// If the code has FreeVars but we don't have a closure tuple,
+			// capture the values from the current frame
+			if closure == nil && len(code.FreeVars) > 0 {
+				closure = make([]*PyCell, len(code.FreeVars))
+				for i, varName := range code.FreeVars {
+					// Look up the variable in the enclosing scope
+					var val Value
+
+					// Check if it's in the current frame's CellVars
+					found := false
+					for j, cellName := range frame.Code.CellVars {
+						if cellName == varName && j < len(frame.Cells) && frame.Cells[j] != nil {
+							cell := frame.Cells[j]
+							// If cell value is nil, check if it was stored in locals instead
+							// (this happens when the bytecode uses STORE_FAST before we knew
+							// the variable would be captured)
+							if cell.Value == nil {
+								for k, localName := range frame.Code.VarNames {
+									if localName == varName && k < len(frame.Locals) && frame.Locals[k] != nil {
+										cell.Value = frame.Locals[k]
+										break
+									}
+								}
+							}
+							// Share the same cell
+							closure[i] = cell
+							found = true
+							break
+						}
+					}
+					if found {
+						continue
+					}
+
+					// Check if it's in the current frame's FreeVars (cells after CellVars)
+					numCellVars := len(frame.Code.CellVars)
+					for j, freeName := range frame.Code.FreeVars {
+						cellIdx := numCellVars + j
+						if freeName == varName && cellIdx < len(frame.Cells) && frame.Cells[cellIdx] != nil {
+							// Share the same cell (pass through)
+							closure[i] = frame.Cells[cellIdx]
+							found = true
+							break
+						}
+					}
+					if found {
+						continue
+					}
+
+					// Check locals
+					for j, localName := range frame.Code.VarNames {
+						if localName == varName && j < len(frame.Locals) {
+							val = frame.Locals[j]
+							break
+						}
+					}
+
+					// Check globals if not found in locals
+					if val == nil {
+						val = frame.Globals[varName]
+					}
+					if val == nil && frame.EnclosingGlobals != nil {
+						val = frame.EnclosingGlobals[varName]
+					}
+
+					closure[i] = &PyCell{Value: val}
+				}
+			}
+
 			// Use enclosing globals if available (for methods in class bodies)
 			// so they can access module-level variables
 			fnGlobals := frame.Globals
@@ -2042,6 +2156,7 @@ func (vm *VM) run() (Value, error) {
 				Code:     code,
 				Globals:  fnGlobals,
 				Defaults: defaults,
+				Closure:  closure,
 				Name:     name,
 			}
 			vm.push(fn)
@@ -3640,10 +3755,40 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 		Builtins: vm.builtins,
 	}
 
+	// Set up closure cells
+	// Cells include CellVars (our variables captured by inner functions) and FreeVars (from closure)
+	numCells := len(code.CellVars) + len(code.FreeVars)
+	if numCells > 0 || len(fn.Closure) > 0 {
+		frame.Cells = make([]*PyCell, numCells)
+		// CellVars are new cells for our locals that will be captured
+		for i := 0; i < len(code.CellVars); i++ {
+			frame.Cells[i] = &PyCell{}
+		}
+		// FreeVars come from the function's closure
+		for i, cell := range fn.Closure {
+			frame.Cells[len(code.CellVars)+i] = cell
+		}
+	}
+
 	// Bind arguments to locals
 	for i, arg := range args {
 		if i < len(frame.Locals) {
 			frame.Locals[i] = arg
+		}
+	}
+
+	// If any arguments are CellVars (captured by inner functions), initialize cells with args
+	// CellVars contain names of captured parameters - match by name against VarNames
+	for cellIdx, cellName := range code.CellVars {
+		// Find if this cell var corresponds to a parameter (in first ArgCount VarNames)
+		for argIdx := 0; argIdx < code.ArgCount && argIdx < len(code.VarNames); argIdx++ {
+			if code.VarNames[argIdx] == cellName && argIdx < len(args) {
+				// This parameter is captured, initialize its cell with the argument
+				if cellIdx < len(frame.Cells) && frame.Cells[cellIdx] != nil {
+					frame.Cells[cellIdx].Value = args[argIdx]
+				}
+				break
+			}
 		}
 	}
 
