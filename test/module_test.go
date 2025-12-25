@@ -4,9 +4,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ATSOTECK/RAGE/internal/compiler"
-	"github.com/ATSOTECK/RAGE/internal/runtime"
-	"github.com/ATSOTECK/RAGE/internal/stdlib"
+	"github.com/ATSOTECK/rage/internal/compiler"
+	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

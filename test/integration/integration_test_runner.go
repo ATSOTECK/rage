@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ATSOTECK/RAGE/pkg/rage"
+	"github.com/ATSOTECK/rage/pkg/rage"
 )
 
 // TestResult holds the result of running a single test script

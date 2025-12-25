@@ -3,8 +3,8 @@ package test
 import (
 	"testing"
 
-	"github.com/ATSOTECK/RAGE/internal/compiler"
-	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/compiler"
+	"github.com/ATSOTECK/rage/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

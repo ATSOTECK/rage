@@ -1,4 +1,4 @@
-module github.com/ATSOTECK/RAGE
+module github.com/ATSOTECK/rage
 
 go 1.25.5
 

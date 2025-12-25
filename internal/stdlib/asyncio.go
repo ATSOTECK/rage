@@ -3,7 +3,7 @@ package stdlib
 import (
 	"time"
 
-	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
 // InitAsyncioModule registers the asyncio module

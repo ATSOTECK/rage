@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
 // globalRand is the default random source

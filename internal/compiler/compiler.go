@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/ATSOTECK/RAGE/internal/model"
-	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/model"
+	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
 // CompileError represents a compilation error
@@ -1243,7 +1243,7 @@ func containsYieldInStmt(stmt model.Stmt) bool {
 				return true
 			}
 		}
-	// Note: Don't descend into nested FunctionDef or ClassDef
+		// Note: Don't descend into nested FunctionDef or ClassDef
 	}
 	return false
 }
@@ -1331,7 +1331,7 @@ func containsYieldInExpr(expr model.Expr) bool {
 		return containsYieldInExpr(e.Value)
 	case *model.Await:
 		return containsYieldInExpr(e.Value)
-	// ListComp, SetComp, DictComp, GeneratorExpr create their own scope, don't check
+		// ListComp, SetComp, DictComp, GeneratorExpr create their own scope, don't check
 	}
 	return false
 }

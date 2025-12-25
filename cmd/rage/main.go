@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ATSOTECK/RAGE/internal/compiler"
-	"github.com/ATSOTECK/RAGE/internal/runtime"
-	"github.com/ATSOTECK/RAGE/internal/stdlib"
+	"github.com/ATSOTECK/rage/internal/compiler"
+	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 )
 
 func main() {

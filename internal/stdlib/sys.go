@@ -6,7 +6,7 @@ import (
 	goruntime "runtime"
 	"unsafe"
 
-	gopherpy "github.com/ATSOTECK/RAGE/internal/runtime"
+	gopherpy "github.com/ATSOTECK/rage/internal/runtime"
 )
 
 // Version information

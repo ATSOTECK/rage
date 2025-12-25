@@ -3,7 +3,7 @@ package compiler
 import (
 	"testing"
 
-	"github.com/ATSOTECK/RAGE/internal/model"
+	"github.com/ATSOTECK/rage/internal/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

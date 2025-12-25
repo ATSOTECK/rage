@@ -3,7 +3,7 @@ package stdlib
 import (
 	"fmt"
 
-	"github.com/ATSOTECK/RAGE/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
 // InitCollectionsModule registers the collections module
