@@ -1,11 +1,11 @@
-github.com/AlDanial/cloc v 2.06  T=0.05 s (889.6 files/s, 445080.5 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.05 s (877.0 files/s, 473726.1 lines/s)
 --------------------------------------------------------------------------------------------------
 File                                                           blank        comment           code
 --------------------------------------------------------------------------------------------------
-./internal/runtime/vm.go                                         275            165           2616
+./internal/runtime/vm.go                                         475            372           4511
 ./internal/compiler/parser.go                                    320             40           1728
-./internal/compiler/optimizer.go                                 174            185           1476
-./internal/compiler/compiler.go                                  263            143           1311
+./internal/compiler/optimizer.go                                 199            231           1600
+./internal/compiler/compiler.go                                  278            172           1523
 ./internal/stdlib/collections.go                                 120             77            761
 ./internal/compiler/lexer.go                                     127             47            735
 ./test/stdlib_test.go                                            225             26            714
@@ -13,7 +13,7 @@ File                                                           blank        comm
 ./internal/compiler/parser_test.go                               135              0            629
 ./test/integration_test.go                                       114              0            564
 ./internal/stdlib/re.go                                          100             34            522
-./internal/runtime/opcode.go                                      50             50            456
+./internal/runtime/opcode.go                                      53             57            486
 ./pkg/rage/value.go                                               63             63            386
 ./test/api_test.go                                                87             43            372
 ./internal/compiler/lexer_test.go                                 70              0            362
@@ -21,14 +21,20 @@ File                                                           blank        comm
 ./internal/runtime/api.go                                         81            111            354
 ./internal/stdlib/time.go                                         36             27            351
 ./test/module_test.go                                             71             20            289
+./test/exception_test.go                                          62             15            288
 ./internal/model/token.go                                         20             10            285
-./pkg/rage/rage.go                                                51             94            271
+./pkg/rage/rage.go                                                51             94            275
+./test/inheritance_test.go                                        80             20            259
 ./internal/stdlib/random.go                                       42             24            254
+./test/integration/scripts/06_exceptions.py                       54             72            228
 ./internal/stdlib/math.go                                         36             12            204
 ./internal/stdlib/sys.go                                          24             32            189
+./test/integration/scripts/05_classes.py                          83             53            188
+./internal/stdlib/asyncio.go                                      21             19            154
 ./internal/runtime/module.go                                      33             36            120
 ./test/integration/scripts/02_operators.py                        25             18             98
-./test/integration/scripts/05_classes.py                          44             30             93
+./test/integration/scripts/12_decorators.py                       29             13             91
+./test/integration/scripts/13_asyncio.py                          36             15             74
 ./test/integration/scripts/03_control_flow.py                     15             15             72
 ./test/integration/scripts/04_functions.py                        28             14             61
 ./internal/utils/ast.go                                            4              0             58
@@ -41,10 +47,9 @@ File                                                           blank        comm
 ./test/integration/scripts/09_strings.py                          14             14             31
 ./test/integration/scripts/07_comprehensions.py                   27             56             26
 ./test/bench/calc_pi.py                                            7              5             22
-./internal/stdlib/init.go                                          1              7             10
-./test/integration/scripts/06_exceptions.py                        1             68              2
+./internal/stdlib/init.go                                          1              7             11
 ./pkg/rage/doc.go                                                 47            128              1
 ./test/integration/scripts/basic/hello.py                          0              0              1
 --------------------------------------------------------------------------------------------------
-SUM:                                                            3027           1796          16690
+SUM:                                                            3590           2194          20143
 --------------------------------------------------------------------------------------------------
