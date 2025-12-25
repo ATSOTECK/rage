@@ -127,13 +127,13 @@ const (
 	OpImportStar // Import * from module
 
 	// Exception handling
-	OpSetupExcept     // Setup exception handler (arg: handler offset)
-	OpSetupFinally    // Setup finally handler (arg: handler offset)
-	OpPopExcept       // Pop exception handler from block stack
-	OpEndFinally      // End finally block
-	OpRaiseVarargs    // Raise exception (arg: count 0-3)
-	OpExceptionMatch  // Check if exception matches type for except clause
-	OpClearException  // Clear current exception state (for handler entry)
+	OpSetupExcept    // Setup exception handler (arg: handler offset)
+	OpSetupFinally   // Setup finally handler (arg: handler offset)
+	OpPopExcept      // Pop exception handler from block stack
+	OpEndFinally     // End finally block
+	OpRaiseVarargs   // Raise exception (arg: count 0-3)
+	OpExceptionMatch // Check if exception matches type for except clause
+	OpClearException // Clear current exception state (for handler entry)
 
 	// With statement
 	OpSetupWith   // Setup with statement (arg: cleanup offset)
@@ -188,27 +188,27 @@ const (
 	OpLoadOne   // Load integer 1
 
 	// Specialized arithmetic (no arg needed)
-	OpIncrementFast // Increment local by 1 (arg: local index) - has arg!
-	OpDecrementFast // Decrement local by 1 (arg: local index) - has arg!
-	OpNegateFast      // Negate local in place (arg: local index) - for sign = -sign
-	OpAddConstFast    // Add constant to local (arg: packed local index + const index)
-	OpAccumulateFast  // Add TOS to local (arg: local index) - for x = x + expr
+	OpIncrementFast  // Increment local by 1 (arg: local index) - has arg!
+	OpDecrementFast  // Decrement local by 1 (arg: local index) - has arg!
+	OpNegateFast     // Negate local in place (arg: local index) - for sign = -sign
+	OpAddConstFast   // Add constant to local (arg: packed local index + const index)
+	OpAccumulateFast // Add TOS to local (arg: local index) - for x = x + expr
 
 	// Superinstructions - combined operations
-	OpLoadFastLoadFast   // Load two locals (arg: packed indices)
-	OpLoadFastLoadConst  // Load local then const (arg: packed indices)
-	OpStoreFastLoadFast  // Store then load (arg: packed indices)
-	OpBinaryAddInt       // Add two ints (optimized path)
-	OpBinarySubtractInt  // Subtract two ints (optimized path)
-	OpBinaryMultiplyInt  // Multiply two ints (optimized path)
-	OpBinaryDivideFloat  // True division (always returns float)
-	OpBinaryAddFloat     // Float addition
-	OpCompareLtInt       // Compare less than for ints
-	OpCompareLeInt       // Compare less than or equal for ints
-	OpCompareGtInt       // Compare greater than for ints
-	OpCompareGeInt       // Compare greater than or equal for ints
-	OpCompareEqInt       // Compare equal for ints
-	OpCompareNeInt       // Compare not equal for ints
+	OpLoadFastLoadFast  // Load two locals (arg: packed indices)
+	OpLoadFastLoadConst // Load local then const (arg: packed indices)
+	OpStoreFastLoadFast // Store then load (arg: packed indices)
+	OpBinaryAddInt      // Add two ints (optimized path)
+	OpBinarySubtractInt // Subtract two ints (optimized path)
+	OpBinaryMultiplyInt // Multiply two ints (optimized path)
+	OpBinaryDivideFloat // True division (always returns float)
+	OpBinaryAddFloat    // Float addition
+	OpCompareLtInt      // Compare less than for ints
+	OpCompareLeInt      // Compare less than or equal for ints
+	OpCompareGtInt      // Compare greater than for ints
+	OpCompareGeInt      // Compare greater than or equal for ints
+	OpCompareEqInt      // Compare equal for ints
+	OpCompareNeInt      // Compare not equal for ints
 
 	// Empty collection loading (no arg needed)
 	OpLoadEmptyList  // Load empty list []
@@ -228,10 +228,10 @@ const (
 	OpCompareLtLocalJump // local1 < local2, jump if false
 
 	// Inline builtins (no function call overhead)
-	OpLenList   // len(list) - inline
-	OpLenString // len(string) - inline
-	OpLenTuple  // len(tuple) - inline
-	OpLenDict   // len(dict) - inline
+	OpLenList    // len(list) - inline
+	OpLenString  // len(string) - inline
+	OpLenTuple   // len(tuple) - inline
+	OpLenDict    // len(dict) - inline
 	OpLenGeneric // len() - generic but optimized path
 
 	// More superinstructions
@@ -349,37 +349,37 @@ var OpcodeNames = map[Opcode]string{
 	OpPrintExpr:        "PRINT_EXPR",
 	OpLoadLocals:       "LOAD_LOCALS",
 	// Generator opcodes
-	OpYieldValue:       "YIELD_VALUE",
-	OpYieldFrom:        "YIELD_FROM",
-	OpGenStart:         "GEN_START",
+	OpYieldValue: "YIELD_VALUE",
+	OpYieldFrom:  "YIELD_FROM",
+	OpGenStart:   "GEN_START",
 	// Coroutine opcodes
-	OpGetAwaitable:     "GET_AWAITABLE",
-	OpGetAIter:         "GET_AITER",
-	OpGetANext:         "GET_ANEXT",
+	OpGetAwaitable: "GET_AWAITABLE",
+	OpGetAIter:     "GET_AITER",
+	OpGetANext:     "GET_ANEXT",
 	// Specialized opcodes
-	OpLoadFast0:         "LOAD_FAST_0",
-	OpLoadFast1:         "LOAD_FAST_1",
-	OpLoadFast2:         "LOAD_FAST_2",
-	OpLoadFast3:         "LOAD_FAST_3",
-	OpStoreFast0:        "STORE_FAST_0",
-	OpStoreFast1:        "STORE_FAST_1",
-	OpStoreFast2:        "STORE_FAST_2",
-	OpStoreFast3:        "STORE_FAST_3",
-	OpLoadNone:          "LOAD_NONE",
-	OpLoadTrue:          "LOAD_TRUE",
-	OpLoadFalse:         "LOAD_FALSE",
-	OpLoadZero:          "LOAD_ZERO",
-	OpLoadOne:           "LOAD_ONE",
-	OpIncrementFast:     "INCREMENT_FAST",
-	OpDecrementFast:     "DECREMENT_FAST",
-	OpNegateFast:        "NEGATE_FAST",
-	OpAddConstFast:      "ADD_CONST_FAST",
-	OpAccumulateFast:    "ACCUMULATE_FAST",
-	OpLoadFastLoadFast:  "LOAD_FAST_LOAD_FAST",
-	OpLoadFastLoadConst: "LOAD_FAST_LOAD_CONST",
-	OpStoreFastLoadFast: "STORE_FAST_LOAD_FAST",
-	OpBinaryAddInt:      "BINARY_ADD_INT",
-	OpBinarySubtractInt: "BINARY_SUBTRACT_INT",
+	OpLoadFast0:          "LOAD_FAST_0",
+	OpLoadFast1:          "LOAD_FAST_1",
+	OpLoadFast2:          "LOAD_FAST_2",
+	OpLoadFast3:          "LOAD_FAST_3",
+	OpStoreFast0:         "STORE_FAST_0",
+	OpStoreFast1:         "STORE_FAST_1",
+	OpStoreFast2:         "STORE_FAST_2",
+	OpStoreFast3:         "STORE_FAST_3",
+	OpLoadNone:           "LOAD_NONE",
+	OpLoadTrue:           "LOAD_TRUE",
+	OpLoadFalse:          "LOAD_FALSE",
+	OpLoadZero:           "LOAD_ZERO",
+	OpLoadOne:            "LOAD_ONE",
+	OpIncrementFast:      "INCREMENT_FAST",
+	OpDecrementFast:      "DECREMENT_FAST",
+	OpNegateFast:         "NEGATE_FAST",
+	OpAddConstFast:       "ADD_CONST_FAST",
+	OpAccumulateFast:     "ACCUMULATE_FAST",
+	OpLoadFastLoadFast:   "LOAD_FAST_LOAD_FAST",
+	OpLoadFastLoadConst:  "LOAD_FAST_LOAD_CONST",
+	OpStoreFastLoadFast:  "STORE_FAST_LOAD_FAST",
+	OpBinaryAddInt:       "BINARY_ADD_INT",
+	OpBinarySubtractInt:  "BINARY_SUBTRACT_INT",
 	OpBinaryMultiplyInt:  "BINARY_MULTIPLY_INT",
 	OpBinaryDivideFloat:  "BINARY_DIVIDE_FLOAT",
 	OpBinaryAddFloat:     "BINARY_ADD_FLOAT",
@@ -477,20 +477,20 @@ type Instruction struct {
 
 // CodeObject represents compiled Python code
 type CodeObject struct {
-	Name           string        // Function/class/module name
-	Filename       string        // Source filename
-	FirstLine      int           // First line number in source
-	Code           []byte        // Bytecode instructions
-	Constants      []interface{} // Constant pool
-	Names          []string      // Names used in code
-	VarNames       []string      // Local variable names
-	FreeVars       []string      // Free variables (closures)
-	CellVars       []string      // Variables captured in closures
-	ArgCount       int           // Number of positional arguments
-	KwOnlyArgCount int           // Number of keyword-only arguments
-	Flags          CodeFlags     // Code flags
-	StackSize      int           // Maximum stack size needed
-	LineNoTab      []LineEntry   // Line number table
+	Name           string      // Function/class/module name
+	Filename       string      // Source filename
+	FirstLine      int         // First line number in source
+	Code           []byte      // Bytecode instructions
+	Constants      []any       // Constant pool
+	Names          []string    // Names used in code
+	VarNames       []string    // Local variable names
+	FreeVars       []string    // Free variables (closures)
+	CellVars       []string    // Variables captured in closures
+	ArgCount       int         // Number of positional arguments
+	KwOnlyArgCount int         // Number of keyword-only arguments
+	Flags          CodeFlags   // Code flags
+	StackSize      int         // Maximum stack size needed
+	LineNoTab      []LineEntry // Line number table
 }
 
 // CodeFlags represents flags for code objects

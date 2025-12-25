@@ -106,7 +106,7 @@ The rage.Value interface wraps Python values. Use constructors and type assertio
 	dictVal := rage.Dict("name", rage.String("Alice"), "age", rage.Int(30))
 
 	// Convert from Go values
-	val := rage.FromGo(map[string]interface{}{"key": "value"})
+	val := rage.FromGo(map[string]any{"key": "value"})
 
 	// Type checking
 	if rage.IsInt(val) {

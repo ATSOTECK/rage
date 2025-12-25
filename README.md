@@ -217,8 +217,8 @@ tuple := rage.Tuple(rage.String("a"), rage.String("b"))
 dict := rage.Dict("name", rage.String("Alice"), "age", rage.Int(30))
 
 // From Go values (automatic conversion)
-val := rage.FromGo(map[string]interface{}{
-    "numbers": []interface{}{1, 2, 3},
+val := rage.FromGo(map[string]any{
+    "numbers": []any{1, 2, 3},
     "active":  true,
 })
 ```

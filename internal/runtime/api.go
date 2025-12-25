@@ -22,7 +22,7 @@ func (g *PyGoFunc) String() string { return fmt.Sprintf("<go function %s>", g.Na
 // PyUserData wraps arbitrary Go values for use in Python.
 // Similar to gopher-lua's LUserData.
 type PyUserData struct {
-	Value     interface{}
+	Value     any
 	Metatable *PyDict
 }
 
@@ -72,7 +72,7 @@ func NewDict() *PyDict {
 }
 
 // NewUserData creates a new userdata wrapping a Go value
-func NewUserData(v interface{}) *PyUserData {
+func NewUserData(v any) *PyUserData {
 	return &PyUserData{Value: v}
 }
 
@@ -348,7 +348,7 @@ func (vm *VM) RegisterType(typeName string, constructor GoFunction, methods map[
 // =====================================
 
 // NewUserDataWithMeta creates userdata with a metatable attached
-func (vm *VM) NewUserDataWithMeta(v interface{}, typeName string) *PyUserData {
+func (vm *VM) NewUserDataWithMeta(v any, typeName string) *PyUserData {
 	ud := &PyUserData{Value: v}
 
 	// Create metatable dict with method lookups
@@ -434,7 +434,7 @@ func IsCallable(v Value) bool {
 // =====================================
 
 // ToGoValue converts a Python value to a Go value
-func ToGoValue(v Value) interface{} {
+func ToGoValue(v Value) any {
 	switch val := v.(type) {
 	case *PyNone:
 		return nil
@@ -449,19 +449,19 @@ func ToGoValue(v Value) interface{} {
 	case *PyBytes:
 		return val.Value
 	case *PyList:
-		result := make([]interface{}, len(val.Items))
+		result := make([]any, len(val.Items))
 		for i, item := range val.Items {
 			result[i] = ToGoValue(item)
 		}
 		return result
 	case *PyTuple:
-		result := make([]interface{}, len(val.Items))
+		result := make([]any, len(val.Items))
 		for i, item := range val.Items {
 			result[i] = ToGoValue(item)
 		}
 		return result
 	case *PyDict:
-		result := make(map[interface{}]interface{})
+		result := make(map[any]any)
 		for k, v := range val.Items {
 			result[ToGoValue(k)] = ToGoValue(v)
 		}
@@ -474,7 +474,7 @@ func ToGoValue(v Value) interface{} {
 }
 
 // FromGoValue converts a Go value to a Python value
-func FromGoValue(v interface{}) Value {
+func FromGoValue(v any) Value {
 	if v == nil {
 		return None
 	}
@@ -541,6 +541,6 @@ func (vm *VM) TypeError(expected string, got Value) {
 }
 
 // RaiseError raises a Python-style error
-func (vm *VM) RaiseError(format string, args ...interface{}) {
+func (vm *VM) RaiseError(format string, args ...any) {
 	panic(fmt.Sprintf(format, args...))
 }

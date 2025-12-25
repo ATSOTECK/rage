@@ -9,7 +9,7 @@ import (
 )
 
 // Value represents a Python value
-type Value interface{}
+type Value any
 
 // PyObject is the base interface for all Python objects
 type PyObject interface {
@@ -2681,14 +2681,14 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 				// Found exception handler - restore stack and jump to handler
 				frame.SP = block.Level
 				frame.IP = block.Handler
-				vm.push(exc) // Push exception onto stack for handler
+				vm.push(exc)    // Push exception onto stack for handler
 				return nil, nil // Continue execution at handler
 
 			case BlockFinally:
 				// Must execute finally block first
 				frame.SP = block.Level
 				frame.IP = block.Handler
-				vm.push(exc) // Push exception for finally to potentially re-raise
+				vm.push(exc)    // Push exception for finally to potentially re-raise
 				return nil, nil // Continue execution at finally
 
 			case BlockLoop:
@@ -2750,7 +2750,7 @@ func (vm *VM) wrapGoError(err error) *PyException {
 
 // Type conversions
 
-func (vm *VM) toValue(v interface{}) Value {
+func (vm *VM) toValue(v any) Value {
 	if v == nil {
 		return None
 	}
@@ -4144,14 +4144,14 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	if gen.State == GenClosed {
 		return nil, true, &PyException{
 			TypeName: "StopIteration",
-			Message: "generator already closed",
+			Message:  "generator already closed",
 		}
 	}
 
 	if gen.State == GenRunning {
 		return nil, false, &PyException{
 			TypeName: "ValueError",
-			Message: "generator already executing",
+			Message:  "generator already executing",
 		}
 	}
 
@@ -4159,7 +4159,7 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	if gen.State == GenCreated && value != nil && value != None {
 		return nil, false, &PyException{
 			TypeName: "TypeError",
-			Message: "can't send non-None value to a just-started generator",
+			Message:  "can't send non-None value to a just-started generator",
 		}
 	}
 
@@ -4280,21 +4280,21 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	if coro.State == GenClosed {
 		return nil, true, &PyException{
 			TypeName: "StopIteration",
-			Message: "coroutine already closed",
+			Message:  "coroutine already closed",
 		}
 	}
 
 	if coro.State == GenRunning {
 		return nil, false, &PyException{
 			TypeName: "ValueError",
-			Message: "coroutine already executing",
+			Message:  "coroutine already executing",
 		}
 	}
 
 	if coro.State == GenCreated && value != nil && value != None {
 		return nil, false, &PyException{
 			TypeName: "TypeError",
-			Message: "can't send non-None value to a just-started coroutine",
+			Message:  "can't send non-None value to a just-started coroutine",
 		}
 	}
 

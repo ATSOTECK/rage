@@ -211,7 +211,7 @@ func (c *Compiler) Compile(module *model.Module) (*runtime.CodeObject, []Compile
 	return c.code, c.errors
 }
 
-func (c *Compiler) error(pos model.Position, format string, args ...interface{}) {
+func (c *Compiler) error(pos model.Position, format string, args ...any) {
 	c.errors = append(c.errors, CompileError{
 		Pos:     pos,
 		Message: fmt.Sprintf(format, args...),
@@ -245,7 +245,7 @@ func (c *Compiler) currentOffset() int {
 	return len(c.code.Code)
 }
 
-func (c *Compiler) addConstant(value interface{}) int {
+func (c *Compiler) addConstant(value any) int {
 	for i, v := range c.code.Constants {
 		if v == value {
 			return i
@@ -265,7 +265,7 @@ func (c *Compiler) addName(name string) int {
 	return len(c.code.Names) - 1
 }
 
-func (c *Compiler) emitLoadConst(value interface{}) {
+func (c *Compiler) emitLoadConst(value any) {
 	idx := c.addConstant(value)
 	c.emitArg(runtime.OpLoadConst, idx)
 }

@@ -31,8 +31,8 @@ type MismatchDetail struct {
 	Actual   string `json:"actual"`
 }
 
-// convertValue converts a rage.Value to a Go interface{} for JSON comparison
-func convertValue(v rage.Value) interface{} {
+// convertValue converts a rage.Value to a Go any for JSON comparison
+func convertValue(v rage.Value) any {
 	if v == nil || rage.IsNone(v) {
 		return nil
 	}
@@ -52,21 +52,21 @@ func convertValue(v rage.Value) interface{} {
 		return s
 	case rage.IsList(v):
 		items, _ := rage.AsList(v)
-		result := make([]interface{}, len(items))
+		result := make([]any, len(items))
 		for i, item := range items {
 			result[i] = convertValue(item)
 		}
 		return result
 	case rage.IsTuple(v):
 		items, _ := rage.AsTuple(v)
-		result := make([]interface{}, len(items))
+		result := make([]any, len(items))
 		for i, item := range items {
 			result[i] = convertValue(item)
 		}
 		return result
 	case rage.IsDict(v):
 		items, _ := rage.AsDict(v)
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for k, val := range items {
 			result[k] = convertValue(val)
 		}
@@ -77,7 +77,7 @@ func convertValue(v rage.Value) interface{} {
 }
 
 // normalizeForComparison normalizes values for comparison
-func normalizeForComparison(v interface{}) interface{} {
+func normalizeForComparison(v any) any {
 	switch val := v.(type) {
 	case float64:
 		// JSON numbers are float64, but we might have int64 from runtime
@@ -85,14 +85,14 @@ func normalizeForComparison(v interface{}) interface{} {
 			return int64(val)
 		}
 		return val
-	case []interface{}:
-		result := make([]interface{}, len(val))
+	case []any:
+		result := make([]any, len(val))
 		for i, item := range val {
 			result[i] = normalizeForComparison(item)
 		}
 		return result
-	case map[string]interface{}:
-		result := make(map[string]interface{})
+	case map[string]any:
+		result := make(map[string]any)
 		for k, v := range val {
 			result[k] = normalizeForComparison(v)
 		}
@@ -103,7 +103,7 @@ func normalizeForComparison(v interface{}) interface{} {
 }
 
 // valuesEqual compares two values for equality
-func valuesEqual(expected, actual interface{}) bool {
+func valuesEqual(expected, actual any) bool {
 	expected = normalizeForComparison(expected)
 	actual = normalizeForComparison(actual)
 
@@ -137,8 +137,8 @@ func valuesEqual(expected, actual interface{}) bool {
 	}
 
 	// Handle slice comparison
-	if es, ok := expected.([]interface{}); ok {
-		if as, ok := actual.([]interface{}); ok {
+	if es, ok := expected.([]any); ok {
+		if as, ok := actual.([]any); ok {
 			if len(es) != len(as) {
 				return false
 			}
@@ -153,8 +153,8 @@ func valuesEqual(expected, actual interface{}) bool {
 	}
 
 	// Handle map comparison
-	if em, ok := expected.(map[string]interface{}); ok {
-		if am, ok := actual.(map[string]interface{}); ok {
+	if em, ok := expected.(map[string]any); ok {
+		if am, ok := actual.(map[string]any); ok {
 			if len(em) != len(am) {
 				return false
 			}
@@ -173,7 +173,7 @@ func valuesEqual(expected, actual interface{}) bool {
 }
 
 // runScript executes a Python script and returns the results dictionary
-func runScript(scriptPath string, timeout time.Duration) (map[string]interface{}, error) {
+func runScript(scriptPath string, timeout time.Duration) (map[string]any, error) {
 	// Read script
 	source, err := os.ReadFile(scriptPath)
 	if err != nil {
@@ -202,7 +202,7 @@ func runScript(scriptPath string, timeout time.Duration) (map[string]interface{}
 
 	// Convert to Go map
 	dictItems, _ := rage.AsDict(resultsVal)
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 	for k, v := range dictItems {
 		results[k] = convertValue(v)
 	}
@@ -211,13 +211,13 @@ func runScript(scriptPath string, timeout time.Duration) (map[string]interface{}
 }
 
 // loadExpectedData loads expected results from JSON file
-func loadExpectedData(jsonPath string) (map[string]interface{}, error) {
+func loadExpectedData(jsonPath string) (map[string]any, error) {
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, err
 	}
 
-	var expected map[string]interface{}
+	var expected map[string]any
 	if err := json.Unmarshal(data, &expected); err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func loadExpectedData(jsonPath string) (map[string]interface{}, error) {
 }
 
 // compareResults compares actual results with expected data
-func compareResults(expected, actual map[string]interface{}) ([]MismatchDetail, []string, []string) {
+func compareResults(expected, actual map[string]any) ([]MismatchDetail, []string, []string) {
 	var mismatches []MismatchDetail
 	var missing []string
 	var extra []string

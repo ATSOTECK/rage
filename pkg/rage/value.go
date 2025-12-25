@@ -16,7 +16,7 @@ type Value interface {
 	String() string
 
 	// GoValue returns the underlying Go value
-	GoValue() interface{}
+	GoValue() any
 
 	// internal conversion
 	toRuntime() runtime.Value
@@ -31,7 +31,7 @@ type NoneValue struct{}
 
 func (v NoneValue) Type() string             { return "NoneType" }
 func (v NoneValue) String() string           { return "None" }
-func (v NoneValue) GoValue() interface{}     { return nil }
+func (v NoneValue) GoValue() any             { return nil }
 func (v NoneValue) toRuntime() runtime.Value { return runtime.None }
 
 // None is the singleton None value
@@ -44,7 +44,7 @@ type BoolValue struct {
 
 func (v BoolValue) Type() string             { return "bool" }
 func (v BoolValue) String() string           { return fmt.Sprintf("%v", v.value) }
-func (v BoolValue) GoValue() interface{}     { return v.value }
+func (v BoolValue) GoValue() any             { return v.value }
 func (v BoolValue) Bool() bool               { return v.value }
 func (v BoolValue) toRuntime() runtime.Value { return runtime.NewBool(v.value) }
 
@@ -61,7 +61,7 @@ type IntValue struct {
 
 func (v IntValue) Type() string             { return "int" }
 func (v IntValue) String() string           { return fmt.Sprintf("%d", v.value) }
-func (v IntValue) GoValue() interface{}     { return v.value }
+func (v IntValue) GoValue() any             { return v.value }
 func (v IntValue) Int() int64               { return v.value }
 func (v IntValue) toRuntime() runtime.Value { return runtime.NewInt(v.value) }
 
@@ -72,7 +72,7 @@ type FloatValue struct {
 
 func (v FloatValue) Type() string             { return "float" }
 func (v FloatValue) String() string           { return fmt.Sprintf("%g", v.value) }
-func (v FloatValue) GoValue() interface{}     { return v.value }
+func (v FloatValue) GoValue() any             { return v.value }
 func (v FloatValue) Float() float64           { return v.value }
 func (v FloatValue) toRuntime() runtime.Value { return runtime.NewFloat(v.value) }
 
@@ -83,7 +83,7 @@ type StringValue struct {
 
 func (v StringValue) Type() string             { return "str" }
 func (v StringValue) String() string           { return v.value }
-func (v StringValue) GoValue() interface{}     { return v.value }
+func (v StringValue) GoValue() any             { return v.value }
 func (v StringValue) Str() string              { return v.value }
 func (v StringValue) toRuntime() runtime.Value { return runtime.NewString(v.value) }
 
@@ -96,8 +96,8 @@ func (v ListValue) Type() string { return "list" }
 func (v ListValue) String() string {
 	return fmt.Sprintf("%v", v.GoValue())
 }
-func (v ListValue) GoValue() interface{} {
-	result := make([]interface{}, len(v.items))
+func (v ListValue) GoValue() any {
+	result := make([]any, len(v.items))
 	for i, item := range v.items {
 		result[i] = item.GoValue()
 	}
@@ -128,8 +128,8 @@ func (v TupleValue) Type() string { return "tuple" }
 func (v TupleValue) String() string {
 	return fmt.Sprintf("%v", v.GoValue())
 }
-func (v TupleValue) GoValue() interface{} {
-	result := make([]interface{}, len(v.items))
+func (v TupleValue) GoValue() any {
+	result := make([]any, len(v.items))
 	for i, item := range v.items {
 		result[i] = item.GoValue()
 	}
@@ -160,8 +160,8 @@ func (v DictValue) Type() string { return "dict" }
 func (v DictValue) String() string {
 	return fmt.Sprintf("%v", v.GoValue())
 }
-func (v DictValue) GoValue() interface{} {
-	result := make(map[string]interface{})
+func (v DictValue) GoValue() any {
+	result := make(map[string]any)
 	for k, val := range v.items {
 		result[k] = val.GoValue()
 	}
@@ -185,12 +185,12 @@ func (v DictValue) toRuntime() runtime.Value {
 
 // UserDataValue wraps arbitrary Go values
 type UserDataValue struct {
-	value interface{}
+	value any
 }
 
 func (v UserDataValue) Type() string             { return "userdata" }
 func (v UserDataValue) String() string           { return fmt.Sprintf("<userdata %T>", v.value) }
-func (v UserDataValue) GoValue() interface{}     { return v.value }
+func (v UserDataValue) GoValue() any             { return v.value }
 func (v UserDataValue) toRuntime() runtime.Value { return runtime.NewUserData(v.value) }
 
 // FunctionValue represents a Python function (for introspection)
@@ -201,7 +201,7 @@ type FunctionValue struct {
 
 func (v FunctionValue) Type() string             { return "function" }
 func (v FunctionValue) String() string           { return fmt.Sprintf("<function %s>", v.name) }
-func (v FunctionValue) GoValue() interface{}     { return nil }
+func (v FunctionValue) GoValue() any             { return nil }
 func (v FunctionValue) Name() string             { return v.name }
 func (v FunctionValue) toRuntime() runtime.Value { return v.rv }
 
@@ -243,7 +243,7 @@ func Tuple(items ...Value) Value {
 }
 
 // Dict creates a Python dict from string keys and Values
-func Dict(pairs ...interface{}) Value {
+func Dict(pairs ...any) Value {
 	items := make(map[string]Value)
 	for i := 0; i+1 < len(pairs); i += 2 {
 		if key, ok := pairs[i].(string); ok {
@@ -258,12 +258,12 @@ func Dict(pairs ...interface{}) Value {
 }
 
 // UserData wraps a Go value for use in Python
-func UserData(v interface{}) Value {
+func UserData(v any) Value {
 	return UserDataValue{value: v}
 }
 
 // FromGo converts a Go value to a Python Value
-func FromGo(v interface{}) Value {
+func FromGo(v any) Value {
 	if v == nil {
 		return None
 	}
@@ -299,13 +299,13 @@ func FromGo(v interface{}) Value {
 		return Float(val)
 	case string:
 		return String(val)
-	case []interface{}:
+	case []any:
 		items := make([]Value, len(val))
 		for i, item := range val {
 			items[i] = FromGo(item)
 		}
 		return ListValue{items: items}
-	case map[string]interface{}:
+	case map[string]any:
 		items := make(map[string]Value)
 		for k, v := range val {
 			items[k] = FromGo(v)
@@ -439,7 +439,7 @@ func AsDict(v Value) (map[string]Value, bool) {
 }
 
 // AsUserData returns the userdata value or nil if not userdata
-func AsUserData(v Value) (interface{}, bool) {
+func AsUserData(v Value) (any, bool) {
 	if uv, ok := v.(UserDataValue); ok {
 		return uv.value, true
 	}
