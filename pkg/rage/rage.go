@@ -36,6 +36,7 @@ const (
 	ModuleTime
 	ModuleRe
 	ModuleCollections
+	ModuleAsyncio
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -47,6 +48,7 @@ var AllModules = []Module{
 	ModuleTime,
 	ModuleRe,
 	ModuleCollections,
+	ModuleAsyncio,
 }
 
 // StateOption is a functional option for configuring State creation.
@@ -157,6 +159,8 @@ func initModule(m Module) {
 		stdlib.InitReModule()
 	case ModuleCollections:
 		stdlib.InitCollectionsModule()
+	case ModuleAsyncio:
+		stdlib.InitAsyncioModule()
 	}
 }
 

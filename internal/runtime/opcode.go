@@ -154,6 +154,16 @@ const (
 	OpPrintExpr  // Print expression result (REPL)
 	OpLoadLocals // Load locals dict
 
+	// Generator operations
+	OpYieldValue // Yield value from generator, suspend execution
+	OpYieldFrom  // Delegate to sub-iterator (yield from)
+	OpGenStart   // Generator frame initialization marker
+
+	// Coroutine operations
+	OpGetAwaitable // Get awaitable from object (__await__)
+	OpGetAIter     // Get async iterator (__aiter__)
+	OpGetANext     // Get next from async iterator (__anext__)
+
 	// ==========================================
 	// Specialized/Optimized opcodes (no args)
 	// ==========================================
@@ -338,6 +348,14 @@ var OpcodeNames = map[Opcode]string{
 	OpNop:              "NOP",
 	OpPrintExpr:        "PRINT_EXPR",
 	OpLoadLocals:       "LOAD_LOCALS",
+	// Generator opcodes
+	OpYieldValue:       "YIELD_VALUE",
+	OpYieldFrom:        "YIELD_FROM",
+	OpGenStart:         "GEN_START",
+	// Coroutine opcodes
+	OpGetAwaitable:     "GET_AWAITABLE",
+	OpGetAIter:         "GET_AITER",
+	OpGetANext:         "GET_ANEXT",
 	// Specialized opcodes
 	OpLoadFast0:         "LOAD_FAST_0",
 	OpLoadFast1:         "LOAD_FAST_1",
@@ -424,6 +442,9 @@ func init() {
 		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException, OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
 		OpImportStar,
+		// Generator/coroutine opcodes (no args)
+		OpYieldValue, OpYieldFrom, OpGenStart,
+		OpGetAwaitable, OpGetAIter, OpGetANext,
 		// Specialized no-arg opcodes
 		OpLoadFast0, OpLoadFast1, OpLoadFast2, OpLoadFast3,
 		OpStoreFast0, OpStoreFast1, OpStoreFast2, OpStoreFast3,

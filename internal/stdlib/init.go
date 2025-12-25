@@ -11,6 +11,7 @@ func InitAllModules() {
 	InitTimeModule()
 	InitReModule()
 	InitCollectionsModule()
+	InitAsyncioModule()
 	// Add more module initializations here as they are implemented
 	// InitOS()
 	// InitJSON()

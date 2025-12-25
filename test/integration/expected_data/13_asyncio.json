@@ -1,0 +1,26 @@
+{
+  "async_conditional_false": "no",
+  "async_conditional_true": "yes",
+  "async_locals": 30,
+  "async_loop": 10,
+  "async_pipeline": 11,
+  "async_returns_dict": {
+    "a": 1,
+    "b": 2
+  },
+  "async_returns_list": [
+    1,
+    2,
+    3
+  ],
+  "async_with_args": 42,
+  "basic_async": 42,
+  "chained_async": 16,
+  "gather_results": [
+    1,
+    2,
+    3
+  ],
+  "multiple_awaits": 15,
+  "nested_await": 20
+}

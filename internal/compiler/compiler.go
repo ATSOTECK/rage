@@ -603,21 +603,25 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		c.compileGeneratorExpr(e)
 
 	case *model.Yield:
+		// Yield expression: push value and suspend
 		if e.Value != nil {
 			c.compileExpr(e.Value)
 		} else {
-			c.emitLoadConst(nil)
+			c.emit(runtime.OpLoadNone)
 		}
-		// Yield is handled specially in generator functions
-		// For now, this is a placeholder
+		c.emit(runtime.OpYieldValue)
 
 	case *model.YieldFrom:
+		// Yield from: delegate to sub-iterator
 		c.compileExpr(e.Value)
-		// Yield from is handled specially
+		c.emit(runtime.OpGetIter)
+		c.emit(runtime.OpYieldFrom)
 
 	case *model.Await:
+		// Await: get awaitable and yield from it
 		c.compileExpr(e.Value)
-		// Await is handled specially in async functions
+		c.emit(runtime.OpGetAwaitable)
+		c.emit(runtime.OpYieldFrom)
 
 	case *model.Starred:
 		c.compileExpr(e.Value)
@@ -1176,6 +1180,162 @@ func (c *Compiler) compileWith(s *model.With) {
 
 // Function and class compilation
 
+// containsYield checks if statements contain yield or yield from expressions
+func containsYield(stmts []model.Stmt) bool {
+	for _, stmt := range stmts {
+		if containsYieldInStmt(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsYieldInStmt(stmt model.Stmt) bool {
+	switch s := stmt.(type) {
+	case *model.ExprStmt:
+		return containsYieldInExpr(s.Value)
+	case *model.Assign:
+		return containsYieldInExpr(s.Value)
+	case *model.AugAssign:
+		return containsYieldInExpr(s.Value)
+	case *model.AnnAssign:
+		if s.Value != nil {
+			return containsYieldInExpr(s.Value)
+		}
+	case *model.Return:
+		if s.Value != nil {
+			return containsYieldInExpr(s.Value)
+		}
+	case *model.If:
+		if containsYieldInExpr(s.Test) || containsYield(s.Body) || containsYield(s.OrElse) {
+			return true
+		}
+	case *model.While:
+		if containsYieldInExpr(s.Test) || containsYield(s.Body) || containsYield(s.OrElse) {
+			return true
+		}
+	case *model.For:
+		if containsYieldInExpr(s.Iter) || containsYield(s.Body) || containsYield(s.OrElse) {
+			return true
+		}
+	case *model.With:
+		for _, item := range s.Items {
+			if containsYieldInExpr(item.ContextExpr) {
+				return true
+			}
+		}
+		return containsYield(s.Body)
+	case *model.Try:
+		if containsYield(s.Body) || containsYield(s.OrElse) || containsYield(s.FinalBody) {
+			return true
+		}
+		for _, handler := range s.Handlers {
+			if containsYield(handler.Body) {
+				return true
+			}
+		}
+	case *model.Match:
+		if containsYieldInExpr(s.Subject) {
+			return true
+		}
+		for _, c := range s.Cases {
+			if containsYield(c.Body) {
+				return true
+			}
+		}
+	// Note: Don't descend into nested FunctionDef or ClassDef
+	}
+	return false
+}
+
+func containsYieldInExpr(expr model.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *model.Yield, *model.YieldFrom:
+		return true
+	case *model.BinaryOp:
+		return containsYieldInExpr(e.Left) || containsYieldInExpr(e.Right)
+	case *model.UnaryOp:
+		return containsYieldInExpr(e.Operand)
+	case *model.BoolOp:
+		for _, v := range e.Values {
+			if containsYieldInExpr(v) {
+				return true
+			}
+		}
+	case *model.Compare:
+		if containsYieldInExpr(e.Left) {
+			return true
+		}
+		for _, c := range e.Comparators {
+			if containsYieldInExpr(c) {
+				return true
+			}
+		}
+	case *model.Call:
+		if containsYieldInExpr(e.Func) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if containsYieldInExpr(arg) {
+				return true
+			}
+		}
+		for _, kw := range e.Keywords {
+			if containsYieldInExpr(kw.Value) {
+				return true
+			}
+		}
+	case *model.IfExpr:
+		return containsYieldInExpr(e.Test) || containsYieldInExpr(e.Body) || containsYieldInExpr(e.OrElse)
+	case *model.Attribute:
+		return containsYieldInExpr(e.Value)
+	case *model.Subscript:
+		return containsYieldInExpr(e.Value) || containsYieldInExpr(e.Slice)
+	case *model.Slice:
+		return containsYieldInExpr(e.Lower) || containsYieldInExpr(e.Upper) || containsYieldInExpr(e.Step)
+	case *model.List:
+		for _, el := range e.Elts {
+			if containsYieldInExpr(el) {
+				return true
+			}
+		}
+	case *model.Tuple:
+		for _, el := range e.Elts {
+			if containsYieldInExpr(el) {
+				return true
+			}
+		}
+	case *model.Dict:
+		for _, k := range e.Keys {
+			if containsYieldInExpr(k) {
+				return true
+			}
+		}
+		for _, v := range e.Values {
+			if containsYieldInExpr(v) {
+				return true
+			}
+		}
+	case *model.Set:
+		for _, el := range e.Elts {
+			if containsYieldInExpr(el) {
+				return true
+			}
+		}
+	case *model.Starred:
+		return containsYieldInExpr(e.Value)
+	case *model.NamedExpr:
+		return containsYieldInExpr(e.Value)
+	case *model.Await:
+		return containsYieldInExpr(e.Value)
+	// ListComp, SetComp, DictComp, GeneratorExpr create their own scope, don't check
+	}
+	return false
+}
+
 func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	// Compile decorators
 	for _, dec := range s.Decorators {
@@ -1239,6 +1399,18 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		if s.Args.KwArg != nil {
 			funcCode.Flags |= runtime.FlagVarKeywords
 		}
+	}
+
+	// Check if function is a generator or coroutine
+	isGenerator := containsYield(s.Body)
+	if s.IsAsync {
+		if isGenerator {
+			funcCode.Flags |= runtime.FlagAsyncGenerator
+		} else {
+			funcCode.Flags |= runtime.FlagCoroutine
+		}
+	} else if isGenerator {
+		funcCode.Flags |= runtime.FlagGenerator
 	}
 
 	// Load defaults
