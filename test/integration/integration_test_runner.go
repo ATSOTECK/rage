@@ -184,6 +184,18 @@ func runScript(scriptPath string, timeout time.Duration) (map[string]any, error)
 	state := rage.NewState()
 	defer state.Close()
 
+	// Set up temp directory
+	if strings.Contains(filepath.Base(scriptPath), "file_io") || strings.Contains(filepath.Base(scriptPath), "io_") {
+		// Create temp directory for file I/O tests
+		tmpDir, err := os.MkdirTemp("", "rage_io_test_")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp dir: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+		// Set temp directory as a global variable accessible from Python
+		state.SetGlobal("__test_tmp_dir__", rage.String(tmpDir))
+	}
+
 	// Execute with timeout
 	_, err = state.RunWithTimeout(string(source), timeout)
 	if err != nil {

@@ -37,6 +37,7 @@ const (
 	ModuleRe
 	ModuleCollections
 	ModuleAsyncio
+	ModuleIO // File I/O - intentionally excluded from AllModules for security
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -49,6 +50,7 @@ var AllModules = []Module{
 	ModuleRe,
 	ModuleCollections,
 	ModuleAsyncio,
+	ModuleIO,
 }
 
 // StateOption is a functional option for configuring State creation.
@@ -161,6 +163,8 @@ func initModule(m Module) {
 		stdlib.InitCollectionsModule()
 	case ModuleAsyncio:
 		stdlib.InitAsyncioModule()
+	case ModuleIO:
+		stdlib.InitIOModule()
 	}
 }
 
@@ -170,6 +174,8 @@ func (s *State) EnableModule(m Module) {
 	if !s.enabledModules[m] {
 		initModule(m)
 		s.enabledModules[m] = true
+		// Apply any pending builtins that were registered by initModule
+		s.vm.ApplyPendingBuiltins()
 	}
 }
 

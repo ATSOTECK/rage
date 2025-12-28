@@ -166,9 +166,13 @@ func (vm *VM) RegisterModuleInstance(name string, module *PyModule) {
 	}
 }
 
-// ResetModules clears the loaded modules cache (useful for testing)
+// ResetModules clears the loaded modules cache and related registries.
+// This should be called before initializing a new State to ensure
+// a clean slate (useful for testing and creating isolated states).
 func ResetModules() {
 	loadedModules = make(map[string]*PyModule)
+	ResetPendingBuiltins()
+	ResetTypeMetatables()
 }
 
 // =====================================

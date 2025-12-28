@@ -295,6 +295,12 @@ func NewVM() *VM {
 		checkCounter:  1000, // Initialize counter
 	}
 	vm.initBuiltins()
+
+	// Add pending builtins registered by stdlib modules (e.g., open() from IO module)
+	for name, fn := range GetPendingBuiltins() {
+		vm.builtins[name] = NewGoFunction(name, fn)
+	}
+
 	return vm
 }
 
@@ -750,6 +756,8 @@ func (vm *VM) initExceptionClasses() {
 	osError := makeExc("OSError", exception)
 	makeExc("FileNotFoundError", osError)
 	makeExc("PermissionError", osError)
+	makeExc("FileExistsError", osError)
+	makeExc("IOError", osError) // IOError is an alias for OSError in Python 3
 
 	// ImportError and its subclass
 	importError := makeExc("ImportError", exception)
@@ -2737,6 +2745,20 @@ func (vm *VM) wrapGoError(err error) *PyException {
 		excClass = vm.builtins["ModuleNotFoundError"].(*PyClass)
 	case len(errStr) >= 11 && errStr[:11] == "ImportError":
 		excClass = vm.builtins["ImportError"].(*PyClass)
+	case len(errStr) >= 17 && errStr[:17] == "FileNotFoundError":
+		excClass = vm.builtins["FileNotFoundError"].(*PyClass)
+	case len(errStr) >= 15 && errStr[:15] == "PermissionError":
+		excClass = vm.builtins["PermissionError"].(*PyClass)
+	case len(errStr) >= 15 && errStr[:15] == "FileExistsError":
+		excClass = vm.builtins["FileExistsError"].(*PyClass)
+	case len(errStr) >= 7 && errStr[:7] == "IOError":
+		if excC, ok := vm.builtins["IOError"]; ok {
+			excClass = excC.(*PyClass)
+		} else {
+			excClass = vm.builtins["OSError"].(*PyClass)
+		}
+	case len(errStr) >= 7 && errStr[:7] == "OSError":
+		excClass = vm.builtins["OSError"].(*PyClass)
 	default:
 		excClass = vm.builtins["RuntimeError"].(*PyClass)
 	}
@@ -3499,6 +3521,27 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			if typeName != "" {
 				mt := typeMetatables[typeName]
 				if mt != nil {
+					// Check properties first (like Python @property - called automatically)
+					if mt.Properties != nil {
+						if propGetter, ok := mt.Properties[name]; ok {
+							// Call the property getter with userdata as arg 1
+							ud := o
+							oldStack := vm.frame.Stack
+							oldSP := vm.frame.SP
+							vm.frame.Stack = make([]Value, 17)
+							vm.frame.Stack[0] = ud
+							vm.frame.SP = 1
+							n := propGetter(vm)
+							var result Value = None
+							if n > 0 {
+								// Result was pushed onto stack after ud
+								result = vm.frame.Stack[vm.frame.SP-1]
+							}
+							vm.frame.Stack = oldStack
+							vm.frame.SP = oldSP
+							return result, nil
+						}
+					}
 					if method, ok := mt.Methods[name]; ok {
 						// Capture the userdata and method in closure
 						ud := o

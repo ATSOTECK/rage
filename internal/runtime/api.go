@@ -71,6 +71,11 @@ func NewDict() *PyDict {
 	return &PyDict{Items: make(map[Value]Value)}
 }
 
+// NewBytes creates a Python bytes from a Go byte slice
+func NewBytes(v []byte) *PyBytes {
+	return &PyBytes{Value: v}
+}
+
 // NewUserData creates a new userdata wrapping a Go value
 func NewUserData(v any) *PyUserData {
 	return &PyUserData{Value: v}
@@ -273,10 +278,11 @@ func (vm *VM) RegisterFuncs(funcs map[string]GoFunction) {
 // Type Registration (gopher-lua style metatables)
 // =====================================
 
-// TypeMetatable holds methods for a user-defined type
+// TypeMetatable holds methods and properties for a user-defined type
 type TypeMetatable struct {
-	Name    string
-	Methods map[string]GoFunction
+	Name       string
+	Methods    map[string]GoFunction
+	Properties map[string]GoFunction // Getters that are called automatically (like Python @property)
 }
 
 var typeMetatables = make(map[string]*TypeMetatable)
@@ -315,6 +321,45 @@ func (mt *TypeMetatable) SetMethod(name string, fn GoFunction) {
 func (mt *TypeMetatable) SetMethods(methods map[string]GoFunction) {
 	for name, fn := range methods {
 		mt.Methods[name] = fn
+	}
+}
+
+// ResetTypeMetatables clears the type metatable registry (called by ResetModules)
+func ResetTypeMetatables() {
+	typeMetatables = make(map[string]*TypeMetatable)
+}
+
+// =====================================
+// Pending Builtins Registry
+// =====================================
+
+// pendingBuiltins holds builtins to be registered on new VMs.
+// This allows stdlib modules (initialized before VM creation) to register builtins.
+var pendingBuiltins = make(map[string]GoFunction)
+
+// RegisterPendingBuiltin registers a builtin to be added to new VMs.
+// Use this from stdlib modules that need to add builtin functions.
+func RegisterPendingBuiltin(name string, fn GoFunction) {
+	pendingBuiltins[name] = fn
+}
+
+// GetPendingBuiltins returns all pending builtins (called by NewVM)
+func GetPendingBuiltins() map[string]GoFunction {
+	return pendingBuiltins
+}
+
+// ResetPendingBuiltins clears the pending builtins registry (called by ResetModules)
+func ResetPendingBuiltins() {
+	pendingBuiltins = make(map[string]GoFunction)
+}
+
+// ApplyPendingBuiltins applies any pending builtins to an existing VM.
+// This is useful when enabling modules after VM creation.
+func (vm *VM) ApplyPendingBuiltins() {
+	for name, fn := range pendingBuiltins {
+		if _, exists := vm.builtins[name]; !exists {
+			vm.builtins[name] = NewGoFunction(name, fn)
+		}
 	}
 }
 
