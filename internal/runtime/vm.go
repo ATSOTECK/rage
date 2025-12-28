@@ -196,6 +196,33 @@ type PyInstance struct {
 func (i *PyInstance) Type() string   { return i.Class.Name }
 func (i *PyInstance) String() string { return fmt.Sprintf("<%s object>", i.Class.Name) }
 
+// PyProperty represents a Python property descriptor
+type PyProperty struct {
+	Fget Value
+	Fset Value
+	Fdel Value
+	Doc  string
+}
+
+func (p *PyProperty) Type() string   { return "property" }
+func (p *PyProperty) String() string { return "<property object>" }
+
+// PyClassMethod wraps a function to bind class as first argument
+type PyClassMethod struct {
+	Func Value
+}
+
+func (c *PyClassMethod) Type() string   { return "classmethod" }
+func (c *PyClassMethod) String() string { return "<classmethod object>" }
+
+// PyStaticMethod wraps a function to prevent binding
+type PyStaticMethod struct {
+	Func Value
+}
+
+func (s *PyStaticMethod) Type() string   { return "staticmethod" }
+func (s *PyStaticMethod) String() string { return "<staticmethod object>" }
+
 // PyException represents a Python exception
 type PyException struct {
 	ExcType   *PyClass         // Exception class (e.g., ValueError, TypeError)
@@ -688,6 +715,70 @@ func (vm *VM) initBuiltins() {
 			class.Mro = mro
 
 			return class, nil
+		},
+	}
+
+	// property() creates a property descriptor
+	vm.builtins["property"] = &PyBuiltinFunc{
+		Name: "property",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			prop := &PyProperty{}
+
+			// Handle positional args: property(fget=None, fset=None, fdel=None, doc=None)
+			if len(args) > 0 && args[0] != None {
+				prop.Fget = args[0]
+			}
+			if len(args) > 1 && args[1] != None {
+				prop.Fset = args[1]
+			}
+			if len(args) > 2 && args[2] != None {
+				prop.Fdel = args[2]
+			}
+			if len(args) > 3 {
+				if s, ok := args[3].(*PyString); ok {
+					prop.Doc = s.Value
+				}
+			}
+
+			// Handle keyword args
+			if fget, ok := kwargs["fget"]; ok && fget != None {
+				prop.Fget = fget
+			}
+			if fset, ok := kwargs["fset"]; ok && fset != None {
+				prop.Fset = fset
+			}
+			if fdel, ok := kwargs["fdel"]; ok && fdel != None {
+				prop.Fdel = fdel
+			}
+			if doc, ok := kwargs["doc"]; ok {
+				if s, ok := doc.(*PyString); ok {
+					prop.Doc = s.Value
+				}
+			}
+
+			return prop, nil
+		},
+	}
+
+	// classmethod() wraps a function to bind the class as first argument
+	vm.builtins["classmethod"] = &PyBuiltinFunc{
+		Name: "classmethod",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("classmethod expected 1 argument, got %d", len(args))
+			}
+			return &PyClassMethod{Func: args[0]}, nil
+		},
+	}
+
+	// staticmethod() wraps a function to prevent binding
+	vm.builtins["staticmethod"] = &PyBuiltinFunc{
+		Name: "staticmethod",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("staticmethod expected 1 argument, got %d", len(args))
+			}
+			return &PyStaticMethod{Func: args[0]}, nil
 		},
 	}
 
@@ -3567,14 +3658,118 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}
 		}
 		return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+	case *PyProperty:
+		prop := o
+		switch name {
+		case "setter":
+			return &PyBuiltinFunc{
+				Name: "property.setter",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					if len(args) != 1 {
+						return nil, fmt.Errorf("setter() takes exactly 1 argument")
+					}
+					return &PyProperty{
+						Fget: prop.Fget,
+						Fset: args[0],
+						Fdel: prop.Fdel,
+						Doc:  prop.Doc,
+					}, nil
+				},
+			}, nil
+		case "deleter":
+			return &PyBuiltinFunc{
+				Name: "property.deleter",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					if len(args) != 1 {
+						return nil, fmt.Errorf("deleter() takes exactly 1 argument")
+					}
+					return &PyProperty{
+						Fget: prop.Fget,
+						Fset: prop.Fset,
+						Fdel: args[0],
+						Doc:  prop.Doc,
+					}, nil
+				},
+			}, nil
+		case "getter":
+			return &PyBuiltinFunc{
+				Name: "property.getter",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					if len(args) != 1 {
+						return nil, fmt.Errorf("getter() takes exactly 1 argument")
+					}
+					return &PyProperty{
+						Fget: args[0],
+						Fset: prop.Fset,
+						Fdel: prop.Fdel,
+						Doc:  prop.Doc,
+					}, nil
+				},
+			}, nil
+		case "fget":
+			if prop.Fget != nil {
+				return prop.Fget, nil
+			}
+			return None, nil
+		case "fset":
+			if prop.Fset != nil {
+				return prop.Fset, nil
+			}
+			return None, nil
+		case "fdel":
+			if prop.Fdel != nil {
+				return prop.Fdel, nil
+			}
+			return None, nil
+		case "__doc__":
+			return &PyString{Value: prop.Doc}, nil
+		}
+		return nil, fmt.Errorf("'property' object has no attribute '%s'", name)
 	case *PyInstance:
-		// First check instance dict
+		// Descriptor protocol: First check class MRO for data descriptors (property with setter)
+		// Data descriptors take precedence over instance dict
+		for _, cls := range o.Class.Mro {
+			if val, ok := cls.Dict[name]; ok {
+				if prop, ok := val.(*PyProperty); ok {
+					// Property is a data descriptor - call fget
+					if prop.Fget == nil {
+						return nil, fmt.Errorf("property '%s' has no getter", name)
+					}
+					return vm.call(prop.Fget, []Value{obj}, nil)
+				}
+			}
+		}
+
+		// Then check instance dict
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
 		}
-		// Then check class MRO for methods/attributes
+
+		// Then check class MRO for methods/attributes (non-data descriptors)
 		for _, cls := range o.Class.Mro {
 			if val, ok := cls.Dict[name]; ok {
+				// Handle classmethod - bind class instead of instance
+				if cm, ok := val.(*PyClassMethod); ok {
+					if fn, ok := cm.Func.(*PyFunction); ok {
+						return &PyMethod{Func: fn, Instance: o.Class}, nil
+					}
+					// For non-PyFunction callables, return a wrapper
+					return &PyBuiltinFunc{
+						Name: "bound_classmethod",
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							newArgs := make([]Value, len(args)+1)
+							newArgs[0] = o.Class
+							copy(newArgs[1:], args)
+							return vm.call(cm.Func, newArgs, kwargs)
+						},
+					}, nil
+				}
+
+				// Handle staticmethod - return unwrapped function
+				if sm, ok := val.(*PyStaticMethod); ok {
+					return sm.Func, nil
+				}
+
 				// Bind method if it's a function
 				if fn, ok := val.(*PyFunction); ok {
 					return &PyMethod{Func: fn, Instance: obj}, nil
@@ -3587,6 +3782,34 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		// Check class dict and MRO
 		for _, cls := range o.Mro {
 			if val, ok := cls.Dict[name]; ok {
+				// Handle classmethod - bind with class
+				if cm, ok := val.(*PyClassMethod); ok {
+					if fn, ok := cm.Func.(*PyFunction); ok {
+						return &PyMethod{Func: fn, Instance: o}, nil
+					}
+					// For non-PyFunction callables, return a wrapper
+					return &PyBuiltinFunc{
+						Name: "bound_classmethod",
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							newArgs := make([]Value, len(args)+1)
+							newArgs[0] = o
+							copy(newArgs[1:], args)
+							return vm.call(cm.Func, newArgs, kwargs)
+						},
+					}, nil
+				}
+
+				// Handle staticmethod - return unwrapped function
+				if sm, ok := val.(*PyStaticMethod); ok {
+					return sm.Func, nil
+				}
+
+				// Handle property on class access - return the property object itself
+				// (In Python, accessing a property on the class returns the property object)
+				if _, ok := val.(*PyProperty); ok {
+					return val, nil
+				}
+
 				return val, nil
 			}
 		}
@@ -3784,6 +4007,21 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	switch o := obj.(type) {
 	case *PyInstance:
+		// Check for property with setter in class MRO
+		for _, cls := range o.Class.Mro {
+			if clsVal, ok := cls.Dict[name]; ok {
+				if prop, ok := clsVal.(*PyProperty); ok {
+					if prop.Fset == nil {
+						return fmt.Errorf("property '%s' has no setter", name)
+					}
+					// Call the setter with (instance, value)
+					_, err := vm.call(prop.Fset, []Value{obj, val}, nil)
+					return err
+				}
+				break // Found in class dict but not a property, fall through to instance assignment
+			}
+		}
+		// Not a property, set on instance dict
 		o.Dict[name] = val
 		return nil
 	case *PyClass:

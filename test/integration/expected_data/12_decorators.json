@@ -14,5 +14,31 @@
   "nested_closure": 42,
   "wrapper_modifies_result": [
     42
-  ]
+  ],
+  "property_basic_getter": 5,
+  "property_computed": 12,
+  "property_after_setter": 20,
+  "property_override": "Square",
+  "property_inherited": "Shape",
+  "classmethod_call1": 1,
+  "classmethod_call2": 2,
+  "classmethod_on_instance": 3,
+  "classmethod_final_count": 3,
+  "classmethod_after_reset": 0,
+  "classmethod_factory_x": 0,
+  "classmethod_factory_y": 0,
+  "classmethod_factory2_x": 3,
+  "classmethod_factory2_y": 4,
+  "classmethod_inherit_animal": "Animal",
+  "classmethod_inherit_dog": "Dog",
+  "classmethod_inherit_cat": "Animal",
+  "staticmethod_add": 5,
+  "staticmethod_multiply": 20,
+  "staticmethod_on_instance": 30,
+  "staticmethod_bool_true": true,
+  "staticmethod_bool_false": false,
+  "mixed_property_get": 5,
+  "mixed_property_set": 15,
+  "mixed_classmethod": 100,
+  "mixed_staticmethod": 30
 }

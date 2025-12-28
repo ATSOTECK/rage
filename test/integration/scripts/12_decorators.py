@@ -130,4 +130,187 @@ def square(x):
 
 results["identity_decorator"] = square(7)
 
+# ============================================
+# @property decorator tests
+# ============================================
+
+# Basic property getter
+class Circle:
+    def __init__(self, radius):
+        self._radius = radius
+
+    @property
+    def radius(self):
+        return self._radius
+
+c = Circle(5)
+results["property_basic_getter"] = c.radius
+
+# Property with setter
+class Rectangle:
+    def __init__(self, width, height):
+        self._width = width
+        self._height = height
+
+    @property
+    def width(self):
+        return self._width
+
+    @width.setter
+    def width(self, value):
+        self._width = value
+
+    @property
+    def area(self):
+        return self._width * self._height
+
+r = Rectangle(3, 4)
+results["property_computed"] = r.area
+r.width = 5
+results["property_after_setter"] = r.area
+
+# Property inheritance
+class Shape:
+    @property
+    def name(self):
+        return "Shape"
+
+class Square(Shape):
+    @property
+    def name(self):
+        return "Square"
+
+class Triangle(Shape):
+    pass
+
+sq = Square()
+tr = Triangle()
+results["property_override"] = sq.name
+results["property_inherited"] = tr.name
+
+# ============================================
+# @classmethod decorator tests
+# ============================================
+
+# Basic classmethod
+class Counter:
+    count = 0
+
+    @classmethod
+    def increment(cls):
+        cls.count = cls.count + 1
+        return cls.count
+
+    @classmethod
+    def reset(cls):
+        cls.count = 0
+
+results["classmethod_call1"] = Counter.increment()
+results["classmethod_call2"] = Counter.increment()
+results["classmethod_on_instance"] = Counter().increment()
+results["classmethod_final_count"] = Counter.count
+
+Counter.reset()
+results["classmethod_after_reset"] = Counter.count
+
+# Classmethod as factory
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    @classmethod
+    def origin(cls):
+        return cls(0, 0)
+
+    @classmethod
+    def from_tuple(cls, t):
+        return cls(t[0], t[1])
+
+p1 = Point.origin()
+p2 = Point.from_tuple((3, 4))
+results["classmethod_factory_x"] = p1.x
+results["classmethod_factory_y"] = p1.y
+results["classmethod_factory2_x"] = p2.x
+results["classmethod_factory2_y"] = p2.y
+
+# Classmethod with inheritance
+class Animal:
+    species = "Animal"
+
+    @classmethod
+    def get_species(cls):
+        return cls.species
+
+class Dog(Animal):
+    species = "Dog"
+
+class Cat(Animal):
+    pass
+
+results["classmethod_inherit_animal"] = Animal.get_species()
+results["classmethod_inherit_dog"] = Dog.get_species()
+results["classmethod_inherit_cat"] = Cat.get_species()
+
+# ============================================
+# @staticmethod decorator tests
+# ============================================
+
+# Basic staticmethod
+class MathUtils:
+    @staticmethod
+    def add(a, b):
+        return a + b
+
+    @staticmethod
+    def multiply(a, b):
+        return a * b
+
+    @staticmethod
+    def is_positive(n):
+        return n > 0
+
+# Call on class
+results["staticmethod_add"] = MathUtils.add(2, 3)
+results["staticmethod_multiply"] = MathUtils.multiply(4, 5)
+
+# Call on instance
+m = MathUtils()
+results["staticmethod_on_instance"] = m.add(10, 20)
+results["staticmethod_bool_true"] = MathUtils.is_positive(5)
+results["staticmethod_bool_false"] = MathUtils.is_positive(-3)
+
+# ============================================
+# Mixed decorators in one class
+# ============================================
+
+class MyClass:
+    class_value = 100
+
+    def __init__(self, x):
+        self._x = x
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, value):
+        self._x = value
+
+    @classmethod
+    def get_class_value(cls):
+        return cls.class_value
+
+    @staticmethod
+    def helper(a, b):
+        return a + b
+
+obj = MyClass(5)
+results["mixed_property_get"] = obj.x
+obj.x = 15
+results["mixed_property_set"] = obj.x
+results["mixed_classmethod"] = MyClass.get_class_value()
+results["mixed_staticmethod"] = MyClass.helper(10, 20)
+
 print("Decorators tests completed")
