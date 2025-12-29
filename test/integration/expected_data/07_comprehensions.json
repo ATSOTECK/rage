@@ -128,5 +128,24 @@
     ]
   ],
   "set_comp_filter": 4,
-  "set_comp_simple": 3
+  "set_comp_simple": 3,
+  "walrus_basic": 42,
+  "walrus_expr": 15,
+  "walrus_var_accessible": 10,
+  "walrus_if_value": 7,
+  "walrus_while_sum": 3,
+  "walrus_while_final": 3,
+  "walrus_list_comp": [0, 2, 4, 6],
+  "walrus_list_comp_leaked": 6,
+  "walrus_dict_comp": {
+    "0": 0,
+    "1": 3,
+    "2": 6
+  },
+  "walrus_dict_comp_leaked": 6,
+  "walrus_nested_a": 15,
+  "walrus_nested_b": 5,
+  "walrus_string": 5,
+  "walrus_string_val": "hello",
+  "walrus_in_func": 102
 }

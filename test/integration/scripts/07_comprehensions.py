@@ -106,4 +106,68 @@ results["list_comp_nested"] = [x for row in matrix for x in row]
 results["list_comp_nested_expr"] = [x * y for x in [1, 2, 3] for y in [10, 100]]
 # Expected: [10, 100, 20, 200, 30, 300]
 
+# =====================================
+# Walrus Operator (:=) Tests
+# =====================================
+
+# Basic walrus operator
+results["walrus_basic"] = (walrus_x := 42)
+# Expected: 42
+
+# Walrus in expression
+results["walrus_expr"] = (walrus_y := 10) + 5
+# Expected: 15
+
+# Verify walrus variable is accessible
+results["walrus_var_accessible"] = walrus_y
+# Expected: 10
+
+# Walrus in if condition
+if (walrus_n := 7) > 5:
+    results["walrus_if_value"] = walrus_n
+# Expected: 7
+
+# Walrus in while condition
+walrus_count = 0
+walrus_sum = 0
+while (walrus_val := walrus_count) < 3:
+    walrus_sum = walrus_sum + walrus_val
+    walrus_count = walrus_count + 1
+results["walrus_while_sum"] = walrus_sum
+# Expected: 3 (0 + 1 + 2)
+results["walrus_while_final"] = walrus_val
+# Expected: 3 (last assigned value when condition fails)
+
+# Walrus in list comprehension - variable leaks to enclosing scope
+results["walrus_list_comp"] = [(walrus_i := i * 2) for i in range(4)]
+# Expected: [0, 2, 4, 6]
+results["walrus_list_comp_leaked"] = walrus_i
+# Expected: 6 (last value assigned)
+
+# Walrus in dict comprehension
+results["walrus_dict_comp"] = {k: (walrus_v := k * 3) for k in range(3)}
+# Expected: {0: 0, 1: 3, 2: 6}
+results["walrus_dict_comp_leaked"] = walrus_v
+# Expected: 6 (last value assigned)
+
+# Nested walrus operators
+if (walrus_a := (walrus_b := 5) + 10) > 10:
+    results["walrus_nested_a"] = walrus_a
+    results["walrus_nested_b"] = walrus_b
+# Expected: walrus_a = 15, walrus_b = 5
+
+# Walrus with string
+results["walrus_string"] = len(walrus_s := "hello")
+# Expected: 5
+results["walrus_string_val"] = walrus_s
+# Expected: "hello"
+
+# Walrus in function
+def walrus_func():
+    inner_result = [(walrus_z := j + 100) for j in range(3)]
+    return walrus_z
+
+results["walrus_in_func"] = walrus_func()
+# Expected: 102 (last value: 2 + 100)
+
 print("Comprehension tests completed")

@@ -91,6 +91,72 @@ func (st *SymbolTable) DefineNonlocal(name string) *Symbol {
 	return sym
 }
 
+// GetEnclosingScopeType returns the scope type of the first non-comprehension enclosing scope.
+func (st *SymbolTable) GetEnclosingScopeType() ScopeType {
+	enclosing := st.outer
+	for enclosing != nil && enclosing.scopeType == ScopeComprehension {
+		enclosing = enclosing.outer
+	}
+	if enclosing == nil {
+		return ScopeModule // Default to module if no enclosing scope
+	}
+	return enclosing.scopeType
+}
+
+// DefineInEnclosingScope defines a variable in the first non-comprehension outer scope.
+// This is used for walrus operator (:=) in comprehensions, where the variable should
+// be accessible in the enclosing scope per PEP 572.
+func (st *SymbolTable) DefineInEnclosingScope(name string) *Symbol {
+	// Find the first non-comprehension scope
+	enclosing := st.outer
+	var intermediateScopes []*SymbolTable
+	currentScope := st
+
+	for enclosing != nil && enclosing.scopeType == ScopeComprehension {
+		intermediateScopes = append(intermediateScopes, currentScope)
+		currentScope = enclosing
+		enclosing = enclosing.outer
+	}
+
+	if enclosing == nil {
+		// No enclosing scope found, define locally
+		return st.Define(name)
+	}
+
+	// Define the variable in the enclosing scope
+	var enclosingSym *Symbol
+	if existing, ok := enclosing.symbols[name]; ok {
+		// Variable already exists in enclosing scope
+		enclosingSym = existing
+	} else {
+		// Create new variable in enclosing scope
+		enclosingSym = &Symbol{Name: name, Scope: ScopeLocal, Index: enclosing.numDefs, OriginalIndex: -1}
+		enclosing.symbols[name] = enclosingSym
+		enclosing.numDefs++
+	}
+
+	// Mark it as a cell in the enclosing scope if it's local
+	if enclosingSym.Scope == ScopeLocal {
+		enclosing.MarkAsCell(name)
+	}
+
+	// Create free variable references in all intermediate scopes (including currentScope)
+	// and the original scope (st)
+	allScopes := append([]*SymbolTable{currentScope}, intermediateScopes...)
+	allScopes = append(allScopes, st)
+
+	for _, scope := range allScopes {
+		if _, exists := scope.symbols[name]; !exists {
+			free := &Symbol{Name: name, Scope: ScopeFree, Index: len(scope.freeSyms)}
+			scope.freeSyms = append(scope.freeSyms, free)
+			scope.symbols[name] = free
+		}
+	}
+
+	// Return the symbol from our scope (st) for storing
+	return st.symbols[name]
+}
+
 func (st *SymbolTable) Resolve(name string) (*Symbol, bool) {
 	// Check if declared global
 	if st.globals[name] {
@@ -630,7 +696,22 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 	case *model.NamedExpr:
 		c.compileExpr(e.Value)
 		c.emit(runtime.OpDup)
-		c.compileStore(e.Target)
+		// In comprehension scope, walrus operator stores to enclosing scope (PEP 572)
+		if c.symbolTable.scopeType == ScopeComprehension {
+			// Find the enclosing non-comprehension scope type
+			enclosingType := c.symbolTable.GetEnclosingScopeType()
+			if enclosingType == ScopeModule {
+				// For module-level, store as global
+				idx := c.addName(e.Target.Name)
+				c.emitArg(runtime.OpStoreGlobal, idx)
+			} else {
+				// For function-level, use cells/deref
+				sym := c.symbolTable.DefineInEnclosingScope(e.Target.Name)
+				c.emitArg(runtime.OpStoreDeref, sym.Index)
+			}
+		} else {
+			c.compileStore(e.Target)
+		}
 
 	default:
 		c.error(expr.Pos(), "unsupported expression type: %T", expr)

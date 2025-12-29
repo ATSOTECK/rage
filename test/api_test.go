@@ -500,3 +500,157 @@ func TestCancelledErrorMessage(t *testing.T) {
 	err := &runtime.CancelledError{}
 	assert.Contains(t, err.Error(), "cancelled")
 }
+
+// =====================================
+// Walrus Operator Tests
+// =====================================
+
+// TestWalrusBasic tests basic walrus operator usage
+func TestWalrusBasic(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+result = (x := 10) + 5
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	result := vm.GetGlobal("result")
+	x := vm.GetGlobal("x")
+	assert.Equal(t, int64(15), result.(*runtime.PyInt).Value)
+	assert.Equal(t, int64(10), x.(*runtime.PyInt).Value)
+}
+
+// TestWalrusInIf tests walrus operator in if condition
+func TestWalrusInIf(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+result = "not set"
+if (n := 5) > 3:
+    result = n
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	result := vm.GetGlobal("result")
+	n := vm.GetGlobal("n")
+	assert.Equal(t, int64(5), result.(*runtime.PyInt).Value)
+	assert.Equal(t, int64(5), n.(*runtime.PyInt).Value)
+}
+
+// TestWalrusInWhile tests walrus operator in while condition
+func TestWalrusInWhile(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+count = 0
+iterations = 0
+while (val := count) < 3:
+    iterations = iterations + 1
+    count = count + 1
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	iterations := vm.GetGlobal("iterations")
+	val := vm.GetGlobal("val")
+	assert.Equal(t, int64(3), iterations.(*runtime.PyInt).Value)
+	// val gets the value of count when the condition check fails (count=3)
+	assert.Equal(t, int64(3), val.(*runtime.PyInt).Value)
+}
+
+// TestWalrusInListComprehension tests walrus operator leaking from list comprehension
+func TestWalrusInListComprehension(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+x = [(y := i * 2) for i in range(3)]
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	// y should be accessible and have the last value (4)
+	y := vm.GetGlobal("y")
+	assert.Equal(t, int64(4), y.(*runtime.PyInt).Value)
+
+	// x should be [0, 2, 4]
+	x := vm.GetGlobal("x").(*runtime.PyList)
+	assert.Equal(t, 3, len(x.Items))
+	assert.Equal(t, int64(0), x.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(2), x.Items[1].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(4), x.Items[2].(*runtime.PyInt).Value)
+}
+
+// TestWalrusInDictComprehension tests walrus operator leaking from dict comprehension
+func TestWalrusInDictComprehension(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+d = {k: (v := k * 2) for k in range(3)}
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	// v should be accessible and have the last value (4)
+	v := vm.GetGlobal("v")
+	assert.Equal(t, int64(4), v.(*runtime.PyInt).Value)
+}
+
+// TestWalrusInFunctionComprehension tests walrus in comprehension inside a function
+func TestWalrusInFunctionComprehension(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+def test_func():
+    result = [(z := j + 10) for j in range(3)]
+    return z
+
+final = test_func()
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	final := vm.GetGlobal("final")
+	assert.Equal(t, int64(12), final.(*runtime.PyInt).Value)
+}
+
+// TestWalrusNested tests nested walrus operators
+func TestWalrusNested(t *testing.T) {
+	vm := runtime.NewVM()
+
+	source := `
+if (a := (b := 10) + 5) > 10:
+    result = a
+`
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	a := vm.GetGlobal("a")
+	b := vm.GetGlobal("b")
+	result := vm.GetGlobal("result")
+	assert.Equal(t, int64(15), a.(*runtime.PyInt).Value)
+	assert.Equal(t, int64(10), b.(*runtime.PyInt).Value)
+	assert.Equal(t, int64(15), result.(*runtime.PyInt).Value)
+}
