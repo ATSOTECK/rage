@@ -351,4 +351,133 @@ finally:
 results["finally_after_handler_raises"] = finally_after_reraise
 results["outer_finally_after_handler_raises"] = outer_finally
 
+# =====================================
+# Exception from function call caught by caller
+# =====================================
+
+def raise_in_func():
+    raise ValueError
+
+func_exc_caught = False
+try:
+    raise_in_func()
+except ValueError:
+    func_exc_caught = True
+results["func_exception_caught_by_caller"] = func_exc_caught
+
+# =====================================
+# Nested function call exception
+# =====================================
+
+def inner_raise():
+    raise KeyError
+
+def outer_call():
+    inner_raise()
+
+nested_func_exc_caught = False
+try:
+    outer_call()
+except KeyError:
+    nested_func_exc_caught = True
+results["nested_func_exception_caught"] = nested_func_exc_caught
+
+# =====================================
+# Generator.throw() - exception caught inside generator
+# =====================================
+
+def gen_catches_throw():
+    try:
+        yield 1
+        yield 2
+    except ValueError:
+        yield "caught"
+    yield 3
+
+g = gen_catches_throw()
+gen_throw_results = []
+for v in g:
+    gen_throw_results.append(v)
+    if v == 1:
+        gen_throw_results.append(g.throw(ValueError, "test"))
+        break
+results["gen_throw_caught_first"] = gen_throw_results[0]
+results["gen_throw_caught_result"] = gen_throw_results[1]
+
+# =====================================
+# Generator.throw() - exception propagates to caller
+# =====================================
+
+def gen_no_catch():
+    yield 1
+    yield 2
+    yield 3
+
+g2 = gen_no_catch()
+gen_throw_propagated = False
+for v in g2:
+    if v == 1:
+        try:
+            g2.throw(RuntimeError, "uncaught")
+        except RuntimeError:
+            gen_throw_propagated = True
+        break
+results["gen_throw_propagates_to_caller"] = gen_throw_propagated
+
+# =====================================
+# Generator.close() runs finally block
+# =====================================
+
+gen_finally_ran = False
+def gen_with_finally():
+    global gen_finally_ran
+    try:
+        yield 1
+        yield 2
+    finally:
+        gen_finally_ran = True
+
+g3 = gen_with_finally()
+for v in g3:
+    break
+g3.close()
+results["gen_close_runs_finally"] = gen_finally_ran
+
+# =====================================
+# Generator with try/except inside - direct raise
+# =====================================
+
+def gen_internal_except():
+    try:
+        yield 1
+        raise ValueError
+    except ValueError:
+        yield "internal_caught"
+    yield 3
+
+gen_internal_results = []
+for v in gen_internal_except():
+    gen_internal_results.append(v)
+results["gen_internal_except_first"] = gen_internal_results[0]
+results["gen_internal_except_caught"] = gen_internal_results[1]
+results["gen_internal_except_last"] = gen_internal_results[2]
+
+# =====================================
+# Generator.throw() into closed generator raises
+# =====================================
+
+def simple_gen():
+    yield 1
+
+g4 = simple_gen()
+for v in g4:
+    pass  # Exhaust generator
+
+throw_into_closed_raised = False
+try:
+    g4.throw(ValueError, "to closed")
+except:
+    throw_into_closed_raised = True
+results["throw_into_closed_gen_raises"] = throw_into_closed_raised
+
 print("Exceptions tests completed")

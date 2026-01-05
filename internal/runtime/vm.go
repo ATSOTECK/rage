@@ -295,6 +295,9 @@ type VM struct {
 	// Exception handling state
 	currentException *PyException // Currently active exception being handled
 	lastException    *PyException // Last raised exception (for bare raise)
+
+	// Generator exception injection
+	generatorThrow *PyException // Exception to throw into generator on resume
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
@@ -312,6 +315,16 @@ type CancelledError struct{}
 func (e *CancelledError) Error() string {
 	return "script execution was cancelled"
 }
+
+// exceptionHandledInOuterFrame is a sentinel error to signal that an exception
+// was handled in an outer frame and execution should continue there
+type exceptionHandledInOuterFrame struct{}
+
+func (e *exceptionHandledInOuterFrame) Error() string {
+	return "exception handled in outer frame"
+}
+
+var errExceptionHandledInOuterFrame = &exceptionHandledInOuterFrame{}
 
 // NewVM creates a new virtual machine
 func NewVM() *VM {
@@ -2311,6 +2324,30 @@ func (vm *VM) run() (Value, error) {
 			callable := vm.pop()
 			result, err := vm.call(callable, args, nil)
 			if err != nil {
+				// Check if exception was already handled in an outer frame
+				if err == errExceptionHandledInOuterFrame {
+					// Check if the handler is in THIS frame
+					if vm.frame == frame {
+						// Handler is in this frame, continue from handler
+						continue
+					}
+					// Handler is in an even outer frame, propagate
+					return nil, err
+				}
+				// Check if it's a Python exception that can be handled
+				if pyExc, ok := err.(*PyException); ok {
+					_, handleErr := vm.handleException(pyExc)
+					if handleErr != nil {
+						// No handler found, propagate exception
+						return nil, handleErr
+					}
+					// Handler found - check if it's in this frame
+					if vm.frame != frame {
+						return nil, errExceptionHandledInOuterFrame
+					}
+					// Handler is in current frame, continue
+					continue
+				}
 				return nil, err
 			}
 			vm.push(result)
@@ -2331,6 +2368,24 @@ func (vm *VM) run() (Value, error) {
 			callable := vm.pop()
 			result, err := vm.call(callable, args, kwargs)
 			if err != nil {
+				// Check if exception was already handled in an outer frame
+				if err == errExceptionHandledInOuterFrame {
+					if vm.frame == frame {
+						continue
+					}
+					return nil, err
+				}
+				// Check if it's a Python exception that can be handled
+				if pyExc, ok := err.(*PyException); ok {
+					_, handleErr := vm.handleException(pyExc)
+					if handleErr != nil {
+						return nil, handleErr
+					}
+					if vm.frame != frame {
+						return nil, errExceptionHandledInOuterFrame
+					}
+					continue
+				}
 				return nil, err
 			}
 			vm.push(result)
@@ -2540,13 +2595,18 @@ func (vm *VM) run() (Value, error) {
 			exc.Traceback = vm.buildTraceback()
 
 			// Try to find an exception handler
-			result, err := vm.handleException(exc)
+			_, err = vm.handleException(exc)
 			if err != nil {
 				// No handler found, propagate exception
 				return nil, err
 			}
-			// Handler found, continue execution
-			_ = result
+			// Handler found - check if we're still in the same frame
+			if vm.frame != frame {
+				// Handler is in an outer frame, return sentinel to signal caller
+				return nil, errExceptionHandledInOuterFrame
+			}
+			// Handler is in current frame, update and continue
+			frame = vm.frame
 
 		case OpImportName:
 			name := frame.Code.Names[arg]
@@ -4324,8 +4384,10 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	// Execute
 	result, err := vm.run()
 
-	// Pop frame
-	vm.frame = oldFrame
+	// Pop frame - but only if exception handling didn't already unwind past us
+	if err != errExceptionHandledInOuterFrame {
+		vm.frame = oldFrame
+	}
 
 	return result, err
 }
@@ -4519,15 +4581,59 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 		}
 	}
 
-	// TODO: Implement throwing exception at current yield point
-	gen.State = GenClosed
+	// Generator is suspended at a yield point - throw the exception there
+	// Create the exception to throw
 	excMsg := "exception"
 	if str, ok := excValue.(*PyString); ok {
 		excMsg = str.Value
+	} else if excValue != nil && excValue != None {
+		excMsg = fmt.Sprintf("%v", excValue)
 	}
-	return nil, true, &PyException{
+
+	exc := &PyException{
 		TypeName: fmt.Sprintf("%v", excType),
 		Message:  excMsg,
+	}
+
+	// Check if excType is a class and set ExcType appropriately
+	if cls, ok := excType.(*PyClass); ok {
+		exc.ExcType = cls
+	}
+
+	// Set the pending exception on the VM for the generator to handle
+	vm.generatorThrow = exc
+	gen.State = GenRunning
+
+	// Save current frame and switch to generator's frame
+	oldFrame := vm.frame
+	oldFrames := vm.frames
+
+	vm.frame = gen.Frame
+	vm.frames = []*Frame{gen.Frame}
+
+	// Run until yield or return (exception will be handled in runWithYieldSupport)
+	result, yielded, err := vm.runGenerator()
+
+	// Restore old frame
+	vm.frame = oldFrame
+	vm.frames = oldFrames
+
+	if err != nil {
+		gen.State = GenClosed
+		return nil, true, err
+	}
+
+	if yielded {
+		gen.State = GenSuspended
+		return result, false, nil
+	}
+
+	// Generator returned (finished)
+	gen.State = GenClosed
+	return nil, true, &PyException{
+		TypeName: "StopIteration",
+		Message:  "generator finished",
+		Args:     &PyTuple{Items: []Value{result}},
 	}
 }
 
@@ -4626,6 +4732,22 @@ func (vm *VM) runGenerator() (Value, bool, error) {
 // runWithYieldSupport is like run() but returns (value, yielded, error) to support generators
 func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 	frame := vm.frame
+
+	// Check for pending exception from generator.throw()
+	if vm.generatorThrow != nil {
+		exc := vm.generatorThrow
+		vm.generatorThrow = nil // Clear it
+
+		// Handle the exception - this will look for handlers in the block stack
+		_, err := vm.handleException(exc)
+		if err != nil {
+			// No handler found, propagate the exception
+			return nil, false, err
+		}
+		// Handler found, frame.IP was updated to handler address
+		// Continue execution at the handler
+		frame = vm.frame // Update frame reference in case it changed
+	}
 
 	for frame.IP < len(frame.Code.Code) {
 		// Check for timeout/cancellation periodically
@@ -5006,6 +5128,25 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		callable := vm.pop()
 		result, err := vm.call(callable, args, nil)
 		if err != nil {
+			// Check if exception was already handled in an outer frame
+			if err == errExceptionHandledInOuterFrame {
+				// Exception handler was found, but it's in the generator's frame
+				// Let runWithYieldSupport continue from the handler
+				return nil, nil
+			}
+			// Check if it's a Python exception that can be handled
+			if pyExc, ok := err.(*PyException); ok {
+				_, handleErr := vm.handleException(pyExc)
+				if handleErr != nil {
+					return nil, handleErr
+				}
+				// Handler found - if it's in this frame, continue from handler
+				// Otherwise, propagate the sentinel
+				if vm.frame != frame {
+					return nil, errExceptionHandledInOuterFrame
+				}
+				return nil, nil
+			}
 			return nil, err
 		}
 		vm.push(result)
@@ -5585,6 +5726,86 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		result := !vm.equal(a, b)
 		if !result {
 			frame.IP = arg
+		}
+
+	// Exception handling opcodes
+	case OpSetupExcept:
+		block := Block{
+			Type:    BlockExcept,
+			Handler: arg,
+			Level:   frame.SP,
+		}
+		frame.BlockStack = append(frame.BlockStack, block)
+
+	case OpSetupFinally:
+		block := Block{
+			Type:    BlockFinally,
+			Handler: arg,
+			Level:   frame.SP,
+		}
+		frame.BlockStack = append(frame.BlockStack, block)
+
+	case OpPopExcept:
+		if len(frame.BlockStack) > 0 {
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+		}
+		vm.currentException = nil
+
+	case OpClearException:
+		vm.currentException = nil
+
+	case OpEndFinally:
+		if vm.currentException != nil {
+			exc := vm.currentException
+			vm.currentException = nil
+			_, err := vm.handleException(exc)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+	case OpExceptionMatch:
+		// Check if exception matches type for except clause
+		// Stack: [..., exception, type] -> [..., exception, bool]
+		excType := vm.pop()
+		exc := vm.top() // Peek, don't pop
+		if pyExc, ok := exc.(*PyException); ok {
+			if vm.exceptionMatches(pyExc, excType) {
+				vm.push(True)
+			} else {
+				vm.push(False)
+			}
+		} else {
+			vm.push(False)
+		}
+
+	case OpRaiseVarargs:
+		var exc *PyException
+		if arg == 0 {
+			// Bare raise - re-raise current exception
+			if vm.lastException != nil {
+				exc = vm.lastException
+			} else {
+				return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
+			}
+		} else if arg == 1 {
+			// raise exc
+			excVal := vm.pop()
+			exc = vm.createException(excVal, nil)
+		} else {
+			// raise exc from cause (ignore cause for now)
+			cause := vm.pop()
+			excVal := vm.pop()
+			exc = vm.createException(excVal, cause)
+		}
+		exc.Traceback = vm.buildTraceback()
+		_, err := vm.handleException(exc)
+		if err != nil {
+			return nil, err
+		}
+		// Check if handler is in current frame or outer frame
+		if vm.frame != frame {
+			return nil, errExceptionHandledInOuterFrame
 		}
 
 	default:
