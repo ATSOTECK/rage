@@ -43,9 +43,9 @@ func NewFloat(v float64) *PyFloat {
 	return &PyFloat{Value: v}
 }
 
-// NewString creates a Python str from a Go string
+// NewString creates a Python str from a Go string, using interning for short strings
 func NewString(v string) *PyString {
-	return &PyString{Value: v}
+	return InternString(v)
 }
 
 // NewBool creates a Python bool from a Go bool

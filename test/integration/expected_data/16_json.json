@@ -17,7 +17,7 @@
   "dumps_newline": "\"line1\\nline2\"",
   "dumps_none": "null",
   "dumps_quote": "\"say \\\"hello\\\"\"",
-  "dumps_sort_keys_valid": false,
+  "dumps_sort_keys_valid": true,
   "dumps_string": "\"hello\"",
   "dumps_tab": "\"col1\\tcol2\"",
   "dumps_true": "true",
@@ -73,8 +73,8 @@
   "loads_with_spaces": {
     "x": 1
   },
-  "roundtrip_complex": false,
-  "roundtrip_dict": false,
+  "roundtrip_complex": true,
+  "roundtrip_dict": true,
   "roundtrip_list": true,
   "type_float_preserved": true,
   "type_int_preserved": true,

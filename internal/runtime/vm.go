@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -79,6 +80,57 @@ func MakeInt(v int64) *PyInt {
 	return &PyInt{Value: v}
 }
 
+// String interning for common/short strings
+// This reduces memory usage and speeds up string comparisons
+var (
+	stringInternPool     = make(map[string]*PyString)
+	stringInternMaxLen   = 64 // Only intern strings up to this length
+	stringInternPoolLock sync.RWMutex
+)
+
+// Common strings that are pre-interned
+var commonStrings = []string{
+	"", "__init__", "__str__", "__repr__", "__eq__", "__ne__", "__lt__", "__le__",
+	"__gt__", "__ge__", "__hash__", "__len__", "__iter__", "__next__", "__getitem__",
+	"__setitem__", "__delitem__", "__contains__", "__call__", "__add__", "__sub__",
+	"__mul__", "__truediv__", "__floordiv__", "__mod__", "__pow__", "__and__",
+	"__or__", "__xor__", "__neg__", "__pos__", "__abs__", "__invert__",
+	"self", "None", "True", "False", "args", "kwargs", "name", "value",
+	"key", "item", "index", "result", "data", "error", "message", "type",
+}
+
+func init() {
+	// Pre-intern common strings
+	for _, s := range commonStrings {
+		stringInternPool[s] = &PyString{Value: s}
+	}
+}
+
+// InternString returns an interned PyString for short strings
+// This allows pointer comparison for equality in many cases
+func InternString(s string) *PyString {
+	if len(s) > stringInternMaxLen {
+		return &PyString{Value: s}
+	}
+	stringInternPoolLock.RLock()
+	if interned, ok := stringInternPool[s]; ok {
+		stringInternPoolLock.RUnlock()
+		return interned
+	}
+	stringInternPoolLock.RUnlock()
+
+	// Not in pool, add it
+	stringInternPoolLock.Lock()
+	defer stringInternPoolLock.Unlock()
+	// Double-check after acquiring write lock
+	if interned, ok := stringInternPool[s]; ok {
+		return interned
+	}
+	interned := &PyString{Value: s}
+	stringInternPool[s] = interned
+	return interned
+}
+
 // intPow computes base^exp using binary exponentiation to avoid float precision loss
 func intPow(base, exp int64) int64 {
 	if exp == 0 {
@@ -108,6 +160,74 @@ func isHashable(v Value) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// hashValue computes a hash for a Python value
+// Only hashable types should be passed to this function
+func hashValue(v Value) uint64 {
+	switch val := v.(type) {
+	case *PyNone:
+		return 0x9e3779b97f4a7c15 // FNV offset basis
+	case *PyBool:
+		if val.Value {
+			return 1
+		}
+		return 0
+	case *PyInt:
+		// Use FNV-1a style hashing for integers
+		h := uint64(val.Value)
+		h ^= h >> 33
+		h *= 0xff51afd7ed558ccd
+		h ^= h >> 33
+		h *= 0xc4ceb9fe1a85ec53
+		h ^= h >> 33
+		return h
+	case *PyFloat:
+		// Hash the bit representation of the float
+		bits := math.Float64bits(val.Value)
+		h := bits
+		h ^= h >> 33
+		h *= 0xff51afd7ed558ccd
+		h ^= h >> 33
+		return h
+	case *PyString:
+		// FNV-1a hash for strings
+		h := uint64(0xcbf29ce484222325)
+		for i := 0; i < len(val.Value); i++ {
+			h ^= uint64(val.Value[i])
+			h *= 0x100000001b3
+		}
+		return h
+	case *PyBytes:
+		h := uint64(0xcbf29ce484222325)
+		for i := 0; i < len(val.Value); i++ {
+			h ^= uint64(val.Value[i])
+			h *= 0x100000001b3
+		}
+		return h
+	case *PyTuple:
+		// Hash tuple by combining element hashes
+		h := uint64(0xcbf29ce484222325)
+		for _, item := range val.Items {
+			itemHash := hashValue(item)
+			h ^= itemHash
+			h *= 0x100000001b3
+		}
+		return h
+	case *PyClass:
+		// Classes hash by identity (pointer)
+		return uint64(ptrValue(v))
+	case *PyInstance:
+		// Instances hash by identity by default
+		return uint64(ptrValue(v))
+	case *PyFunction:
+		return uint64(ptrValue(v))
+	case *PyBuiltinFunc:
+		return uint64(ptrValue(v))
+	default:
+		// Default to pointer hash for other types
+		return uint64(ptrValue(v))
 	}
 }
 
@@ -155,9 +275,17 @@ func (t *PyTuple) String() string {
 	return fmt.Sprintf("%v", t.Items)
 }
 
-// PyDict represents a Python dictionary
+// dictEntry represents a key-value pair in a PyDict
+type dictEntry struct {
+	key   Value
+	value Value
+}
+
+// PyDict represents a Python dictionary with hash-based lookups
 type PyDict struct {
-	Items map[Value]Value
+	Items   map[Value]Value      // Legacy field for compatibility
+	buckets map[uint64][]dictEntry // Hash buckets for O(1) lookup
+	size    int
 }
 
 func (d *PyDict) Type() string { return "dict" }
@@ -165,14 +293,177 @@ func (d *PyDict) String() string {
 	return fmt.Sprintf("%v", d.Items)
 }
 
-// PySet represents a Python set
+// DictGet retrieves a value by key using hash-based lookup
+func (d *PyDict) DictGet(key Value, vm *VM) (Value, bool) {
+	if d.buckets == nil {
+		// Fall back to legacy Items lookup
+		if val, ok := d.Items[key]; ok {
+			return val, true
+		}
+		for k, v := range d.Items {
+			if vm.equal(k, key) {
+				return v, true
+			}
+		}
+		return nil, false
+	}
+	h := hashValue(key)
+	entries := d.buckets[h]
+	for _, e := range entries {
+		if vm.equal(e.key, key) {
+			return e.value, true
+		}
+	}
+	return nil, false
+}
+
+// DictSet sets a key-value pair using hash-based storage
+func (d *PyDict) DictSet(key, value Value, vm *VM) {
+	if d.buckets == nil {
+		d.buckets = make(map[uint64][]dictEntry)
+	}
+	h := hashValue(key)
+	entries := d.buckets[h]
+	for i, e := range entries {
+		if vm.equal(e.key, key) {
+			d.buckets[h][i].value = value
+			// Also update legacy Items for compatibility
+			if d.Items != nil {
+				d.Items[key] = value
+			}
+			return
+		}
+	}
+	d.buckets[h] = append(entries, dictEntry{key: key, value: value})
+	d.size++
+	// Also update legacy Items for compatibility
+	if d.Items == nil {
+		d.Items = make(map[Value]Value)
+	}
+	d.Items[key] = value
+}
+
+// DictDelete removes a key using hash-based lookup
+func (d *PyDict) DictDelete(key Value, vm *VM) bool {
+	if d.buckets == nil {
+		delete(d.Items, key)
+		return true
+	}
+	h := hashValue(key)
+	entries := d.buckets[h]
+	for i, e := range entries {
+		if vm.equal(e.key, key) {
+			// Remove entry by replacing with last and truncating
+			d.buckets[h] = append(entries[:i], entries[i+1:]...)
+			d.size--
+			delete(d.Items, key)
+			return true
+		}
+	}
+	return false
+}
+
+// DictContains checks if a key exists using hash-based lookup
+func (d *PyDict) DictContains(key Value, vm *VM) bool {
+	_, found := d.DictGet(key, vm)
+	return found
+}
+
+// DictLen returns the number of items
+func (d *PyDict) DictLen() int {
+	if d.buckets != nil {
+		return d.size
+	}
+	return len(d.Items)
+}
+
+// setEntry represents a value in a PySet
+type setEntry struct {
+	value Value
+}
+
+// PySet represents a Python set with hash-based lookups
 type PySet struct {
-	Items map[Value]struct{}
+	Items   map[Value]struct{}    // Legacy field for compatibility
+	buckets map[uint64][]setEntry // Hash buckets for O(1) lookup
+	size    int
 }
 
 func (s *PySet) Type() string { return "set" }
 func (s *PySet) String() string {
 	return fmt.Sprintf("%v", s.Items)
+}
+
+// SetAdd adds a value to the set using hash-based storage
+func (s *PySet) SetAdd(value Value, vm *VM) {
+	if s.buckets == nil {
+		s.buckets = make(map[uint64][]setEntry)
+	}
+	h := hashValue(value)
+	entries := s.buckets[h]
+	for _, e := range entries {
+		if vm.equal(e.value, value) {
+			return // Already exists
+		}
+	}
+	s.buckets[h] = append(entries, setEntry{value: value})
+	s.size++
+	// Also update legacy Items for compatibility
+	if s.Items == nil {
+		s.Items = make(map[Value]struct{})
+	}
+	s.Items[value] = struct{}{}
+}
+
+// SetContains checks if a value exists using hash-based lookup
+func (s *PySet) SetContains(value Value, vm *VM) bool {
+	if s.buckets == nil {
+		// Fall back to legacy Items lookup
+		if _, ok := s.Items[value]; ok {
+			return true
+		}
+		for k := range s.Items {
+			if vm.equal(k, value) {
+				return true
+			}
+		}
+		return false
+	}
+	h := hashValue(value)
+	entries := s.buckets[h]
+	for _, e := range entries {
+		if vm.equal(e.value, value) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetRemove removes a value from the set
+func (s *PySet) SetRemove(value Value, vm *VM) bool {
+	if s.buckets == nil {
+		delete(s.Items, value)
+		return true
+	}
+	h := hashValue(value)
+	entries := s.buckets[h]
+	for i, e := range entries {
+		if vm.equal(e.value, value) {
+			s.buckets[h] = append(entries[:i], entries[i+1:]...)
+			s.size--
+			delete(s.Items, value)
+			return true
+		}
+	}
+	return false
+}
+
+// SetLen returns the number of items
+func (s *PySet) SetLen() int {
+	if s.buckets != nil {
+		return s.size
+	}
+	return len(s.Items)
 }
 
 // PyFunction represents a Python function
@@ -534,9 +825,10 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["dict"] = &PyBuiltinFunc{
 		Name: "dict",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			d := &PyDict{Items: make(map[Value]Value)}
+			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 			for k, v := range kwargs {
-				d.Items[&PyString{Value: k}] = v
+				// Use hash-based storage for O(1) lookup
+				d.DictSet(&PyString{Value: k}, v, vm)
 			}
 			return d, nil
 		},
@@ -545,7 +837,7 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["set"] = &PyBuiltinFunc{
 		Name: "set",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			s := &PySet{Items: make(map[Value]struct{})}
+			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
 			if len(args) > 0 {
 				items, err := vm.toList(args[0])
 				if err != nil {
@@ -555,17 +847,8 @@ func (vm *VM) initBuiltins() {
 					if !isHashable(item) {
 						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
 					}
-					// Check for value equality before adding
-					found := false
-					for k := range s.Items {
-						if vm.equal(k, item) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						s.Items[item] = struct{}{}
-					}
+					// Use hash-based storage for O(1) lookup
+					s.SetAdd(item, vm)
 				}
 			}
 			return s, nil
@@ -2821,35 +3104,27 @@ func (vm *VM) run() (Value, error) {
 			vm.push(&PyList{Items: items})
 
 		case OpBuildSet:
-			s := &PySet{Items: make(map[Value]struct{})}
+			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
 			for i := 0; i < arg; i++ {
 				val := vm.pop()
 				if !isHashable(val) {
 					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
 				}
-				// Check for value equality before adding
-				found := false
-				for k := range s.Items {
-					if vm.equal(k, val) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					s.Items[val] = struct{}{}
-				}
+				// Use hash-based storage for O(1) lookup
+				s.SetAdd(val, vm)
 			}
 			vm.push(s)
 
 		case OpBuildMap:
-			d := &PyDict{Items: make(map[Value]Value)}
+			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 			for i := 0; i < arg; i++ {
 				val := vm.pop()
 				key := vm.pop()
 				if !isHashable(key) {
 					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
 				}
-				d.Items[key] = val
+				// Use hash-based storage for O(1) lookup
+				d.DictSet(key, val, vm)
 			}
 			vm.push(d)
 
@@ -2877,17 +3152,8 @@ func (vm *VM) run() (Value, error) {
 			if !isHashable(val) {
 				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
 			}
-			// Check if an equivalent value already exists (for proper value equality)
-			found := false
-			for k := range set.Items {
-				if vm.equal(k, val) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				set.Items[val] = struct{}{}
-			}
+			// Use hash-based storage for O(1) lookup
+			set.SetAdd(val, vm)
 
 		case OpMapAdd:
 			val := vm.pop()
@@ -2896,7 +3162,8 @@ func (vm *VM) run() (Value, error) {
 			if !isHashable(key) {
 				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
 			}
-			dict.Items[key] = val
+			// Use hash-based storage for O(1) lookup
+			dict.DictSet(key, val, vm)
 
 		case OpMakeFunction:
 			name := vm.pop().(*PyString).Value
@@ -3829,6 +4096,30 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 	return nil, exc
 }
 
+// exceptionPrefixes maps error message prefixes to exception type names
+// Sorted by length descending for longest-match-first semantics
+var exceptionPrefixes = []struct {
+	prefix   string
+	excName  string
+	fallback string // Optional fallback exception name
+}{
+	{"ModuleNotFoundError", "ModuleNotFoundError", ""},
+	{"ZeroDivisionError", "ZeroDivisionError", ""},
+	{"FileNotFoundError", "FileNotFoundError", ""},
+	{"PermissionError", "PermissionError", ""},
+	{"FileExistsError", "FileExistsError", ""},
+	{"AttributeError", "AttributeError", ""},
+	{"ImportError", "ImportError", ""},
+	{"IndexError", "IndexError", ""},
+	{"ValueError", "ValueError", ""},
+	{"TypeError", "TypeError", ""},
+	{"NameError", "NameError", ""},
+	{"MemoryError", "MemoryError", ""},
+	{"KeyError", "KeyError", ""},
+	{"IOError", "IOError", "OSError"},
+	{"OSError", "OSError", ""},
+}
+
 // wrapGoError converts a Go error to a Python exception
 func (vm *VM) wrapGoError(err error) *PyException {
 	if pyExc, ok := err.(*PyException); ok {
@@ -3837,42 +4128,19 @@ func (vm *VM) wrapGoError(err error) *PyException {
 
 	errStr := err.Error()
 
-	// Try to detect exception type from error message prefix
+	// Find exception type using prefix matching (prefixes sorted by length desc)
 	var excClass *PyClass
-	switch {
-	case len(errStr) >= 17 && errStr[:17] == "ZeroDivisionError":
-		excClass = vm.builtins["ZeroDivisionError"].(*PyClass)
-	case len(errStr) >= 8 && errStr[:8] == "KeyError":
-		excClass = vm.builtins["KeyError"].(*PyClass)
-	case len(errStr) >= 10 && errStr[:10] == "IndexError":
-		excClass = vm.builtins["IndexError"].(*PyClass)
-	case len(errStr) >= 9 && errStr[:9] == "TypeError":
-		excClass = vm.builtins["TypeError"].(*PyClass)
-	case len(errStr) >= 10 && errStr[:10] == "ValueError":
-		excClass = vm.builtins["ValueError"].(*PyClass)
-	case len(errStr) >= 14 && errStr[:14] == "AttributeError":
-		excClass = vm.builtins["AttributeError"].(*PyClass)
-	case len(errStr) >= 9 && errStr[:9] == "NameError":
-		excClass = vm.builtins["NameError"].(*PyClass)
-	case len(errStr) >= 19 && errStr[:19] == "ModuleNotFoundError":
-		excClass = vm.builtins["ModuleNotFoundError"].(*PyClass)
-	case len(errStr) >= 11 && errStr[:11] == "ImportError":
-		excClass = vm.builtins["ImportError"].(*PyClass)
-	case len(errStr) >= 17 && errStr[:17] == "FileNotFoundError":
-		excClass = vm.builtins["FileNotFoundError"].(*PyClass)
-	case len(errStr) >= 15 && errStr[:15] == "PermissionError":
-		excClass = vm.builtins["PermissionError"].(*PyClass)
-	case len(errStr) >= 15 && errStr[:15] == "FileExistsError":
-		excClass = vm.builtins["FileExistsError"].(*PyClass)
-	case len(errStr) >= 7 && errStr[:7] == "IOError":
-		if excC, ok := vm.builtins["IOError"]; ok {
-			excClass = excC.(*PyClass)
-		} else {
-			excClass = vm.builtins["OSError"].(*PyClass)
+	for _, ep := range exceptionPrefixes {
+		if len(errStr) >= len(ep.prefix) && errStr[:len(ep.prefix)] == ep.prefix {
+			if exc, ok := vm.builtins[ep.excName]; ok {
+				excClass = exc.(*PyClass)
+			} else if ep.fallback != "" {
+				excClass = vm.builtins[ep.fallback].(*PyClass)
+			}
+			break
 		}
-	case len(errStr) >= 7 && errStr[:7] == "OSError":
-		excClass = vm.builtins["OSError"].(*PyClass)
-	default:
+	}
+	if excClass == nil {
 		excClass = vm.builtins["RuntimeError"].(*PyClass)
 	}
 
@@ -4623,17 +4891,11 @@ func (vm *VM) contains(container, item Value) bool {
 			}
 		}
 	case *PySet:
-		for k := range c.Items {
-			if vm.equal(k, item) {
-				return true
-			}
-		}
+		// Use hash-based lookup for O(1) average case
+		return c.SetContains(item, vm)
 	case *PyDict:
-		for k := range c.Items {
-			if vm.equal(k, item) {
-				return true
-			}
-		}
+		// Use hash-based lookup for O(1) average case
+		return c.DictContains(item, vm)
 	}
 	return false
 }
@@ -5289,14 +5551,9 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return &PyString{Value: string(runes[idx])}, nil
 	case *PyDict:
-		if val, ok := o.Items[index]; ok {
+		// Use hash-based lookup for O(1) average case
+		if val, found := o.DictGet(index, vm); found {
 			return val, nil
-		}
-		// Try finding equivalent key
-		for k, v := range o.Items {
-			if vm.equal(k, index) {
-				return v, nil
-			}
 		}
 		return nil, fmt.Errorf("KeyError: %v", index)
 	case *PyUserData:
@@ -5353,7 +5610,8 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 		if !isHashable(index) {
 			return fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(index))
 		}
-		o.Items[index] = val
+		// Use hash-based storage for O(1) average case
+		o.DictSet(index, val, vm)
 		return nil
 	}
 	return fmt.Errorf("'%s' object does not support item assignment", vm.typeName(obj))
@@ -5372,7 +5630,8 @@ func (vm *VM) delItem(obj Value, index Value) error {
 		o.Items = append(o.Items[:idx], o.Items[idx+1:]...)
 		return nil
 	case *PyDict:
-		delete(o.Items, index)
+		// Use hash-based deletion for O(1) average case
+		o.DictDelete(index, vm)
 		return nil
 	}
 	return fmt.Errorf("'%s' object does not support item deletion", vm.typeName(obj))
@@ -6426,11 +6685,12 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		vm.push(&PyTuple{Items: items})
 	case OpBuildMap:
-		dict := &PyDict{Items: make(map[Value]Value)}
+		dict := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 		for i := 0; i < arg; i++ {
 			val := vm.pop()
 			key := vm.pop()
-			dict.Items[key] = val
+			// Use hash-based storage for O(1) lookup
+			dict.DictSet(key, val, vm)
 		}
 		vm.push(dict)
 
