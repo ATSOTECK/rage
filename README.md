@@ -11,7 +11,7 @@ applications without any external dependencies or CGO.
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -201,6 +201,7 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | datetime | `rage.ModuleDatetime` | Date and time types |
 | typing | `rage.ModuleTyping` | Type hint support |
 | asyncio | `rage.ModuleAsyncio` | Basic async/await support |
+| csv | `rage.ModuleCSV` | CSV file reading and writing |
 
 ## Working with Values
 

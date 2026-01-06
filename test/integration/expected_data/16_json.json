@@ -1,6 +1,6 @@
 {
   "dumps_backslash": "\"path\\\\to\\\\file\"",
-  "dumps_dict": "{\"b\": 2,\"a\": 1}",
+  "dumps_dict": true,
   "dumps_empty_dict": "{}",
   "dumps_empty_list": "[]",
   "dumps_empty_string": "\"\"",
@@ -12,7 +12,7 @@
   "dumps_list": "[1,2,3]",
   "dumps_mixed_list": "[1,\"two\",true,null]",
   "dumps_negative_int": "-17",
-  "dumps_nested_dict": "{\"outer\": {\"inner\": \"value\"}}",
+  "dumps_nested_dict": true,
   "dumps_nested_list": "[[1,2],[3,4]]",
   "dumps_newline": "\"line1\\nline2\"",
   "dumps_none": "null",

@@ -16,4 +16,5 @@ func InitAllModules() {
 	InitOSModule()
 	InitDatetimeModule()
 	InitTypingModule()
+	InitCSVModule()
 }

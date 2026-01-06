@@ -1,0 +1,158 @@
+{
+  "const_quote_all": true,
+  "const_quote_minimal": true,
+  "const_quote_none": true,
+  "const_quote_nonnumeric": true,
+  "dictreader_count": 2,
+  "dictreader_fieldnames_count": 2,
+  "dictreader_fieldnames_row1_name": "Alice",
+  "dictreader_fieldnames_row2_city": "LA",
+  "dictreader_row1_age": "30",
+  "dictreader_row1_city": "NYC",
+  "dictreader_row1_name": "Alice",
+  "dictreader_row2_age": "25",
+  "dictreader_row2_city": "LA",
+  "dictreader_row2_name": "Bob",
+  "dictwriter_has_alice": true,
+  "dictwriter_has_bob": true,
+  "dictwriter_has_header": true,
+  "dictwriter_restval": true,
+  "dictwriter_writerows_header": true,
+  "dictwriter_writerows_row1": true,
+  "dictwriter_writerows_row2": true,
+  "format_row_empty_list": "",
+  "format_row_has_newline": "a,\"b\nc\",d",
+  "format_row_has_quote": "a,\"say \"\"hi\"\"\",c",
+  "format_row_mixed": "name,30,city",
+  "format_row_needs_quote": "a,\"b,c\",d",
+  "format_row_numbers": "1,2,3",
+  "format_row_quote_all": "\"a\",\"b\"",
+  "format_row_quote_none": "a,b",
+  "format_row_semicolon": "a;b;c",
+  "format_row_single": "only",
+  "format_row_strings": "a,b,c",
+  "format_row_tab": "a\tb\tc",
+  "parse_row_empty_fields": [
+    "a",
+    "",
+    "c"
+  ],
+  "parse_row_escaped_quote": [
+    "a",
+    "say \"hello\"",
+    "c"
+  ],
+  "parse_row_mixed": [
+    "name",
+    "30",
+    "city"
+  ],
+  "parse_row_numbers": [
+    "1",
+    "2",
+    "3"
+  ],
+  "parse_row_pipe": [
+    "a",
+    "b",
+    "c"
+  ],
+  "parse_row_quoted": [
+    "a",
+    "b",
+    "c"
+  ],
+  "parse_row_quoted_comma": [
+    "a",
+    "b,c",
+    "d"
+  ],
+  "parse_row_quoted_empty": [
+    "a",
+    "",
+    "c"
+  ],
+  "parse_row_semicolon": [
+    "a",
+    "b",
+    "c"
+  ],
+  "parse_row_simple": [
+    "a",
+    "b",
+    "c"
+  ],
+  "parse_row_single": [
+    "only"
+  ],
+  "parse_row_tab": [
+    "a",
+    "b",
+    "c"
+  ],
+  "reader_data_row1": [
+    "Alice",
+    "30",
+    "NYC"
+  ],
+  "reader_data_row2": [
+    "Bob",
+    "25",
+    "LA"
+  ],
+  "reader_first_row": [
+    "a",
+    "b",
+    "c"
+  ],
+  "reader_header": [
+    "name",
+    "age",
+    "city"
+  ],
+  "reader_quoted_header": [
+    "name",
+    "description"
+  ],
+  "reader_quoted_simple": [
+    "item1",
+    "A simple item"
+  ],
+  "reader_quoted_with_comma": [
+    "item2",
+    "An item, with comma"
+  ],
+  "reader_row_count": 3,
+  "reader_second_row": [
+    "1",
+    "2",
+    "3"
+  ],
+  "reader_semicolon_row1": [
+    "a",
+    "b",
+    "c"
+  ],
+  "reader_semicolon_row2": [
+    "1",
+    "2",
+    "3"
+  ],
+  "reader_third_row": [
+    "x",
+    "y",
+    "z"
+  ],
+  "roundtrip_header": true,
+  "roundtrip_row1": true,
+  "roundtrip_row2": true,
+  "writer_has_alice": true,
+  "writer_has_bob": true,
+  "writer_has_header": true,
+  "writer_line_count": 3,
+  "writer_quote_all": true,
+  "writer_semicolon": true,
+  "writer_writerows_line1": true,
+  "writer_writerows_line2": true,
+  "writer_writerows_line3": true
+}

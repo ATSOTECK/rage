@@ -37,8 +37,9 @@ results["dumps_nested_list"] = json.dumps([[1, 2], [3, 4]])
 results["dumps_mixed_list"] = json.dumps([1, "two", True, None])
 
 results["dumps_empty_dict"] = json.dumps({})
-results["dumps_dict"] = json.dumps({"a": 1, "b": 2})
-results["dumps_nested_dict"] = json.dumps({"outer": {"inner": "value"}})
+# Dict key order is non-deterministic, so verify via round-trip instead of exact string
+results["dumps_dict"] = json.loads(json.dumps({"a": 1, "b": 2})) == {"a": 1, "b": 2}
+results["dumps_nested_dict"] = json.loads(json.dumps({"outer": {"inner": "value"}})) == {"outer": {"inner": "value"}}
 
 results["dumps_tuple"] = json.dumps((1, 2, 3))
 

@@ -5776,6 +5776,10 @@ func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 			if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
 				return nil, true, nil
 			}
+			// Also check for StopIteration from Go function calls (plain error strings)
+			if strings.HasPrefix(err.Error(), "StopIteration:") {
+				return nil, true, nil
+			}
 			return nil, false, err
 		}
 		return val, false, nil
