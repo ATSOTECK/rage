@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -76,6 +77,38 @@ func MakeInt(v int64) *PyInt {
 		return smallIntCache[v-smallIntMin]
 	}
 	return &PyInt{Value: v}
+}
+
+// intPow computes base^exp using binary exponentiation to avoid float precision loss
+func intPow(base, exp int64) int64 {
+	if exp == 0 {
+		return 1
+	}
+	result := int64(1)
+	for exp > 0 {
+		if exp&1 == 1 {
+			result *= base
+		}
+		base *= base
+		exp >>= 1
+	}
+	return result
+}
+
+// ptrValue returns a uintptr for a Value, used for cycle detection in equality
+func ptrValue(v Value) uintptr {
+	return reflect.ValueOf(v).Pointer()
+}
+
+// isHashable checks if a value can be used as a dict key or set member
+// In Python, mutable types (list, dict, set) are not hashable
+func isHashable(v Value) bool {
+	switch v.(type) {
+	case *PyList, *PyDict, *PySet:
+		return false
+	default:
+		return true
+	}
 }
 
 // PyFloat represents a Python float
@@ -519,6 +552,9 @@ func (vm *VM) initBuiltins() {
 					return nil, err
 				}
 				for _, item := range items {
+					if !isHashable(item) {
+						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+					}
 					// Check for value equality before adding
 					found := false
 					for k := range s.Items {
@@ -2788,6 +2824,9 @@ func (vm *VM) run() (Value, error) {
 			s := &PySet{Items: make(map[Value]struct{})}
 			for i := 0; i < arg; i++ {
 				val := vm.pop()
+				if !isHashable(val) {
+					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+				}
 				// Check for value equality before adding
 				found := false
 				for k := range s.Items {
@@ -2807,6 +2846,9 @@ func (vm *VM) run() (Value, error) {
 			for i := 0; i < arg; i++ {
 				val := vm.pop()
 				key := vm.pop()
+				if !isHashable(key) {
+					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
+				}
 				d.Items[key] = val
 			}
 			vm.push(d)
@@ -2832,6 +2874,9 @@ func (vm *VM) run() (Value, error) {
 		case OpSetAdd:
 			val := vm.pop()
 			set := vm.peek(arg).(*PySet)
+			if !isHashable(val) {
+				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+			}
 			// Check if an equivalent value already exists (for proper value equality)
 			found := false
 			for k := range set.Items {
@@ -2848,6 +2893,9 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			key := vm.pop()
 			dict := vm.peek(arg).(*PyDict)
+			if !isHashable(key) {
+				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
+			}
 			dict.Items[key] = val
 
 		case OpMakeFunction:
@@ -4129,18 +4177,54 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if bi.Value == 0 {
 					return nil, fmt.Errorf("integer division by zero")
 				}
-				return MakeInt(ai.Value / bi.Value), nil
+				// Python floor division: always rounds toward negative infinity
+				result := ai.Value / bi.Value
+				// If signs differ and there's a remainder, adjust toward -inf
+				if (ai.Value < 0) != (bi.Value < 0) && ai.Value%bi.Value != 0 {
+					result--
+				}
+				return MakeInt(result), nil
 			case OpBinaryModulo:
 				if bi.Value == 0 {
 					return nil, fmt.Errorf("integer modulo by zero")
 				}
-				return MakeInt(ai.Value % bi.Value), nil
+				// Python modulo: result has same sign as divisor
+				result := ai.Value % bi.Value
+				if result != 0 && (result < 0) != (bi.Value < 0) {
+					result += bi.Value
+				}
+				return MakeInt(result), nil
 			case OpBinaryPower:
-				return MakeInt(int64(math.Pow(float64(ai.Value), float64(bi.Value)))), nil
+				// Use integer exponentiation to avoid float precision loss
+				if bi.Value < 0 {
+					// Negative exponent returns float
+					return &PyFloat{Value: math.Pow(float64(ai.Value), float64(bi.Value))}, nil
+				}
+				return MakeInt(intPow(ai.Value, bi.Value)), nil
 			case OpBinaryLShift:
-				return MakeInt(ai.Value << bi.Value), nil
+				if bi.Value < 0 {
+					return nil, fmt.Errorf("ValueError: negative shift count")
+				}
+				if bi.Value > 63 {
+					// For very large shifts, result is 0 (or overflow behavior)
+					if ai.Value == 0 {
+						return MakeInt(0), nil
+					}
+					return MakeInt(0), nil // Simplified: large left shifts overflow to 0
+				}
+				return MakeInt(ai.Value << uint(bi.Value)), nil
 			case OpBinaryRShift:
-				return MakeInt(ai.Value >> bi.Value), nil
+				if bi.Value < 0 {
+					return nil, fmt.Errorf("ValueError: negative shift count")
+				}
+				if bi.Value > 63 {
+					// Right shift by large amount gives 0 or -1 (for negative numbers)
+					if ai.Value < 0 {
+						return MakeInt(-1), nil
+					}
+					return MakeInt(0), nil
+				}
+				return MakeInt(ai.Value >> uint(bi.Value)), nil
 			case OpBinaryAnd:
 				return MakeInt(ai.Value & bi.Value), nil
 			case OpBinaryOr:
@@ -4170,11 +4254,17 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 	}
 
 	// String repetition - use strings.Repeat for O(n) instead of O(n²)
+	// Limit maximum result size to 100MB to prevent memory exhaustion
+	const maxStringRepeatSize = 100 * 1024 * 1024
 	if op == OpBinaryMultiply {
 		if as, ok := a.(*PyString); ok {
 			if bi, ok := b.(*PyInt); ok {
 				if bi.Value <= 0 {
 					return &PyString{Value: ""}, nil
+				}
+				resultSize := int64(len(as.Value)) * bi.Value
+				if resultSize > maxStringRepeatSize {
+					return nil, fmt.Errorf("MemoryError: string repetition result too large")
 				}
 				return &PyString{Value: strings.Repeat(as.Value, int(bi.Value))}, nil
 			}
@@ -4184,14 +4274,24 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if ai.Value <= 0 {
 					return &PyString{Value: ""}, nil
 				}
+				resultSize := int64(len(as.Value)) * ai.Value
+				if resultSize > maxStringRepeatSize {
+					return nil, fmt.Errorf("MemoryError: string repetition result too large")
+				}
 				return &PyString{Value: strings.Repeat(as.Value, int(ai.Value))}, nil
 			}
 		}
 		// List repetition - pre-allocate for efficiency
+		// Limit maximum result size to 10M items to prevent memory exhaustion
+		const maxListRepeatItems = 10 * 1024 * 1024
 		if al, ok := a.(*PyList); ok {
 			if bi, ok := b.(*PyInt); ok {
 				if bi.Value <= 0 {
 					return &PyList{Items: []Value{}}, nil
+				}
+				resultItems := int64(len(al.Items)) * bi.Value
+				if resultItems > maxListRepeatItems {
+					return nil, fmt.Errorf("MemoryError: list repetition result too large")
 				}
 				count := int(bi.Value)
 				items := make([]Value, 0, len(al.Items)*count)
@@ -4346,6 +4446,11 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 }
 
 func (vm *VM) equal(a, b Value) bool {
+	return vm.equalWithCycleDetection(a, b, make(map[uintptr]map[uintptr]bool))
+}
+
+// equalWithCycleDetection compares values with cycle detection to prevent stack overflow
+func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]bool) bool {
 	switch av := a.(type) {
 	case *PyNone:
 		_, ok := b.(*PyNone)
@@ -4377,8 +4482,18 @@ func (vm *VM) equal(a, b Value) bool {
 			if len(av.Items) != len(bv.Items) {
 				return false
 			}
+			// Cycle detection: check if we've seen this pair
+			ptrA := ptrValue(a)
+			ptrB := ptrValue(b)
+			if seen[ptrA] != nil && seen[ptrA][ptrB] {
+				return true // Already comparing these, assume equal to break cycle
+			}
+			if seen[ptrA] == nil {
+				seen[ptrA] = make(map[uintptr]bool)
+			}
+			seen[ptrA][ptrB] = true
 			for i := range av.Items {
-				if !vm.equal(av.Items[i], bv.Items[i]) {
+				if !vm.equalWithCycleDetection(av.Items[i], bv.Items[i], seen) {
 					return false
 				}
 			}
@@ -4390,7 +4505,38 @@ func (vm *VM) equal(a, b Value) bool {
 				return false
 			}
 			for i := range av.Items {
-				if !vm.equal(av.Items[i], bv.Items[i]) {
+				if !vm.equalWithCycleDetection(av.Items[i], bv.Items[i], seen) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyDict:
+		if bv, ok := b.(*PyDict); ok {
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			// Cycle detection for dicts
+			ptrA := ptrValue(a)
+			ptrB := ptrValue(b)
+			if seen[ptrA] != nil && seen[ptrA][ptrB] {
+				return true
+			}
+			if seen[ptrA] == nil {
+				seen[ptrA] = make(map[uintptr]bool)
+			}
+			seen[ptrA][ptrB] = true
+			for k, v := range av.Items {
+				found := false
+				for k2, v2 := range bv.Items {
+					if vm.equalWithCycleDetection(k, k2, seen) {
+						if vm.equalWithCycleDetection(v, v2, seen) {
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
 					return false
 				}
 			}
@@ -4461,11 +4607,8 @@ func (vm *VM) contains(container, item Value) bool {
 	switch c := container.(type) {
 	case *PyString:
 		if i, ok := item.(*PyString); ok {
-			for j := 0; j <= len(c.Value)-len(i.Value); j++ {
-				if c.Value[j:j+len(i.Value)] == i.Value {
-					return true
-				}
-			}
+			// Use strings.Contains for optimized O(n+m) substring search
+			return strings.Contains(c.Value, i.Value)
 		}
 	case *PyList:
 		for _, v := range c.Items {
@@ -5135,14 +5278,16 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return o.Items[idx], nil
 	case *PyString:
+		// Convert to runes for proper UTF-8 character indexing
+		runes := []rune(o.Value)
 		idx := int(vm.toInt(index))
 		if idx < 0 {
-			idx = len(o.Value) + idx
+			idx = len(runes) + idx
 		}
-		if idx < 0 || idx >= len(o.Value) {
+		if idx < 0 || idx >= len(runes) {
 			return nil, fmt.Errorf("string index out of range")
 		}
-		return &PyString{Value: string(o.Value[idx])}, nil
+		return &PyString{Value: string(runes[idx])}, nil
 	case *PyDict:
 		if val, ok := o.Items[index]; ok {
 			return val, nil
@@ -5205,6 +5350,9 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 		o.Items[idx] = val
 		return nil
 	case *PyDict:
+		if !isHashable(index) {
+			return fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(index))
+		}
 		o.Items[index] = val
 		return nil
 	}

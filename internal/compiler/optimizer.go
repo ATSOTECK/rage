@@ -3,6 +3,7 @@ package compiler
 import (
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/ATSOTECK/rage/internal/model"
 	"github.com/ATSOTECK/rage/internal/runtime"
@@ -86,13 +87,9 @@ func (o *Optimizer) foldBinaryOp(e *model.BinaryOp) model.Expr {
 	}
 
 	if leftIsStr && rightIsInt && e.Op == model.TK_Star {
-		// String repetition
+		// String repetition - use strings.Repeat for O(n) instead of O(n²)
 		if rightInt >= 0 && rightInt <= 1000 { // Limit to prevent huge strings
-			result := ""
-			for i := int64(0); i < rightInt; i++ {
-				result += leftStr
-			}
-			return &model.StringLit{Value: result}
+			return &model.StringLit{Value: strings.Repeat(leftStr, int(rightInt))}
 		}
 	}
 
