@@ -5154,6 +5154,40 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			}
 		}
 		return nil, fmt.Errorf("KeyError: %v", index)
+	case *PyUserData:
+		// Check for __getitem__ method in metatable
+		if o.Metatable != nil {
+			var typeName string
+			for k, v := range o.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					typeName = vm.str(v)
+					break
+				}
+			}
+			if typeName != "" {
+				mt := typeMetatables[typeName]
+				if mt != nil {
+					if method, ok := mt.Methods["__getitem__"]; ok {
+						// Call __getitem__ with userdata and index
+						oldStack := vm.frame.Stack
+						oldSP := vm.frame.SP
+						vm.frame.Stack = make([]Value, 17)
+						vm.frame.Stack[0] = o
+						vm.frame.Stack[1] = index
+						vm.frame.SP = 2
+						n := method(vm)
+						var result Value = None
+						if n > 0 {
+							result = vm.frame.Stack[vm.frame.SP-1]
+						}
+						vm.frame.Stack = oldStack
+						vm.frame.SP = oldSP
+						return result, nil
+					}
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 	}
 	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 }

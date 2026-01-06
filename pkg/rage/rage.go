@@ -41,6 +41,7 @@ const (
 	ModuleJSON
 	ModuleOS
 	ModuleDatetime
+	ModuleTyping
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -57,6 +58,7 @@ var AllModules = []Module{
 	ModuleJSON,
 	ModuleOS,
 	ModuleDatetime,
+	ModuleTyping,
 }
 
 // StateOption is a functional option for configuring State creation.
@@ -177,6 +179,8 @@ func initModule(m Module) {
 		stdlib.InitOSModule()
 	case ModuleDatetime:
 		stdlib.InitDatetimeModule()
+	case ModuleTyping:
+		stdlib.InitTypingModule()
 	}
 }
 

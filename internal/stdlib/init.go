@@ -15,4 +15,5 @@ func InitAllModules() {
 	InitJSONModule()
 	InitOSModule()
 	InitDatetimeModule()
+	InitTypingModule()
 }

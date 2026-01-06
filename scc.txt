@@ -1,8 +1,8 @@
-github.com/AlDanial/cloc v 2.06  T=0.08 s (754.2 files/s, 441737.1 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.07 s (829.8 files/s, 489293.5 lines/s)
 ----------------------------------------------------------------------------------------------------
 File                                                             blank        comment           code
 ----------------------------------------------------------------------------------------------------
-./internal/runtime/vm.go                                           589            549           5756
+./internal/runtime/vm.go                                           589            551           5788
 ./internal/compiler/parser.go                                      375             61           1977
 ./internal/compiler/compiler.go                                    331            254           1776
 ./internal/compiler/optimizer.go                                   205            238           1630
@@ -10,6 +10,7 @@ File                                                             blank        co
 ./internal/stdlib/os.go                                            123            101            845
 ./internal/stdlib/collections.go                                   120             77            761
 ./internal/compiler/lexer.go                                       127             47            735
+./internal/stdlib/typing.go                                        120            112            731
 ./test/stdlib_test.go                                              225             26            714
 ./internal/model/ast.go                                            151             84            640
 ./internal/compiler/parser_test.go                                 135              0            629
@@ -26,7 +27,7 @@ File                                                             blank        co
 ./internal/stdlib/time.go                                           36             27            351
 ./test/integration/scripts/06_exceptions.py                         77             93            313
 ./test/descriptor_test.go                                           78             12            307
-./pkg/rage/rage.go                                                  51             95            292
+./pkg/rage/rage.go                                                  51             95            296
 ./test/module_test.go                                               71             20            289
 ./test/exception_test.go                                            62             15            288
 ./internal/model/token.go                                           20             10            285
@@ -37,6 +38,7 @@ File                                                             blank        co
 ./test/integration/scripts/15_match_statements.py                   53             20            220
 ./test/integration/scripts/12_decorators.py                         71             34            211
 ./internal/stdlib/math.go                                           36             12            204
+./test/integration/scripts/19_typing.py                             99            116            192
 ./internal/stdlib/sys.go                                            24             32            189
 ./test/integration/scripts/08_builtins.py                           44             30            168
 ./internal/stdlib/asyncio.go                                        21             19            154
@@ -58,9 +60,9 @@ File                                                             blank        co
 ./test/integration/scripts/10_collections.py                        18             24             33
 ./test/integration/scripts/09_strings.py                            14             14             31
 ./test/bench/calc_pi.py                                              7              5             22
-./internal/stdlib/init.go                                            1              3             14
+./internal/stdlib/init.go                                            1              3             15
 ./pkg/rage/doc.go                                                   47            128              1
 ./test/integration/scripts/basic/hello.py                            0              0              1
 ----------------------------------------------------------------------------------------------------
-SUM:                                                              4780           3133          26645
+SUM:                                                              4999           3363          27605
 ----------------------------------------------------------------------------------------------------
