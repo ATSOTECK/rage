@@ -11,7 +11,7 @@ applications without any external dependencies or CGO.
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -196,6 +196,11 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | time | `rage.ModuleTime` | Time functions (time, sleep) |
 | re | `rage.ModuleRe` | Regular expressions |
 | collections | `rage.ModuleCollections` | Container datatypes (Counter, defaultdict) |
+| json | `rage.ModuleJSON` | JSON encoding and decoding |
+| os | `rage.ModuleOS` | OS interface (environ, path manipulation) |
+| datetime | `rage.ModuleDatetime` | Date and time types |
+| typing | `rage.ModuleTyping` | Type hint support |
+| asyncio | `rage.ModuleAsyncio` | Basic async/await support |
 
 ## Working with Values
 
@@ -308,21 +313,21 @@ RAGE is under active development. Currently supported:
 ### Implemented
 - Basic data types: None, bool, int, float, str, list, tuple, dict, set, range
 - Operators: arithmetic, comparison, logical, bitwise
-- Control flow: if/elif/else, for, while, break, continue
+- Control flow: if/elif/else, for, while, break, continue, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs
-- Classes: class definitions, `__init__`, instance attributes, methods, single inheritance
+- Classes: class definitions, `__init__`, instance attributes, methods, single inheritance, properties
+- Exception handling: try/except/else/finally, raise, custom exception types
+- Generators: yield, yield from, generator expressions
+- Decorators: function and class decorators
 - Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
 - Imports: import, from...import (for stdlib modules)
-- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, type, isinstance, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, repr
+- Context managers: with statement support
+- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, type, isinstance, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super
 
 ### Not Yet Implemented
-- Exception handling (try/except/finally)
-- Generator expressions and yield
-- Decorators
 - Multiple inheritance (MRO is simplified)
-- Async/await
-- File I/O
-- Most of the standard library
+- Full async/await (basic support via asyncio module)
+- File I/O (open, read, write)
 
 ## Thread Safety
 
