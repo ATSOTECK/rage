@@ -17,4 +17,5 @@ func InitAllModules() {
 	InitDatetimeModule()
 	InitTypingModule()
 	InitCSVModule()
+	InitItertoolsModule()
 }

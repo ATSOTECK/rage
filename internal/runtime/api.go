@@ -572,6 +572,16 @@ func FromGoValue(v any) Value {
 }
 
 // =====================================
+// Function Calling
+// =====================================
+
+// Call calls a Python callable with the given arguments
+// This is the exported version of the internal call method
+func (vm *VM) Call(callable Value, args []Value, kwargs map[string]Value) (Value, error) {
+	return vm.call(callable, args, kwargs)
+}
+
+// =====================================
 // Error Helpers
 // =====================================
 
