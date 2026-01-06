@@ -223,6 +223,16 @@ type PyStaticMethod struct {
 func (s *PyStaticMethod) Type() string   { return "staticmethod" }
 func (s *PyStaticMethod) String() string { return "<staticmethod object>" }
 
+// PySuper represents Python's super() proxy object
+type PySuper struct {
+	ThisClass *PyClass // The class where super() was called (__class__)
+	Instance  Value    // The instance (self) or class
+	StartIdx  int      // Index in MRO to start searching from (after ThisClass)
+}
+
+func (s *PySuper) Type() string   { return "super" }
+func (s *PySuper) String() string { return "<super object>" }
+
 // PyException represents a Python exception
 type PyException struct {
 	ExcType   *PyClass         // Exception class (e.g., ValueError, TypeError)
@@ -707,6 +717,12 @@ func (vm *VM) initBuiltins() {
 				}
 			}
 
+			// If no bases specified, implicitly inherit from object (Python 3 behavior)
+			objectClass := vm.builtins["object"].(*PyClass)
+			if len(bases) == 0 {
+				bases = []*PyClass{objectClass}
+			}
+
 			// Execute the class body to get the namespace
 			classDict, err := vm.callClassBody(bodyFunc)
 			if err != nil {
@@ -792,6 +808,92 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("staticmethod expected 1 argument, got %d", len(args))
 			}
 			return &PyStaticMethod{Func: args[0]}, nil
+		},
+	}
+
+	// super() returns a proxy object for MRO-based method lookup
+	vm.builtins["super"] = &PyBuiltinFunc{
+		Name: "super",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			var thisClass *PyClass
+			var instance Value
+
+			if len(args) == 0 {
+				// Zero-argument form: super()
+				// Need to find __class__ from the enclosing scope and self from first arg
+				// Look up the call stack to find the method context
+				// We need to look at the caller's frame, not the current one (which is the builtin call)
+				callerFrame := vm.frame
+				if len(vm.frames) >= 1 {
+					// The frames stack contains previous frames; vm.frame is current
+					// For builtin calls, we want the calling frame
+					callerFrame = vm.frame
+				}
+				if callerFrame != nil && callerFrame.Code != nil {
+					// Try to get __class__ from closure cells
+					for i, name := range callerFrame.Code.FreeVars {
+						if name == "__class__" && i < len(callerFrame.Cells) {
+							if cls, ok := callerFrame.Cells[i].Value.(*PyClass); ok {
+								thisClass = cls
+							}
+						}
+					}
+					// Try to get self from first local variable (slot 0)
+					if len(callerFrame.Code.VarNames) > 0 && len(callerFrame.Locals) > 0 {
+						instance = callerFrame.Locals[0]
+					}
+				}
+				if thisClass == nil {
+					return nil, fmt.Errorf("super(): __class__ cell not found")
+				}
+				if instance == nil {
+					return nil, fmt.Errorf("super(): self argument not found")
+				}
+			} else if len(args) == 2 {
+				// Two-argument form: super(type, object-or-type)
+				var ok bool
+				thisClass, ok = args[0].(*PyClass)
+				if !ok {
+					return nil, fmt.Errorf("super() argument 1 must be type, not %s", vm.typeName(args[0]))
+				}
+				instance = args[1]
+			} else if len(args) == 1 {
+				// One-argument form: super(type) - unbound super
+				var ok bool
+				thisClass, ok = args[0].(*PyClass)
+				if !ok {
+					return nil, fmt.Errorf("super() argument 1 must be type, not %s", vm.typeName(args[0]))
+				}
+				instance = nil
+			} else {
+				return nil, fmt.Errorf("super() takes 0, 1, or 2 arguments (%d given)", len(args))
+			}
+
+			// Find the index of thisClass in the MRO of the instance's class
+			var mro []*PyClass
+			if inst, ok := instance.(*PyInstance); ok {
+				mro = inst.Class.Mro
+			} else if cls, ok := instance.(*PyClass); ok {
+				mro = cls.Mro
+			} else if instance != nil {
+				return nil, fmt.Errorf("super(type, obj): obj must be an instance or subtype of type")
+			}
+
+			startIdx := 0
+			if mro != nil {
+				for i, cls := range mro {
+					if cls == thisClass {
+						startIdx = i + 1 // Start searching from the next class in MRO
+						break
+					}
+				}
+			}
+
+			return &PySuper{
+				ThisClass: thisClass,
+				Instance:  instance,
+				StartIdx:  startIdx,
+			}, nil
 		},
 	}
 
@@ -941,8 +1043,14 @@ func (vm *VM) computeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error)
 
 		if candidate == nil {
 			// No valid candidate found - inconsistent hierarchy
-			return nil, fmt.Errorf("TypeError: Cannot create a consistent method resolution order (MRO) for bases %s",
+			msg := fmt.Sprintf("Cannot create a consistent method resolution order (MRO) for bases %s",
 				vm.formatBases(bases))
+			return nil, &PyException{
+				ExcType:  vm.builtins["TypeError"].(*PyClass),
+				Args:     &PyTuple{Items: []Value{&PyString{Value: msg}}},
+				Message:  "TypeError: " + msg,
+				TypeName: "TypeError",
+			}
 		}
 
 		// Add candidate to result
@@ -3761,6 +3869,12 @@ func (vm *VM) equal(a, b Value) bool {
 			}
 			return true
 		}
+	case *PyClass:
+		// Classes are compared by identity
+		return a == b
+	case *PyInstance:
+		// Instances are compared by identity by default
+		return a == b
 	}
 	return false
 }
@@ -4087,6 +4201,58 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return &PyString{Value: prop.Doc}, nil
 		}
 		return nil, fmt.Errorf("'property' object has no attribute '%s'", name)
+	case *PySuper:
+		// super() proxy - look up attribute in MRO starting after ThisClass
+		if o.Instance == nil {
+			return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+		}
+
+		// Get the MRO to search
+		var mro []*PyClass
+		var instance Value = o.Instance
+		if inst, ok := o.Instance.(*PyInstance); ok {
+			mro = inst.Class.Mro
+		} else if cls, ok := o.Instance.(*PyClass); ok {
+			mro = cls.Mro
+			instance = cls
+		}
+
+		// Search MRO starting from StartIdx
+		for i := o.StartIdx; i < len(mro); i++ {
+			cls := mro[i]
+			if val, ok := cls.Dict[name]; ok {
+				// Handle classmethod - bind class
+				if cm, ok := val.(*PyClassMethod); ok {
+					if fn, ok := cm.Func.(*PyFunction); ok {
+						if inst, ok := o.Instance.(*PyInstance); ok {
+							return &PyMethod{Func: fn, Instance: inst.Class}, nil
+						}
+						return &PyMethod{Func: fn, Instance: instance}, nil
+					}
+				}
+
+				// Handle staticmethod - return unwrapped function
+				if sm, ok := val.(*PyStaticMethod); ok {
+					return sm.Func, nil
+				}
+
+				// Handle property - call fget with the original instance
+				if prop, ok := val.(*PyProperty); ok {
+					if prop.Fget == nil {
+						return nil, fmt.Errorf("property '%s' has no getter", name)
+					}
+					return vm.call(prop.Fget, []Value{instance}, nil)
+				}
+
+				// Bind method if it's a function - bind to original instance
+				if fn, ok := val.(*PyFunction); ok {
+					return &PyMethod{Func: fn, Instance: instance}, nil
+				}
+				return val, nil
+			}
+		}
+		return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+
 	case *PyInstance:
 		// Descriptor protocol: First check class MRO for data descriptors (property with setter)
 		// Data descriptors take precedence over instance dict
@@ -4141,6 +4307,32 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Class.Name, name)
 	case *PyClass:
+		// Handle special class attributes
+		switch name {
+		case "__mro__":
+			// Return the MRO as a tuple
+			mroItems := make([]Value, len(o.Mro))
+			for i, cls := range o.Mro {
+				mroItems[i] = cls
+			}
+			return &PyTuple{Items: mroItems}, nil
+		case "__bases__":
+			// Return the direct base classes as a tuple
+			baseItems := make([]Value, len(o.Bases))
+			for i, base := range o.Bases {
+				baseItems[i] = base
+			}
+			return &PyTuple{Items: baseItems}, nil
+		case "__name__":
+			return &PyString{Value: o.Name}, nil
+		case "__dict__":
+			// Return a copy of the class dict
+			dictCopy := make(map[Value]Value)
+			for k, v := range o.Dict {
+				dictCopy[&PyString{Value: k}] = v
+			}
+			return &PyDict{Items: dictCopy}, nil
+		}
 		// Check class dict and MRO
 		for _, cls := range o.Mro {
 			if val, ok := cls.Dict[name]; ok {

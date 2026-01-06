@@ -321,4 +321,155 @@ person.set_name("Alice").set_age(30)
 results["mi_person_name"] = person.name
 results["mi_person_age"] = person.age
 
+# =====================================
+# C3 MRO Linearization Tests
+# =====================================
+
+# Test __mro__ attribute
+class MroBase:
+    pass
+
+class MroChild(MroBase):
+    pass
+
+# __mro__ should include class, base, and object
+mro_child = MroChild.__mro__
+results["mro_length"] = len(mro_child)
+results["mro_first_is_child"] = mro_child[0] is MroChild
+results["mro_second_is_base"] = mro_child[1] is MroBase
+results["mro_last_is_object"] = mro_child[-1] is object
+
+# Test __bases__ attribute
+results["bases_child_length"] = len(MroChild.__bases__)
+results["bases_child_first"] = MroChild.__bases__[0] is MroBase
+results["bases_empty_class"] = len(Empty.__bases__)  # Should be 1 (object)
+results["bases_empty_is_object"] = Empty.__bases__[0] is object
+
+# Test diamond inheritance MRO
+class DiamondTop:
+    def value(self):
+        return "top"
+
+class DiamondLeft(DiamondTop):
+    def value(self):
+        return "left"
+
+class DiamondRight(DiamondTop):
+    def value(self):
+        return "right"
+
+class DiamondBottom(DiamondLeft, DiamondRight):
+    pass
+
+# MRO should be: DiamondBottom -> DiamondLeft -> DiamondRight -> DiamondTop -> object
+diamond_mro = DiamondBottom.__mro__
+results["diamond_mro_length"] = len(diamond_mro)
+results["diamond_mro_0"] = diamond_mro[0] is DiamondBottom
+results["diamond_mro_1"] = diamond_mro[1] is DiamondLeft
+results["diamond_mro_2"] = diamond_mro[2] is DiamondRight
+results["diamond_mro_3"] = diamond_mro[3] is DiamondTop
+results["diamond_mro_4"] = diamond_mro[4] is object
+
+# Method resolution follows MRO
+db = DiamondBottom()
+results["diamond_method_resolution"] = db.value()
+
+# =====================================
+# super() with C3 MRO
+# =====================================
+
+class SuperBase:
+    def greet(self):
+        return "Base"
+
+class SuperLeft(SuperBase):
+    def greet(self):
+        return "Left->" + super(SuperLeft, self).greet()
+
+class SuperRight(SuperBase):
+    def greet(self):
+        return "Right->" + super(SuperRight, self).greet()
+
+class SuperChild(SuperLeft, SuperRight):
+    def greet(self):
+        return "Child->" + super(SuperChild, self).greet()
+
+sc = SuperChild()
+# MRO: SuperChild -> SuperLeft -> SuperRight -> SuperBase -> object
+# So super chain should be: Child->Left->Right->Base
+results["super_chain"] = sc.greet()
+
+# =====================================
+# Complex MRO with super()
+# =====================================
+
+class O:
+    def m(self):
+        return "O"
+
+class A_mro(O):
+    def m(self):
+        return "A->" + super(A_mro, self).m()
+
+class B_mro(O):
+    def m(self):
+        return "B->" + super(B_mro, self).m()
+
+class C_mro(O):
+    def m(self):
+        return "C->" + super(C_mro, self).m()
+
+class D_mro(A_mro, B_mro):
+    def m(self):
+        return "D->" + super(D_mro, self).m()
+
+class E_mro(B_mro, C_mro):
+    def m(self):
+        return "E->" + super(E_mro, self).m()
+
+class F_mro(D_mro, E_mro):
+    def m(self):
+        return "F->" + super(F_mro, self).m()
+
+f = F_mro()
+# Complex MRO should correctly linearize
+results["complex_mro_length"] = len(F_mro.__mro__)
+results["complex_super_chain"] = f.m()
+
+# =====================================
+# Inconsistent MRO Detection
+# =====================================
+
+class X:
+    pass
+
+class Y:
+    pass
+
+class A_bad(X, Y):
+    pass
+
+class B_bad(Y, X):
+    pass
+
+# Trying to create C(A_bad, B_bad) should fail with TypeError
+inconsistent_mro_error = False
+try:
+    class C_bad(A_bad, B_bad):
+        pass
+except TypeError:
+    inconsistent_mro_error = True
+
+results["inconsistent_mro_detected"] = inconsistent_mro_error
+
+# =====================================
+# Class membership in MRO (using 'in')
+# =====================================
+
+results["object_in_mro"] = object in DiamondBottom.__mro__
+results["top_in_mro"] = DiamondTop in DiamondBottom.__mro__
+results["left_in_mro"] = DiamondLeft in DiamondBottom.__mro__
+results["right_in_mro"] = DiamondRight in DiamondBottom.__mro__
+results["unrelated_not_in_mro"] = MroBase not in DiamondBottom.__mro__
+
 print("Classes tests completed")
