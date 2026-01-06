@@ -935,11 +935,54 @@ func (o *Optimizer) removeDupPop(instrs []*instruction) bool {
 func (o *Optimizer) optimizeJumps(instrs []*instruction, code *runtime.CodeObject) bool {
 	// This is complex because we need to handle jump targets
 	// For now, just handle simple cases
+
+	// First, build a set of instruction indices that are jump targets
+	// We need to be careful not to optimize patterns where the first instruction
+	// is a jump target (because control flow may come from elsewhere with different stack)
+	jumpTargets := make(map[int]bool)
+	offset := 0
+	for i, instr := range instrs {
+		if instr.originalHadArg {
+			offset += 3
+		} else {
+			offset++
+		}
+		_ = i // We'll use the offset to find target instruction index below
+	}
+
+	// Map offsets to instruction indices
+	offsetToIndex := make(map[int]int)
+	offset = 0
+	for i, instr := range instrs {
+		offsetToIndex[offset] = i
+		if instr.originalHadArg {
+			offset += 3
+		} else {
+			offset++
+		}
+	}
+
+	// Mark jump targets
+	for _, instr := range instrs {
+		if isJumpOp(instr.op) && instr.arg >= 0 {
+			if targetIdx, ok := offsetToIndex[instr.arg]; ok {
+				jumpTargets[targetIdx] = true
+			}
+		}
+	}
+
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed {
 			continue
 		}
+
+		// Skip if this instruction is a jump target - can't safely optimize
+		// because control flow may come from elsewhere with different stack state
+		if jumpTargets[i] {
+			continue
+		}
+
 		// LOAD_CONST True; POP_JUMP_IF_FALSE -> remove both (never jumps)
 		if instrs[i].op == runtime.OpLoadTrue || instrs[i].op == runtime.OpLoadConst {
 			if instrs[i].op == runtime.OpLoadConst {

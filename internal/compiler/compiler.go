@@ -1907,32 +1907,45 @@ func (c *Compiler) compileMatch(s *model.Match) {
 }
 
 func (c *Compiler) compilePattern(pattern model.Pattern) {
+	// All patterns should:
+	// - Expect the element to match on top of stack
+	// - Leave the element on stack
+	// - Push True/False result on top
+	// After: [..., element, True/False]
+
 	switch p := pattern.(type) {
 	case *model.MatchValue:
+		// Dup element, load value, compare
+		c.emit(runtime.OpDup)
 		c.compileExpr(p.Value)
 		c.emit(runtime.OpCompareEq)
 
 	case *model.MatchSingleton:
+		// Dup element, load singleton, compare with 'is'
+		c.emit(runtime.OpDup)
 		c.compileExpr(p.Value)
 		c.emit(runtime.OpCompareIs)
 
 	case *model.MatchAs:
 		if p.Pattern != nil {
-			c.emit(runtime.OpDup)
-			c.compilePattern(p.Pattern)
-			// If pattern matches, bind name
-			matchJump := c.emitJump(runtime.OpPopJumpIfFalse)
-			c.emit(runtime.OpDup)
+			// Pattern with 'as' binding: pattern as name
+			// First match the element against the sub-pattern
+			c.compilePattern(p.Pattern) // Stack: [..., element, True/False]
+			matchJump := c.emitJump(runtime.OpPopJumpIfFalse) // Stack: [..., element]
+			// Pattern matched, bind name
 			if p.Name != nil {
+				c.emit(runtime.OpDup)
 				c.compileStore(p.Name)
 			}
 			c.emitLoadConst(true)
 			endJump := c.emitJump(runtime.OpJump)
 			c.patchJump(matchJump, c.currentOffset())
+			// Pattern didn't match
 			c.emitLoadConst(false)
 			c.patchJump(endJump, c.currentOffset())
 		} else {
-			// Wildcard - always matches
+			// Wildcard (_) or simple capture (name)
+			// Just bind to name (if present) and always match
 			if p.Name != nil {
 				c.emit(runtime.OpDup)
 				c.compileStore(p.Name)
@@ -1941,29 +1954,314 @@ func (c *Compiler) compilePattern(pattern model.Pattern) {
 		}
 
 	case *model.MatchSequence:
-		// Simplified sequence matching
-		c.emitLoadConst(len(p.Patterns))
-		// Length check would go here
-		c.emit(runtime.OpCompareEq)
+		c.compileSequencePattern(p)
 
 	case *model.MatchMapping:
-		// Simplified mapping matching
-		c.emitLoadConst(true)
+		c.compileMappingPattern(p)
+
+	case *model.MatchClass:
+		c.compileClassPattern(p)
 
 	case *model.MatchOr:
-		var orJumps []int
-		for _, subPattern := range p.Patterns[:len(p.Patterns)-1] {
-			c.emit(runtime.OpDup)
-			c.compilePattern(subPattern)
-			orJumps = append(orJumps, c.emitJump(runtime.OpJumpIfTrueOrPop))
-		}
-		c.compilePattern(p.Patterns[len(p.Patterns)-1])
-		for _, jump := range orJumps {
-			c.patchJump(jump, c.currentOffset())
-		}
+		c.compileOrPattern(p)
+
+	case *model.MatchStar:
+		// Star patterns are handled within sequence pattern compilation
+		// If we get here, it's an error (star outside sequence)
+		c.emitLoadConst(true)
 
 	default:
 		c.emitLoadConst(true)
+	}
+}
+
+func (c *Compiler) compileSequencePattern(p *model.MatchSequence) {
+	// Stack: [..., subject]
+	// After: [..., subject, True/False]
+
+	// Find if there's a star pattern and its position
+	starIndex := -1
+	for i, pat := range p.Patterns {
+		if _, isStar := pat.(*model.MatchStar); isStar {
+			starIndex = i
+			break
+		}
+	}
+
+	if starIndex == -1 {
+		// No star pattern - exact length match
+		// Check if it's a sequence with correct length
+		c.emitArg(runtime.OpMatchSequence, len(p.Patterns))
+		failJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+		// Match each sub-pattern by subscripting
+		var subPatternFails []int
+		for i, subPattern := range p.Patterns {
+			// subject[i]
+			c.emit(runtime.OpDup) // Dup subject
+			c.emitLoadConst(int64(i))
+			c.emit(runtime.OpBinarySubscr) // Get subject[i]
+
+			c.compilePattern(subPattern) // Match pattern, leaves element and True/False
+			subPatternFails = append(subPatternFails, c.emitJump(runtime.OpPopJumpIfFalse))
+			c.emit(runtime.OpPop) // Pop the element
+		}
+
+		c.emitLoadConst(true)
+		successJump := c.emitJump(runtime.OpJump)
+
+		// Failure path - each sub-pattern failure leaves 1 element on stack
+		// All sub-pattern failures share a single cleanup path
+		if len(subPatternFails) > 0 {
+			cleanupStart := c.currentOffset()
+			for _, jump := range subPatternFails {
+				c.patchJump(jump, cleanupStart)
+			}
+			c.emit(runtime.OpPop) // Pop the leftover element
+			// Fall through to common failure epilogue
+		}
+
+		// Common failure epilogue
+		c.patchJump(failJump, c.currentOffset())
+		c.emitLoadConst(false)
+
+		c.patchJump(successJump, c.currentOffset())
+	} else {
+		// Has star pattern - variable length match
+		beforeStar := starIndex
+		afterStar := len(p.Patterns) - starIndex - 1
+		minLen := beforeStar + afterStar
+
+		// Check if it's a sequence with minimum length
+		c.emitArg(runtime.OpMatchSequence, -1) // -1 means any length (stored as 65535)
+		failJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+		c.emitArg(runtime.OpMatchStar, minLen) // Check minimum length
+		starFailJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+		var subPatternFails []int
+
+		// Match patterns before star
+		for i := 0; i < beforeStar; i++ {
+			c.emit(runtime.OpDup)
+			c.emitLoadConst(int64(i))
+			c.emit(runtime.OpBinarySubscr)
+			c.compilePattern(p.Patterns[i])
+			subPatternFails = append(subPatternFails, c.emitJump(runtime.OpPopJumpIfFalse))
+			c.emit(runtime.OpPop)
+		}
+
+		// Handle star pattern - bind slice to name
+		starPat := p.Patterns[starIndex].(*model.MatchStar)
+		if starPat.Name != nil {
+			// Extract and bind the star slice: subject[beforeStar : len(subject) - afterStar]
+			c.emit(runtime.OpDup) // Dup subject
+			c.emitArg(runtime.OpExtractStar, (beforeStar<<8)|afterStar)
+			c.compileStore(starPat.Name)
+		}
+
+		// Match patterns after star (from the end)
+		for i := 0; i < afterStar; i++ {
+			c.emit(runtime.OpDup)
+			// Index from end: -(afterStar - i)
+			c.emitLoadConst(int64(-(afterStar - i)))
+			c.emit(runtime.OpBinarySubscr)
+			c.compilePattern(p.Patterns[starIndex+1+i])
+			subPatternFails = append(subPatternFails, c.emitJump(runtime.OpPopJumpIfFalse))
+			c.emit(runtime.OpPop)
+		}
+
+		c.emitLoadConst(true)
+		successJump := c.emitJump(runtime.OpJump)
+
+		// Failure path - each sub-pattern failure leaves 1 element on stack
+		// All sub-pattern failures share a single cleanup path
+		if len(subPatternFails) > 0 {
+			cleanupStart := c.currentOffset()
+			for _, jump := range subPatternFails {
+				c.patchJump(jump, cleanupStart)
+			}
+			c.emit(runtime.OpPop) // Pop the leftover element
+			// Fall through to common failure epilogue
+		}
+
+		// Common failure epilogue
+		c.patchJump(failJump, c.currentOffset())
+		c.patchJump(starFailJump, c.currentOffset())
+		c.emitLoadConst(false)
+
+		c.patchJump(successJump, c.currentOffset())
+	}
+}
+
+func (c *Compiler) compileMappingPattern(p *model.MatchMapping) {
+	// Check if it's a mapping
+	c.emitArg(runtime.OpMatchMapping, len(p.Keys))
+	failJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+	// Track failure jumps with how many values need to be popped
+	type failInfo struct {
+		jump       int
+		valuesToPop int
+	}
+	var subPatternFails []failInfo
+	var keysFailJump int
+
+	numValues := len(p.Patterns)
+	if len(p.Keys) > 0 {
+		// Push keys onto stack and check they exist
+		for _, key := range p.Keys {
+			c.compileExpr(key)
+		}
+		c.emitLoadConst(int64(len(p.Keys)))
+		c.emit(runtime.OpMatchKeys)
+		keysFailJump = c.emitJump(runtime.OpPopJumpIfFalse)
+
+		// Match value patterns against extracted values
+		// After OpMatchKeys success, stack has values in reverse order
+		for i, pat := range p.Patterns {
+			c.compilePattern(pat)
+			// If this pattern fails, we need to pop remaining values (numValues - i)
+			subPatternFails = append(subPatternFails, failInfo{
+				jump:        c.emitJump(runtime.OpPopJumpIfFalse),
+				valuesToPop: numValues - i,
+			})
+			c.emit(runtime.OpPop)
+		}
+	}
+
+	// Handle **rest if present
+	if p.Rest != nil {
+		// Push keys to remove
+		for _, key := range p.Keys {
+			c.compileExpr(key)
+		}
+		c.emitLoadConst(int64(len(p.Keys)))
+		c.emit(runtime.OpCopyDict)
+		c.compileStore(p.Rest)
+	}
+
+	c.emitLoadConst(true)
+	successJump := c.emitJump(runtime.OpJump)
+
+	// Emit failure cleanup paths for each sub-pattern failure
+	var cleanupJumps []int
+	for i := 0; i < len(subPatternFails); i++ {
+		info := subPatternFails[i]
+		c.patchJump(info.jump, c.currentOffset())
+		// Pop remaining values
+		for j := 0; j < info.valuesToPop; j++ {
+			c.emit(runtime.OpPop)
+		}
+		cleanupJumps = append(cleanupJumps, c.emitJump(runtime.OpJump))
+	}
+
+	// Common failure epilogue
+	c.patchJump(failJump, c.currentOffset())
+	if len(p.Keys) > 0 {
+		c.patchJump(keysFailJump, c.currentOffset())
+	}
+	for _, jump := range cleanupJumps {
+		c.patchJump(jump, c.currentOffset())
+	}
+	c.emitLoadConst(false)
+
+	c.patchJump(successJump, c.currentOffset())
+}
+
+func (c *Compiler) compileClassPattern(p *model.MatchClass) {
+	// Push class onto stack
+	c.compileExpr(p.Cls)
+
+	// Match class pattern with positional arguments
+	c.emitArg(runtime.OpMatchClass, len(p.Patterns))
+	failJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+	// Track failure jumps with how many attrs need to be popped
+	type failInfo struct {
+		jump       int
+		attrsToPop int
+	}
+	var subPatternFails []failInfo
+
+	// Match positional patterns against extracted attributes
+	// After OpMatchClass success, stack has: [..., subject, attr_{n-1}, ..., attr_0, True]
+	// After PJIF, stack has: [..., subject, attr_{n-1}, ..., attr_0]
+	numPositional := len(p.Patterns)
+	for i, pat := range p.Patterns {
+		c.compilePattern(pat)
+		// If this pattern fails, we need to pop remaining attrs (numPositional - i)
+		subPatternFails = append(subPatternFails, failInfo{
+			jump:       c.emitJump(runtime.OpPopJumpIfFalse),
+			attrsToPop: numPositional - i,
+		})
+		c.emit(runtime.OpPop)
+	}
+
+	// Handle keyword patterns - each fetches attribute and matches
+	var kwdFails []int
+	for i, attr := range p.KwdAttrs {
+		// Get attribute from subject
+		c.emit(runtime.OpDup) // Dup subject
+		c.emitArg(runtime.OpLoadAttr, c.addName(attr.Name))
+
+		// Match against keyword pattern
+		c.compilePattern(p.KwdPatterns[i])
+		kwdFails = append(kwdFails, c.emitJump(runtime.OpPopJumpIfFalse))
+		c.emit(runtime.OpPop)
+	}
+
+	c.emitLoadConst(true)
+	successJump := c.emitJump(runtime.OpJump)
+
+	// Emit failure cleanup paths for each positional pattern failure
+	// Each path pops the appropriate number of attrs then jumps to common epilogue
+	var cleanupJumps []int
+	for i := 0; i < len(subPatternFails); i++ {
+		info := subPatternFails[i]
+		c.patchJump(info.jump, c.currentOffset())
+		// Pop remaining attrs
+		for j := 0; j < info.attrsToPop; j++ {
+			c.emit(runtime.OpPop)
+		}
+		// Jump to common failure epilogue
+		cleanupJumps = append(cleanupJumps, c.emitJump(runtime.OpJump))
+	}
+
+	// Emit failure cleanup for keyword pattern failures
+	// Each keyword failure leaves 1 attr value on stack
+	for _, jump := range kwdFails {
+		c.patchJump(jump, c.currentOffset())
+		c.emit(runtime.OpPop) // Pop the leftover attr value
+		cleanupJumps = append(cleanupJumps, c.emitJump(runtime.OpJump))
+	}
+
+	// Common failure epilogue
+	c.patchJump(failJump, c.currentOffset())
+	for _, jump := range cleanupJumps {
+		c.patchJump(jump, c.currentOffset())
+	}
+	c.emitLoadConst(false)
+
+	c.patchJump(successJump, c.currentOffset())
+}
+
+func (c *Compiler) compileOrPattern(p *model.MatchOr) {
+	// Try each pattern, short-circuit on first match
+	var orJumps []int
+	for i, subPattern := range p.Patterns {
+		if i < len(p.Patterns)-1 {
+			c.emit(runtime.OpDup)
+		}
+		c.compilePattern(subPattern)
+		if i < len(p.Patterns)-1 {
+			orJumps = append(orJumps, c.emitJump(runtime.OpJumpIfTrueOrPop))
+		}
+	}
+
+	// Patch all successful jumps to the end
+	for _, jump := range orJumps {
+		c.patchJump(jump, c.currentOffset())
 	}
 }
 

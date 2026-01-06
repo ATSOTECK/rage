@@ -164,6 +164,16 @@ const (
 	OpGetAIter     // Get async iterator (__aiter__)
 	OpGetANext     // Get next from async iterator (__anext__)
 
+	// Pattern matching operations (match statement)
+	OpMatchSequence // Match sequence pattern (arg: expected length, or -1 for variable with star)
+	OpMatchMapping  // Match mapping pattern (arg: number of keys)
+	OpMatchClass    // Match class pattern (arg: number of positional attrs)
+	OpMatchKeys     // Check if mapping has required keys (keys on stack)
+	OpCopyDict      // Copy dict for **rest in mapping pattern
+	OpGetLen        // Get length of sequence (non-consuming for pattern match)
+	OpMatchStar     // Handle starred pattern in sequence (arg: minLength)
+	OpExtractStar   // Extract star slice (arg: beforeStar << 8 | afterStar)
+
 	// ==========================================
 	// Specialized/Optimized opcodes (no args)
 	// ==========================================
@@ -356,6 +366,15 @@ var OpcodeNames = map[Opcode]string{
 	OpGetAwaitable: "GET_AWAITABLE",
 	OpGetAIter:     "GET_AITER",
 	OpGetANext:     "GET_ANEXT",
+	// Pattern matching opcodes
+	OpMatchSequence: "MATCH_SEQUENCE",
+	OpMatchMapping:  "MATCH_MAPPING",
+	OpMatchClass:    "MATCH_CLASS",
+	OpMatchKeys:     "MATCH_KEYS",
+	OpCopyDict:      "COPY_DICT",
+	OpGetLen:        "GET_LEN",
+	OpMatchStar:     "MATCH_STAR",
+	OpExtractStar:   "EXTRACT_STAR",
 	// Specialized opcodes
 	OpLoadFast0:          "LOAD_FAST_0",
 	OpLoadFast1:          "LOAD_FAST_1",
@@ -445,6 +464,8 @@ func init() {
 		// Generator/coroutine opcodes (no args)
 		OpYieldValue, OpYieldFrom, OpGenStart,
 		OpGetAwaitable, OpGetAIter, OpGetANext,
+		// Pattern matching no-arg opcodes
+		OpMatchKeys, OpCopyDict, OpGetLen,
 		// Specialized no-arg opcodes
 		OpLoadFast0, OpLoadFast1, OpLoadFast2, OpLoadFast3,
 		OpStoreFast0, OpStoreFast1, OpStoreFast2, OpStoreFast3,
