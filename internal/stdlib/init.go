@@ -14,4 +14,5 @@ func InitAllModules() {
 	InitAsyncioModule()
 	InitJSONModule()
 	InitOSModule()
+	InitDatetimeModule()
 }
