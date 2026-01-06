@@ -99,6 +99,7 @@ type State struct {
 	vm             *runtime.VM
 	compiled       map[string]*runtime.CodeObject
 	enabledModules map[Module]bool
+	closed         bool
 }
 
 // NewState creates a new Python execution state with all stdlib modules enabled.
@@ -225,19 +226,40 @@ func (s *State) EnabledModules() []Module {
 
 // Close releases resources associated with the state.
 // Always call this when done with the state.
+// After Close is called, the state should not be used.
 func (s *State) Close() {
+	if s.closed {
+		return // Already closed, idempotent
+	}
+	s.closed = true
+	// Clear references to allow GC to reclaim memory
 	s.vm = nil
 	s.compiled = nil
+	s.enabledModules = nil
+}
+
+// checkClosed returns an error if the state has been closed.
+func (s *State) checkClosed() error {
+	if s.closed {
+		return fmt.Errorf("operation on closed State")
+	}
+	return nil
 }
 
 // Run compiles and executes Python source code.
 // Returns the result of the last expression or nil.
 func (s *State) Run(source string) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	return s.RunWithFilename(source, "<string>")
 }
 
 // RunWithFilename compiles and executes Python source code with a filename for error messages.
 func (s *State) RunWithFilename(source, filename string) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	code, errs := compiler.CompileSource(source, filename)
 	if len(errs) > 0 {
 		return nil, &CompileErrors{Errors: errs}
@@ -252,6 +274,9 @@ func (s *State) RunWithFilename(source, filename string) (Value, error) {
 
 // RunWithTimeout executes Python code with a timeout.
 func (s *State) RunWithTimeout(source string, timeout time.Duration) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	code, errs := compiler.CompileSource(source, "<string>")
 	if len(errs) > 0 {
 		return nil, &CompileErrors{Errors: errs}
@@ -266,6 +291,9 @@ func (s *State) RunWithTimeout(source string, timeout time.Duration) (Value, err
 
 // RunWithContext executes Python code with a context for cancellation.
 func (s *State) RunWithContext(ctx context.Context, source string) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	code, errs := compiler.CompileSource(source, "<string>")
 	if len(errs) > 0 {
 		return nil, &CompileErrors{Errors: errs}
@@ -281,6 +309,7 @@ func (s *State) RunWithContext(ctx context.Context, source string) (Value, error
 // Compile compiles Python source code without executing it.
 // The compiled code can be executed later with Execute.
 func (s *State) Compile(source, filename string) (*Code, error) {
+	// Note: Compile doesn't need checkClosed as it doesn't use the VM
 	code, errs := compiler.CompileSource(source, filename)
 	if len(errs) > 0 {
 		return nil, &CompileErrors{Errors: errs}
@@ -290,6 +319,9 @@ func (s *State) Compile(source, filename string) (*Code, error) {
 
 // Execute runs previously compiled code.
 func (s *State) Execute(code *Code) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	result, err := s.vm.Execute(code.code)
 	if err != nil {
 		return nil, err
@@ -299,6 +331,9 @@ func (s *State) Execute(code *Code) (Value, error) {
 
 // ExecuteWithTimeout runs previously compiled code with a timeout.
 func (s *State) ExecuteWithTimeout(code *Code, timeout time.Duration) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
 	result, err := s.vm.ExecuteWithTimeout(timeout, code.code)
 	if err != nil {
 		return nil, err
@@ -308,16 +343,25 @@ func (s *State) ExecuteWithTimeout(code *Code, timeout time.Duration) (Value, er
 
 // SetGlobal sets a global variable accessible from Python code.
 func (s *State) SetGlobal(name string, value Value) {
+	if s.closed {
+		return // Silently ignore on closed state
+	}
 	s.vm.SetGlobal(name, toRuntime(value))
 }
 
 // GetGlobal retrieves a global variable set by Python code.
 func (s *State) GetGlobal(name string) Value {
+	if s.closed {
+		return nil
+	}
 	return fromRuntime(s.vm.GetGlobal(name))
 }
 
 // GetGlobals returns all global variables as a map.
 func (s *State) GetGlobals() map[string]Value {
+	if s.closed {
+		return nil
+	}
 	result := make(map[string]Value)
 	for k, v := range s.vm.Globals {
 		result[k] = fromRuntime(v)
@@ -336,6 +380,9 @@ func (s *State) GetGlobals() map[string]Value {
 //
 // Then in Python: greet("World")
 func (s *State) Register(name string, fn GoFunc) {
+	if s.closed {
+		return // Silently ignore on closed state
+	}
 	wrapper := func(vm *runtime.VM) int {
 		// Collect arguments from stack
 		nargs := vm.GetTop()
@@ -359,6 +406,9 @@ func (s *State) Register(name string, fn GoFunc) {
 
 // RegisterBuiltin registers a Go function as a builtin.
 func (s *State) RegisterBuiltin(name string, fn GoFunc) {
+	if s.closed {
+		return // Silently ignore on closed state
+	}
 	wrapper := func(vm *runtime.VM) int {
 		nargs := vm.GetTop()
 		args := make([]Value, nargs)

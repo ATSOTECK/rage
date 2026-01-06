@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -757,7 +758,11 @@ func (vm *VM) initBuiltins() {
 			if len(args) == 0 {
 				return MakeInt(0), nil
 			}
-			return MakeInt(vm.toInt(args[0])), nil
+			i, err := vm.tryToInt(args[0])
+			if err != nil {
+				return nil, err
+			}
+			return MakeInt(i), nil
 		},
 	}
 
@@ -767,7 +772,11 @@ func (vm *VM) initBuiltins() {
 			if len(args) == 0 {
 				return &PyFloat{Value: 0.0}, nil
 			}
-			return &PyFloat{Value: vm.toFloat(args[0])}, nil
+			f, err := vm.tryToFloat(args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &PyFloat{Value: f}, nil
 		},
 	}
 
@@ -3926,16 +3935,26 @@ func (vm *VM) ensureStack(n int) {
 }
 
 func (vm *VM) pop() Value {
+	if vm.frame.SP <= 0 {
+		panic("stack underflow: cannot pop from empty stack")
+	}
 	vm.frame.SP--
 	return vm.frame.Stack[vm.frame.SP]
 }
 
 func (vm *VM) top() Value {
+	if vm.frame.SP <= 0 {
+		panic("stack underflow: cannot access top of empty stack")
+	}
 	return vm.frame.Stack[vm.frame.SP-1]
 }
 
 func (vm *VM) peek(n int) Value {
-	return vm.frame.Stack[vm.frame.SP-1-n]
+	idx := vm.frame.SP - 1 - n
+	if idx < 0 || idx >= vm.frame.SP {
+		panic("stack underflow: invalid peek index")
+	}
+	return vm.frame.Stack[idx]
 }
 
 // Exception handling helpers
@@ -4133,15 +4152,27 @@ func (vm *VM) wrapGoError(err error) *PyException {
 	for _, ep := range exceptionPrefixes {
 		if len(errStr) >= len(ep.prefix) && errStr[:len(ep.prefix)] == ep.prefix {
 			if exc, ok := vm.builtins[ep.excName]; ok {
-				excClass = exc.(*PyClass)
-			} else if ep.fallback != "" {
-				excClass = vm.builtins[ep.fallback].(*PyClass)
+				if cls, ok := exc.(*PyClass); ok {
+					excClass = cls
+				}
+			}
+			if excClass == nil && ep.fallback != "" {
+				if fb, ok := vm.builtins[ep.fallback]; ok {
+					if cls, ok := fb.(*PyClass); ok {
+						excClass = cls
+					}
+				}
 			}
 			break
 		}
 	}
 	if excClass == nil {
-		excClass = vm.builtins["RuntimeError"].(*PyClass)
+		// Fallback to RuntimeError with safe type assertion
+		if re, ok := vm.builtins["RuntimeError"]; ok {
+			if cls, ok := re.(*PyClass); ok {
+				excClass = cls
+			}
+		}
 	}
 
 	return &PyException{
@@ -4189,42 +4220,74 @@ func (vm *VM) toValue(v any) Value {
 }
 
 func (vm *VM) toInt(v Value) int64 {
+	i, _ := vm.tryToInt(v)
+	return i
+}
+
+// tryToInt converts a value to int64, returning an error if conversion fails.
+// Use this for Python's int() builtin where ValueError should be raised on failure.
+func (vm *VM) tryToInt(v Value) (int64, error) {
 	switch val := v.(type) {
 	case *PyInt:
-		return val.Value
+		return val.Value, nil
 	case *PyFloat:
-		return int64(val.Value)
+		return int64(val.Value), nil
 	case *PyBool:
 		if val.Value {
-			return 1
+			return 1, nil
 		}
-		return 0
+		return 0, nil
 	case *PyString:
-		var i int64
-		fmt.Sscanf(val.Value, "%d", &i)
-		return i
+		s := strings.TrimSpace(val.Value)
+		if s == "" {
+			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+		}
+		// Try parsing as integer
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			// Try parsing as float then converting
+			f, ferr := strconv.ParseFloat(s, 64)
+			if ferr != nil {
+				return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			}
+			return int64(f), nil
+		}
+		return i, nil
 	default:
-		return 0
+		return 0, fmt.Errorf("TypeError: int() argument must be a string or a number, not '%s'", vm.typeName(v))
 	}
 }
 
 func (vm *VM) toFloat(v Value) float64 {
+	f, _ := vm.tryToFloat(v)
+	return f
+}
+
+// tryToFloat converts a value to float64, returning an error if conversion fails.
+// Use this for Python's float() builtin where ValueError should be raised on failure.
+func (vm *VM) tryToFloat(v Value) (float64, error) {
 	switch val := v.(type) {
 	case *PyInt:
-		return float64(val.Value)
+		return float64(val.Value), nil
 	case *PyFloat:
-		return val.Value
+		return val.Value, nil
 	case *PyBool:
 		if val.Value {
-			return 1.0
+			return 1.0, nil
 		}
-		return 0.0
+		return 0.0, nil
 	case *PyString:
-		var f float64
-		fmt.Sscanf(val.Value, "%f", &f)
-		return f
+		s := strings.TrimSpace(val.Value)
+		if s == "" {
+			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
+		}
+		return f, nil
 	default:
-		return 0.0
+		return 0, fmt.Errorf("TypeError: float() argument must be a string or a number, not '%s'", vm.typeName(v))
 	}
 }
 
@@ -5416,13 +5479,15 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				var parts []Value
 				current := ""
-				for i := 0; i < len(o.Value); i++ {
+				// Manually manage loop index to avoid confusion with separator length
+				for i := 0; i < len(o.Value); {
 					if i+len(sep) <= len(o.Value) && o.Value[i:i+len(sep)] == sep {
 						parts = append(parts, &PyString{Value: current})
 						current = ""
-						i += len(sep) - 1
+						i += len(sep)
 					} else {
 						current += string(o.Value[i])
+						i++
 					}
 				}
 				parts = append(parts, &PyString{Value: current})
@@ -5783,12 +5848,20 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 
 	// Call the Go function - it returns number of results
 	var nResults int
+	var panicErr *PyPanicError
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Convert panic to error - push error onto stack
-				tempFrame.Stack[tempFrame.SP] = NewString(fmt.Sprintf("%v", r))
-				tempFrame.SP++
+				// Check if it's a typed PyPanicError for better exception mapping
+				if pe, ok := r.(*PyPanicError); ok {
+					panicErr = pe
+				} else {
+					// Generic panic - convert to string
+					panicErr = &PyPanicError{
+						ExcType: "RuntimeError",
+						Message: fmt.Sprintf("%v", r),
+					}
+				}
 				nResults = -1 // Indicate error
 			}
 		}()
@@ -5800,8 +5873,7 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 
 	// Handle error case
 	if nResults < 0 {
-		errVal := tempFrame.Stack[tempFrame.SP-1]
-		return nil, fmt.Errorf("%s", vm.str(errVal))
+		return nil, fmt.Errorf("%s: %s", panicErr.ExcType, panicErr.Message)
 	}
 
 	// Get results from stack

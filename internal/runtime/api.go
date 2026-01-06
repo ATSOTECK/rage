@@ -575,17 +575,59 @@ func FromGoValue(v any) Value {
 // Error Helpers
 // =====================================
 
+// PyPanicError is used to propagate Python exceptions through Go panics.
+// This type is caught by the VM's recover and converted to a proper PyException.
+type PyPanicError struct {
+	ExcType string // Exception type name (e.g., "TypeError", "ValueError")
+	Message string // Error message
+}
+
+func (e *PyPanicError) Error() string {
+	return fmt.Sprintf("%s: %s", e.ExcType, e.Message)
+}
+
 // ArgError raises an argument error
 func (vm *VM) ArgError(n int, msg string) {
-	panic(fmt.Sprintf("bad argument #%d: %s", n, msg))
+	panic(&PyPanicError{
+		ExcType: "TypeError",
+		Message: fmt.Sprintf("bad argument #%d: %s", n, msg),
+	})
 }
 
 // TypeError raises a type error
 func (vm *VM) TypeError(expected string, got Value) {
-	panic(fmt.Sprintf("expected %s, got %s", expected, vm.typeName(got)))
+	panic(&PyPanicError{
+		ExcType: "TypeError",
+		Message: fmt.Sprintf("expected %s, got %s", expected, vm.typeName(got)),
+	})
 }
 
-// RaiseError raises a Python-style error
+// RaiseError raises a Python-style error.
+// The format string can optionally start with an exception type prefix like "ValueError: ".
 func (vm *VM) RaiseError(format string, args ...any) {
-	panic(fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf(format, args...)
+	excType := "RuntimeError"
+
+	// Parse exception type from message if present (e.g., "ValueError: message")
+	for _, prefix := range []string{
+		"TypeError", "ValueError", "KeyError", "IndexError", "AttributeError",
+		"RuntimeError", "StopIteration", "NotImplementedError", "OSError",
+		"FileNotFoundError", "PermissionError", "FileExistsError", "IOError",
+		"ZeroDivisionError", "OverflowError", "RecursionError",
+	} {
+		if len(msg) > len(prefix)+2 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
+			excType = prefix
+			msg = msg[len(prefix)+1:]
+			// Trim leading space
+			if len(msg) > 0 && msg[0] == ' ' {
+				msg = msg[1:]
+			}
+			break
+		}
+	}
+
+	panic(&PyPanicError{
+		ExcType: excType,
+		Message: msg,
+	})
 }

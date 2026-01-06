@@ -984,8 +984,9 @@ func (o *Optimizer) optimizeJumps(instrs []*instruction, code *runtime.CodeObjec
 		if instrs[i].op == runtime.OpLoadTrue || instrs[i].op == runtime.OpLoadConst {
 			if instrs[i].op == runtime.OpLoadConst {
 				// Check if it's loading True
-				if instrs[i].arg < len(code.Constants) {
-					if b, ok := code.Constants[instrs[i].arg].(bool); !ok || !b {
+				arg := instrs[i].arg
+				if arg >= 0 && arg < len(code.Constants) {
+					if b, ok := code.Constants[arg].(bool); !ok || !b {
 						continue
 					}
 				}
@@ -999,8 +1000,9 @@ func (o *Optimizer) optimizeJumps(instrs []*instruction, code *runtime.CodeObjec
 		// LOAD_CONST False; POP_JUMP_IF_FALSE -> JUMP
 		if instrs[i].op == runtime.OpLoadFalse || instrs[i].op == runtime.OpLoadConst {
 			if instrs[i].op == runtime.OpLoadConst {
-				if instrs[i].arg < len(code.Constants) {
-					if b, ok := code.Constants[instrs[i].arg].(bool); !ok || b {
+				arg := instrs[i].arg
+				if arg >= 0 && arg < len(code.Constants) {
+					if b, ok := code.Constants[arg].(bool); !ok || b {
 						continue
 					}
 				}
@@ -1153,8 +1155,9 @@ func (o *Optimizer) detectIncrementPattern(instrs []*instruction, code *runtime.
 		if instrs[i+1].op == runtime.OpLoadOne {
 			isOne = true
 		} else if instrs[i+1].op == runtime.OpLoadConst {
-			if instrs[i+1].arg < len(code.Constants) {
-				switch v := code.Constants[instrs[i+1].arg].(type) {
+			arg := instrs[i+1].arg
+			if arg >= 0 && arg < len(code.Constants) {
+				switch v := code.Constants[arg].(type) {
 				case int64:
 					isOne = v == 1
 				case int:
@@ -1389,7 +1392,7 @@ func (o *Optimizer) isLoadOne(instr *instruction, code *runtime.CodeObject) bool
 	if instr.op == runtime.OpLoadOne {
 		return true
 	}
-	if instr.op == runtime.OpLoadConst && instr.arg < len(code.Constants) {
+	if instr.op == runtime.OpLoadConst && instr.arg >= 0 && instr.arg < len(code.Constants) {
 		switch v := code.Constants[instr.arg].(type) {
 		case int64:
 			return v == 1
@@ -1750,7 +1753,7 @@ func (o *Optimizer) isIntegerLoad(instr *instruction, code *runtime.CodeObject) 
 	case runtime.OpLoadZero, runtime.OpLoadOne:
 		return true
 	case runtime.OpLoadConst:
-		if instr.arg < len(code.Constants) {
+		if instr.arg >= 0 && instr.arg < len(code.Constants) {
 			switch code.Constants[instr.arg].(type) {
 			case int64, int:
 				return true

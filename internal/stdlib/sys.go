@@ -1,10 +1,10 @@
 package stdlib
 
 import (
+	"encoding/binary"
 	"math"
 	"os"
 	goruntime "runtime"
-	"unsafe"
 
 	gopherpy "github.com/ATSOTECK/rage/internal/runtime"
 )
@@ -116,9 +116,10 @@ func getPlatform() string {
 
 // getByteOrder returns the native byte order
 func getByteOrder() string {
-	// Check endianness
-	var x uint32 = 0x01020304
-	if *(*byte)(unsafe.Pointer(&x)) == 0x04 {
+	// Safely detect endianness using a buffer
+	buf := [2]byte{}
+	binary.NativeEndian.PutUint16(buf[:], 0x0102)
+	if buf[0] == 0x02 {
 		return "little"
 	}
 	return "big"
