@@ -1,141 +1,150 @@
 # Test: Operators
 # Tests all Python operators
 
-results = {}
+def test_arithmetic():
+    expect(15, 10 + 5)
+    expect(5, 10 - 5)
+    expect(50, 10 * 5)
+    expect(2.5, 10 / 4)
+    expect(3, 10 // 3)
+    expect(1, 10 % 3)
+    expect(1024, 2 ** 10)
+    expect(5, +5)
+    expect(-5, -5)
 
-# Arithmetic operators
-results["add"] = 10 + 5
-results["subtract"] = 10 - 5
-results["multiply"] = 10 * 5
-results["divide"] = 10 / 4
-results["floor_divide"] = 10 // 3
-results["modulo"] = 10 % 3
-results["power"] = 2 ** 10
-results["unary_positive"] = +5
-results["unary_negative"] = -5
+def test_float_arithmetic():
+    expect(4.0, 1.5 + 2.5)
+    expect(10.0, 2.5 * 4.0)
+    expect(3.5, 7.0 / 2.0)
+    expect(7.5, 5 + 2.5)
+    expect(7.5, 3 * 2.5)
 
-# Float arithmetic
-results["float_add"] = 1.5 + 2.5
-results["float_multiply"] = 2.5 * 4.0
-results["float_divide"] = 7.0 / 2.0
+def test_comparison():
+    expect(True, 5 == 5)
+    expect(False, 5 == 6)
+    expect(True, 5 != 6)
+    expect(False, 5 != 5)
+    expect(True, 5 < 10)
+    expect(False, 10 < 5)
+    expect(True, 5 <= 5)
+    expect(False, 6 <= 5)
+    expect(True, 10 > 5)
+    expect(False, 5 > 10)
+    expect(True, 5 >= 5)
+    expect(False, 4 >= 5)
 
-# Mixed arithmetic
-results["int_float_add"] = 5 + 2.5
-results["int_float_multiply"] = 3 * 2.5
+def test_chained_comparison():
+    expect(True, 1 < 5 < 10)
+    expect(False, 1 < 10 < 5)
+    expect(True, 1 <= 2 <= 3 <= 4)
 
-# Comparison operators
-results["equal_true"] = 5 == 5
-results["equal_false"] = 5 == 6
-results["not_equal_true"] = 5 != 6
-results["not_equal_false"] = 5 != 5
-results["less_than_true"] = 5 < 10
-results["less_than_false"] = 10 < 5
-results["less_equal_true"] = 5 <= 5
-results["less_equal_false"] = 6 <= 5
-results["greater_than_true"] = 10 > 5
-results["greater_than_false"] = 5 > 10
-results["greater_equal_true"] = 5 >= 5
-results["greater_equal_false"] = 4 >= 5
+def test_string_comparison():
+    expect(True, "hello" == "hello")
+    expect(True, "hello" != "world")
+    expect(True, "apple" < "banana")
 
-# Chained comparisons
-results["chained_true"] = 1 < 5 < 10
-results["chained_false"] = 1 < 10 < 5
-results["chained_triple"] = 1 <= 2 <= 3 <= 4
+def test_identity():
+    a = [1, 2, 3]
+    b = a
+    c = [1, 2, 3]
+    expect(True, a is b)
+    expect(False, a is c)
+    expect(True, a is not c)
+    expect(False, a is not b)
+    expect(True, None is None)
 
-# String comparisons
-results["str_equal"] = "hello" == "hello"
-results["str_not_equal"] = "hello" != "world"
-results["str_less_than"] = "apple" < "banana"
+def test_membership():
+    expect(True, 2 in [1, 2, 3])
+    expect(True, 5 not in [1, 2, 3])
+    expect(True, "ell" in "hello")
+    expect(True, "xyz" not in "hello")
+    expect(True, "a" in {"a": 1, "b": 2})
+    expect(True, 2 in {1, 2, 3})
+    expect(True, 2 in (1, 2, 3))
 
-# Identity operators
-a = [1, 2, 3]
-b = a
-c = [1, 2, 3]
-results["is_same"] = a is b
-results["is_different"] = a is c
-results["is_not_same"] = a is not c
-results["is_not_different"] = a is not b
-results["none_is_none"] = None is None
+def test_logical():
+    expect(True, True and True)
+    expect(False, True and False)
+    expect(True, False or True)
+    expect(False, False or False)
+    expect(True, not False)
+    expect(False, not True)
 
-# Membership operators
-results["in_list"] = 2 in [1, 2, 3]
-results["not_in_list"] = 5 not in [1, 2, 3]
-results["in_string"] = "ell" in "hello"
-results["not_in_string"] = "xyz" not in "hello"
-results["in_dict"] = "a" in {"a": 1, "b": 2}
-results["in_set"] = 2 in {1, 2, 3}
-results["in_tuple"] = 2 in (1, 2, 3)
+def test_short_circuit():
+    expect(False, False and (1 / 0))
+    expect(True, True or (1 / 0))
 
-# Logical operators
-results["and_true"] = True and True
-results["and_false"] = True and False
-results["or_true"] = False or True
-results["or_false"] = False or False
-results["not_true"] = not False
-results["not_false"] = not True
+def test_logical_values():
+    expect(10, 5 and 10)
+    expect(10, 0 or 10)
+    expect(0, 5 and 0)
+    expect(5, 0 or 5)
 
-# Short-circuit evaluation
-results["and_short_circuit"] = False and (1 / 0)  # Should not raise
-results["or_short_circuit"] = True or (1 / 0)  # Should not raise
+def test_bitwise():
+    expect(8, 0b1100 & 0b1010)
+    expect(14, 0b1100 | 0b1010)
+    expect(6, 0b1100 ^ 0b1010)
+    expect(-1, ~0)
+    expect(16, 1 << 4)
+    expect(4, 16 >> 2)
 
-# Logical with non-booleans
-results["and_values"] = 5 and 10  # Returns last truthy or first falsy
-results["or_values"] = 0 or 10  # Returns first truthy or last value
-results["and_with_zero"] = 5 and 0
-results["or_with_zero"] = 0 or 5
+def test_augmented_assignment():
+    x = 10
+    x += 5
+    expect(15, x)
 
-# Bitwise operators
-results["bit_and"] = 0b1100 & 0b1010
-results["bit_or"] = 0b1100 | 0b1010
-results["bit_xor"] = 0b1100 ^ 0b1010
-results["bit_not"] = ~0
-results["bit_left_shift"] = 1 << 4
-results["bit_right_shift"] = 16 >> 2
+    x = 10
+    x -= 3
+    expect(7, x)
 
-# Augmented assignment
-x = 10
-x += 5
-results["aug_add"] = x
+    x = 10
+    x *= 2
+    expect(20, x)
 
-x = 10
-x -= 3
-results["aug_sub"] = x
+    x = 10
+    x //= 3
+    expect(3, x)
 
-x = 10
-x *= 2
-results["aug_mul"] = x
+    x = 10
+    x %= 3
+    expect(1, x)
 
-x = 10
-x //= 3
-results["aug_floordiv"] = x
+    x = 2
+    x **= 4
+    expect(16, x)
 
-x = 10
-x %= 3
-results["aug_mod"] = x
+    x = 0b1111
+    x &= 0b1010
+    expect(10, x)
 
-x = 2
-x **= 4
-results["aug_pow"] = x
+    x = 0b1100
+    x |= 0b0011
+    expect(15, x)
 
-x = 0b1111
-x &= 0b1010
-results["aug_and"] = x
+def test_ternary():
+    expect("yes", "yes" if True else "no")
+    expect("no", "yes" if False else "no")
+    expect("even", "even" if 10 % 2 == 0 else "odd")
 
-x = 0b1100
-x |= 0b0011
-results["aug_or"] = x
+def test_sequence_operators():
+    expect("hello world", "hello" + " " + "world")
+    expect("abababab", "ab" * 4)
+    expect([1, 2, 3, 4], [1, 2] + [3, 4])
+    expect([1, 2, 1, 2, 1, 2], [1, 2] * 3)
 
-# Ternary/conditional operator
-results["ternary_true"] = "yes" if True else "no"
-results["ternary_false"] = "yes" if False else "no"
-results["ternary_expr"] = "even" if 10 % 2 == 0 else "odd"
-
-# String operators
-results["str_concat"] = "hello" + " " + "world"
-results["str_repeat"] = "ab" * 4
-
-# List operators
-results["list_concat"] = [1, 2] + [3, 4]
-results["list_repeat"] = [1, 2] * 3
+test("arithmetic", test_arithmetic)
+test("float_arithmetic", test_float_arithmetic)
+test("comparison", test_comparison)
+test("chained_comparison", test_chained_comparison)
+test("string_comparison", test_string_comparison)
+test("identity", test_identity)
+test("membership", test_membership)
+test("logical", test_logical)
+test("short_circuit", test_short_circuit)
+test("logical_values", test_logical_values)
+test("bitwise", test_bitwise)
+test("augmented_assignment", test_augmented_assignment)
+test("ternary", test_ternary)
+test("sequence_operators", test_sequence_operators)
 
 print("Operators tests completed")

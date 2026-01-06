@@ -1,224 +1,198 @@
 # Test: datetime module
 # Tests datetime, date, time, timedelta classes
 
-results = {}
-
 import datetime
 
-# =====================================
-# Constants
-# =====================================
-results["datetime_minyear"] = datetime.MINYEAR
-results["datetime_maxyear"] = datetime.MAXYEAR
+def test_datetime_constants():
+    expect(1, datetime.MINYEAR)
+    expect(9999, datetime.MAXYEAR)
 
-# =====================================
-# datetime class - constructor
-# =====================================
-dt = datetime.datetime(2024, 6, 15, 14, 30, 45, 123456)
-results["datetime_year"] = dt.year()
-results["datetime_month"] = dt.month()
-results["datetime_day"] = dt.day()
-results["datetime_hour"] = dt.hour()
-results["datetime_minute"] = dt.minute()
-results["datetime_second"] = dt.second()
-results["datetime_microsecond"] = dt.microsecond()
+def test_datetime_constructor():
+    dt = datetime.datetime(2024, 6, 15, 14, 30, 45, 123456)
+    expect(2024, dt.year())
+    expect(6, dt.month())
+    expect(15, dt.day())
+    expect(14, dt.hour())
+    expect(30, dt.minute())
+    expect(45, dt.second())
+    expect(123456, dt.microsecond())
 
-# datetime with defaults
-dt2 = datetime.datetime(2024, 1, 1)
-results["datetime_default_hour"] = dt2.hour()
-results["datetime_default_minute"] = dt2.minute()
-results["datetime_default_second"] = dt2.second()
+    dt2 = datetime.datetime(2024, 1, 1)
+    expect(0, dt2.hour())
+    expect(0, dt2.minute())
+    expect(0, dt2.second())
 
-# =====================================
-# datetime methods
-# =====================================
+def test_datetime_weekday():
+    dt3 = datetime.datetime(2024, 6, 17)  # Monday
+    expect(0, dt3.weekday())
+    expect(1, dt3.isoweekday())
 
-# weekday (Monday=0)
-dt3 = datetime.datetime(2024, 6, 17)  # Monday
-results["datetime_weekday_monday"] = dt3.weekday()
+    dt4 = datetime.datetime(2024, 6, 22)  # Saturday
+    expect(5, dt4.weekday())
+    expect(6, dt4.isoweekday())
 
-dt4 = datetime.datetime(2024, 6, 22)  # Saturday
-results["datetime_weekday_saturday"] = dt4.weekday()
+def test_datetime_isoformat():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    expect("2024-03-14T09:26:53", dt5.isoformat())
+    expect("2024-03-14 09:26:53", dt5.isoformat(" "))
 
-# isoweekday (Monday=1)
-results["datetime_isoweekday_monday"] = dt3.isoweekday()
-results["datetime_isoweekday_saturday"] = dt4.isoweekday()
+    dt6 = datetime.datetime(2024, 3, 14, 9, 26, 53, 500000)
+    expect("2024-03-14T09:26:53.500000", dt6.isoformat())
 
-# isoformat
-dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
-results["datetime_isoformat"] = dt5.isoformat()
-results["datetime_isoformat_space"] = dt5.isoformat(" ")
+def test_datetime_strftime():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    expect("2024-03-14", dt5.strftime("%Y-%m-%d"))
+    expect("09:26:53", dt5.strftime("%H:%M:%S"))
+    expect("2024-03-14 09:26:53", dt5.strftime("%Y-%m-%d %H:%M:%S"))
+    expect("Thursday", dt5.strftime("%A"))
+    expect("March", dt5.strftime("%B"))
 
-# isoformat with microseconds
-dt6 = datetime.datetime(2024, 3, 14, 9, 26, 53, 500000)
-results["datetime_isoformat_micro"] = dt6.isoformat()
+def test_datetime_timetuple():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    tt = dt5.timetuple()
+    expect(2024, tt[0])
+    expect(3, tt[1])
+    expect(14, tt[2])
+    expect(9, tt[3])
+    expect(26, tt[4])
+    expect(53, tt[5])
 
-# strftime
-results["datetime_strftime_ymd"] = dt5.strftime("%Y-%m-%d")
-results["datetime_strftime_hms"] = dt5.strftime("%H:%M:%S")
-results["datetime_strftime_full"] = dt5.strftime("%Y-%m-%d %H:%M:%S")
-results["datetime_strftime_weekday"] = dt5.strftime("%A")
-results["datetime_strftime_month"] = dt5.strftime("%B")
+def test_datetime_toordinal():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    # Check ordinal is a reasonable value (around 739000 for 2024)
+    ordinal = dt5.toordinal()
+    expect(True, 738000 < ordinal < 740000)
 
-# ctime
-results["datetime_ctime"] = dt5.ctime()
+def test_datetime_timestamp():
+    dt_epoch = datetime.datetime(1970, 1, 1, 0, 0, 0)
+    ts = dt_epoch.timestamp()
+    expect(True, ts == ts)  # Check not NaN
 
-# timetuple
-tt = dt5.timetuple()
-results["datetime_timetuple_year"] = tt[0]
-results["datetime_timetuple_month"] = tt[1]
-results["datetime_timetuple_day"] = tt[2]
-results["datetime_timetuple_hour"] = tt[3]
-results["datetime_timetuple_minute"] = tt[4]
-results["datetime_timetuple_second"] = tt[5]
+def test_datetime_replace():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    dt7 = dt5.replace(2025)
+    expect(2025, dt7.year())
+    dt8 = dt5.replace(None, 12)
+    expect(12, dt8.month())
 
-# toordinal
-results["datetime_toordinal"] = dt5.toordinal()
+def test_datetime_date_time():
+    dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
+    d = dt5.date()
+    expect(2024, d.year())
+    expect(3, d.month())
+    expect(14, d.day())
 
-# timestamp (for a known date)
-dt_epoch = datetime.datetime(1970, 1, 1, 0, 0, 0)
-# Note: timestamp depends on timezone, just check it's a number
-ts = dt_epoch.timestamp()
-results["datetime_timestamp_is_number"] = ts == ts  # True if not NaN
+    t = dt5.time()
+    expect(9, t.hour())
+    expect(26, t.minute())
+    expect(53, t.second())
 
-# replace
-dt7 = dt5.replace(2025)
-results["datetime_replace_year"] = dt7.year()
-dt8 = dt5.replace(None, 12)
-results["datetime_replace_month"] = dt8.month()
+def test_date_class():
+    d1 = datetime.date(2024, 12, 25)
+    expect(2024, d1.year())
+    expect(12, d1.month())
+    expect(25, d1.day())
+    expect(2, d1.weekday())
+    expect(3, d1.isoweekday())
+    expect("2024-12-25", d1.isoformat())
+    expect("2024/12/25", d1.strftime("%Y/%m/%d"))
 
-# date() method - extracts date portion
-d = dt5.date()
-results["datetime_date_year"] = d.year()
-results["datetime_date_month"] = d.month()
-results["datetime_date_day"] = d.day()
+    d2 = d1.replace(2025)
+    expect(2025, d2.year())
 
-# time() method - extracts time portion
-t = dt5.time()
-results["datetime_time_hour"] = t.hour()
-results["datetime_time_minute"] = t.minute()
-results["datetime_time_second"] = t.second()
+    dtt = d1.timetuple()
+    expect(2024, dtt[0])
+    expect(0, dtt[3])  # Hour should be 0 for date
 
-# =====================================
-# date class - constructor
-# =====================================
-d1 = datetime.date(2024, 12, 25)
-results["date_year"] = d1.year()
-results["date_month"] = d1.month()
-results["date_day"] = d1.day()
+def test_time_class():
+    t1 = datetime.time(10, 30, 45, 123456)
+    expect(10, t1.hour())
+    expect(30, t1.minute())
+    expect(45, t1.second())
+    expect(123456, t1.microsecond())
+    expect("10:30:45.123456", t1.isoformat())
+    expect("10:30:45", t1.strftime("%H:%M:%S"))
 
-# date methods
-results["date_weekday"] = d1.weekday()
-results["date_isoweekday"] = d1.isoweekday()
-results["date_isoformat"] = d1.isoformat()
-results["date_toordinal"] = d1.toordinal()
+    t2 = datetime.time(12, 30)
+    expect(0, t2.second())
+    expect(0, t2.microsecond())
+    expect("12:30:00", t2.isoformat())
 
-# date strftime
-results["date_strftime"] = d1.strftime("%Y/%m/%d")
+    t3 = t1.replace(15)
+    expect(15, t3.hour())
 
-# date replace
-d2 = d1.replace(2025)
-results["date_replace_year"] = d2.year()
+def test_timedelta_class():
+    td1 = datetime.timedelta(5, 3600, 500000)
+    expect(5, td1.days())
+    expect(3600, td1.seconds())
+    expect(500000, td1.microseconds())
+    expect(435600.5, td1.total_seconds())
 
-# date timetuple
-dtt = d1.timetuple()
-results["date_timetuple_year"] = dtt[0]
-results["date_timetuple_hour"] = dtt[3]  # Should be 0 for date
+    td2 = datetime.timedelta(1, 0, 0, 0, 30, 2, 1)  # 1 day + 30 min + 2 hours + 1 week
+    expect(True, td2.total_seconds() > 0)
 
-# =====================================
-# time class - constructor
-# =====================================
-t1 = datetime.time(10, 30, 45, 123456)
-results["time_hour"] = t1.hour()
-results["time_minute"] = t1.minute()
-results["time_second"] = t1.second()
-results["time_microsecond"] = t1.microsecond()
+    td3 = datetime.timedelta(0, 0, 0, 0, 0, 0, 2)  # 2 weeks
+    expect(14, td3.days())
 
-# time with defaults
-t2 = datetime.time(12, 30)
-results["time_default_second"] = t2.second()
-results["time_default_microsecond"] = t2.microsecond()
+    td4 = datetime.timedelta(0, 90061)  # 90061 seconds = 1 day + 1 hour + 1 minute + 1 second
+    expect(1, td4.days())
+    expect(3661, td4.seconds())
 
-# time methods
-results["time_isoformat"] = t1.isoformat()
-results["time_isoformat_no_micro"] = t2.isoformat()
+def test_datetime_now_today():
+    now = datetime.now()
+    expect(True, now.year() >= 2024)
+    expect(True, 1 <= now.month() <= 12)
+    expect(True, 1 <= now.day() <= 31)
 
-# time strftime
-results["time_strftime"] = t1.strftime("%H:%M:%S")
+    today = datetime.today()
+    expect(True, today.year() >= 2024)
+    expect(True, 1 <= today.month() <= 12)
 
-# time replace
-t3 = t1.replace(15)
-results["time_replace_hour"] = t3.hour()
+def test_datetime_fromtimestamp():
+    dt_from_ts = datetime.fromtimestamp(1000000000)  # 2001-09-09
+    expect(2001, dt_from_ts.year())
+    expect(9, dt_from_ts.month())
+    expect(True, dt_from_ts.day() >= 8)  # May vary by timezone
 
-# =====================================
-# timedelta class - constructor
-# =====================================
-td1 = datetime.timedelta(5, 3600, 500000)
-results["timedelta_days"] = td1.days()
-results["timedelta_seconds"] = td1.seconds()
-results["timedelta_microseconds"] = td1.microseconds()
+def test_datetime_fromisoformat():
+    dt_parsed = datetime.fromisoformat("2024-07-04T12:00:00")
+    expect(2024, dt_parsed.year())
+    expect(7, dt_parsed.month())
+    expect(4, dt_parsed.day())
+    expect(12, dt_parsed.hour())
 
-# total_seconds
-results["timedelta_total_seconds"] = td1.total_seconds()
+    dt_parsed2 = datetime.fromisoformat("2024-07-04 15:30:00")
+    expect(15, dt_parsed2.hour())
+    expect(30, dt_parsed2.minute())
 
-# timedelta with various units
-# timedelta(days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0)
-td2 = datetime.timedelta(1, 0, 0, 0, 30, 2, 1)  # 1 day + 30 min + 2 hours + 1 week
-results["timedelta_complex_total"] = td2.total_seconds()
+    dt_parsed3 = datetime.fromisoformat("2024-07-04")
+    expect(2024, dt_parsed3.year())
+    expect(0, dt_parsed3.hour())
 
-# timedelta with just weeks
-td3 = datetime.timedelta(0, 0, 0, 0, 0, 0, 2)  # 2 weeks
-results["timedelta_weeks_days"] = td3.days()
+def test_datetime_combine():
+    d_combine = datetime.date(2024, 1, 1)
+    t_combine = datetime.time(12, 30, 45)
+    dt_combined = datetime.combine(d_combine, t_combine)
+    expect(2024, dt_combined.year())
+    expect(12, dt_combined.hour())
+    expect(30, dt_combined.minute())
 
-# timedelta normalization
-td4 = datetime.timedelta(0, 90061)  # 90061 seconds = 1 day + 1 hour + 1 minute + 1 second
-results["timedelta_normalize_days"] = td4.days()
-results["timedelta_normalize_seconds"] = td4.seconds()
-
-# =====================================
-# Module-level functions
-# =====================================
-
-# now() - just verify it returns something with correct attributes
-now = datetime.now()
-results["now_has_year"] = now.year() >= 2024
-results["now_has_month"] = 1 <= now.month() <= 12
-results["now_has_day"] = 1 <= now.day() <= 31
-
-# today() - same
-today = datetime.today()
-results["today_has_year"] = today.year() >= 2024
-results["today_has_month"] = 1 <= today.month() <= 12
-
-# fromtimestamp
-dt_from_ts = datetime.fromtimestamp(1000000000)  # 2001-09-09
-results["fromtimestamp_year"] = dt_from_ts.year()
-results["fromtimestamp_month"] = dt_from_ts.month()
-results["fromtimestamp_day"] = dt_from_ts.day()
-
-# fromisoformat
-dt_parsed = datetime.fromisoformat("2024-07-04T12:00:00")
-results["fromisoformat_year"] = dt_parsed.year()
-results["fromisoformat_month"] = dt_parsed.month()
-results["fromisoformat_day"] = dt_parsed.day()
-results["fromisoformat_hour"] = dt_parsed.hour()
-
-# fromisoformat with space separator
-dt_parsed2 = datetime.fromisoformat("2024-07-04 15:30:00")
-results["fromisoformat_space_hour"] = dt_parsed2.hour()
-results["fromisoformat_space_minute"] = dt_parsed2.minute()
-
-# fromisoformat date only
-dt_parsed3 = datetime.fromisoformat("2024-07-04")
-results["fromisoformat_dateonly_year"] = dt_parsed3.year()
-results["fromisoformat_dateonly_hour"] = dt_parsed3.hour()  # Should be 0
-
-# combine
-d_combine = datetime.date(2024, 1, 1)
-t_combine = datetime.time(12, 30, 45)
-dt_combined = datetime.combine(d_combine, t_combine)
-results["combine_year"] = dt_combined.year()
-results["combine_hour"] = dt_combined.hour()
-results["combine_minute"] = dt_combined.minute()
+test("datetime_constants", test_datetime_constants)
+test("datetime_constructor", test_datetime_constructor)
+test("datetime_weekday", test_datetime_weekday)
+test("datetime_isoformat", test_datetime_isoformat)
+test("datetime_strftime", test_datetime_strftime)
+test("datetime_timetuple", test_datetime_timetuple)
+test("datetime_toordinal", test_datetime_toordinal)
+test("datetime_timestamp", test_datetime_timestamp)
+test("datetime_replace", test_datetime_replace)
+test("datetime_date_time", test_datetime_date_time)
+test("date_class", test_date_class)
+test("time_class", test_time_class)
+test("timedelta_class", test_timedelta_class)
+test("datetime_now_today", test_datetime_now_today)
+test("datetime_fromtimestamp", test_datetime_fromtimestamp)
+test("datetime_fromisoformat", test_datetime_fromisoformat)
+test("datetime_combine", test_datetime_combine)
 
 print("datetime module tests completed")

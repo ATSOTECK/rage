@@ -1,226 +1,29 @@
 # Test: Built-in Functions
 # Tests commonly used built-in functions
 
-results = {}
-
-# Type constructors
-results["int_from_float"] = int(3.7)
-results["int_from_str"] = int("42")
-results["int_from_bool"] = int(True)
-
-results["float_from_int"] = float(42)
-results["float_from_str"] = float("3.14")
-
-results["str_from_int"] = str(42)
-results["str_from_float"] = str(3.14)
-results["str_from_bool"] = str(True)
-
-results["bool_from_int_true"] = bool(1)
-results["bool_from_int_false"] = bool(0)
-results["bool_from_str_true"] = bool("hello")
-results["bool_from_str_false"] = bool("")
-results["bool_from_list_true"] = bool([1])
-results["bool_from_list_false"] = bool([])
-
-results["list_from_tuple"] = list((1, 2, 3))
-results["list_from_str"] = list("abc")
-results["list_from_range"] = list(range(5))
-
-results["tuple_from_list"] = tuple([1, 2, 3])
-results["tuple_from_str"] = tuple("abc")
-
-# len function
-results["len_str"] = len("hello")
-results["len_list"] = len([1, 2, 3, 4, 5])
-results["len_tuple"] = len((1, 2, 3))
-results["len_dict"] = len({"a": 1, "b": 2})
-
-# min and max
-results["min_args"] = min(5, 2, 8, 1, 9)
-results["max_args"] = max(5, 2, 8, 1, 9)
-results["min_list"] = min([5, 2, 8, 1, 9])
-results["max_list"] = max([5, 2, 8, 1, 9])
-
-# sum
-results["sum_list"] = sum([1, 2, 3, 4, 5])
-results["sum_range"] = sum(range(10))
-results["sum_empty"] = sum([])
-
-# abs
-results["abs_positive"] = abs(42)
-results["abs_negative"] = abs(-42)
-results["abs_float"] = abs(-3.14)
-results["abs_zero"] = abs(0)
-
-# ord and chr
-results["ord_a"] = ord("a")
-results["ord_A"] = ord("A")
-results["chr_97"] = chr(97)
-results["chr_65"] = chr(65)
-
-# isinstance
-results["isinstance_int"] = isinstance(42, int)
-results["isinstance_str"] = isinstance("hello", str)
-results["isinstance_list"] = isinstance([1, 2], list)
-results["isinstance_not"] = isinstance(42, str)
-
-# range
-results["range_simple"] = list(range(5))
-results["range_start_stop"] = list(range(2, 7))
-results["range_with_step"] = list(range(0, 10, 2))
-results["range_negative"] = list(range(10, 0, -1))
-results["range_empty"] = list(range(5, 2))
-
-# enumerate
-results["enumerate_basic"] = list(enumerate(["a", "b", "c"]))
-results["enumerate_start"] = list(enumerate(["x", "y"], 1))
-results["enumerate_empty"] = list(enumerate([]))
-results["enumerate_string"] = list(enumerate("hi"))
-
-# zip
-results["zip_basic"] = list(zip([1, 2, 3], ["a", "b", "c"]))
-results["zip_unequal"] = list(zip([1, 2], ["a", "b", "c", "d"]))
-results["zip_empty"] = list(zip())
-results["zip_single"] = list(zip([1, 2, 3]))
-results["zip_three"] = list(zip([1, 2], ["a", "b"], [True, False]))
-
-# map
+# Helper functions and classes at module level
 def double(x):
     return x * 2
 
 def add(a, b):
     return a + b
 
-results["map_basic"] = list(map(double, [1, 2, 3, 4]))
-results["map_strings"] = list(map(str, [1, 2, 3]))
-results["map_two_args"] = list(map(add, [1, 2, 3], [10, 20, 30]))
-results["map_empty"] = list(map(double, []))
-
-# filter
 def is_even(x):
     return x % 2 == 0
 
 def is_positive(x):
     return x > 0
 
-results["filter_basic"] = list(filter(is_even, [1, 2, 3, 4, 5, 6]))
-results["filter_positive"] = list(filter(is_positive, [-2, -1, 0, 1, 2]))
-results["filter_none"] = list(filter(None, [0, 1, "", "hello", [], [1]]))
-results["filter_empty"] = list(filter(is_even, []))
-results["filter_all_fail"] = list(filter(is_even, [1, 3, 5]))
-
-# reversed
-results["reversed_list"] = list(reversed([1, 2, 3, 4, 5]))
-results["reversed_string"] = list(reversed("hello"))
-results["reversed_tuple"] = list(reversed((1, 2, 3)))
-results["reversed_empty"] = list(reversed([]))
-results["reversed_single"] = list(reversed([42]))
-
-# sorted
-results["sorted_basic"] = sorted([3, 1, 4, 1, 5, 9, 2, 6])
-results["sorted_string"] = sorted("hello")
-results["sorted_reverse"] = sorted([3, 1, 2], reverse=True)
-results["sorted_empty"] = sorted([])
-results["sorted_single"] = sorted([42])
-results["sorted_already"] = sorted([1, 2, 3, 4, 5])
-
 def get_len(x):
     return len(x)
-results["sorted_key"] = sorted(["apple", "pie", "a"], key=get_len)
 
-# all
-results["all_true"] = all([True, True, True])
-results["all_false"] = all([True, False, True])
-results["all_empty"] = all([])
-results["all_numbers_true"] = all([1, 2, 3])
-results["all_numbers_false"] = all([1, 0, 3])
-results["all_strings"] = all(["a", "b", "c"])
-results["all_strings_empty"] = all(["a", "", "c"])
+def test_func():
+    pass
 
-# any
-results["any_true"] = any([False, False, True])
-results["any_false"] = any([False, False, False])
-results["any_empty"] = any([])
-results["any_numbers_true"] = any([0, 0, 1])
-results["any_numbers_false"] = any([0, 0, 0])
-results["any_mixed"] = any([0, "", [], "hello"])
-
-# Attribute access builtins
 class AttrTest:
     def __init__(self):
         self.x = 10
         self.y = 20
-
-obj = AttrTest()
-
-# hasattr
-results["hasattr_exists"] = hasattr(obj, "x")
-results["hasattr_missing"] = hasattr(obj, "z")
-results["hasattr_method"] = hasattr(obj, "__init__")
-
-# getattr
-results["getattr_exists"] = getattr(obj, "x")
-results["getattr_default"] = getattr(obj, "z", 99)
-results["getattr_default_none"] = getattr(obj, "missing", None)
-
-# setattr
-setattr(obj, "z", 30)
-results["setattr_new"] = obj.z
-setattr(obj, "x", 100)
-results["setattr_existing"] = obj.x
-
-# delattr
-setattr(obj, "temp", 42)
-results["delattr_before"] = hasattr(obj, "temp")
-delattr(obj, "temp")
-results["delattr_after"] = hasattr(obj, "temp")
-
-# pow
-results["pow_int"] = pow(2, 3)
-results["pow_large"] = pow(2, 10)
-results["pow_mod"] = pow(2, 3, 5)
-results["pow_mod2"] = pow(7, 2, 13)
-results["pow_zero"] = pow(5, 0)
-results["pow_one"] = pow(5, 1)
-
-# divmod
-results["divmod_basic"] = divmod(17, 5)
-results["divmod_exact"] = divmod(10, 2)
-results["divmod_neg1"] = divmod(-17, 5)
-results["divmod_neg2"] = divmod(17, -5)
-
-# hex
-results["hex_255"] = hex(255)
-results["hex_16"] = hex(16)
-results["hex_0"] = hex(0)
-results["hex_neg"] = hex(-255)
-
-# oct
-results["oct_8"] = oct(8)
-results["oct_64"] = oct(64)
-results["oct_0"] = oct(0)
-results["oct_neg"] = oct(-8)
-
-# bin
-results["bin_5"] = bin(5)
-results["bin_255"] = bin(255)
-results["bin_0"] = bin(0)
-results["bin_neg"] = bin(-5)
-
-# round
-results["round_up"] = round(3.7)
-results["round_down"] = round(3.2)
-results["round_half_even1"] = round(2.5)  # Banker's rounding
-results["round_half_even2"] = round(3.5)  # Banker's rounding
-results["round_digits"] = round(3.14159, 2)
-results["round_digits4"] = round(3.14159, 4)
-results["round_neg_digits"] = round(1234, -2)
-results["round_negative"] = round(-2.5)
-results["round_zero"] = round(0.0)
-
-# callable
-def test_func():
-    pass
 
 class TestClass:
     pass
@@ -229,14 +32,239 @@ class CallableClass:
     def __call__(self):
         pass
 
-results["callable_func"] = callable(test_func)
-results["callable_class"] = callable(TestClass)
-results["callable_callable_inst"] = callable(CallableClass())
-results["callable_inst"] = callable(TestClass())
-results["callable_int"] = callable(42)
-results["callable_str"] = callable("hello")
-results["callable_list"] = callable([1, 2])
-results["callable_builtin"] = callable(print)
-results["callable_none"] = callable(None)
+def test_type_constructors():
+    expect(3, int(3.7))
+    expect(42, int("42"))
+    expect(1, int(True))
+    expect(42.0, float(42))
+    expect(3.14, float("3.14"))
+    expect("42", str(42))
+    expect("3.14", str(3.14))
+    expect("True", str(True))
+
+def test_bool_conversion():
+    expect(True, bool(1))
+    expect(False, bool(0))
+    expect(True, bool("hello"))
+    expect(False, bool(""))
+    expect(True, bool([1]))
+    expect(False, bool([]))
+
+def test_list_tuple_conversion():
+    expect([1, 2, 3], list((1, 2, 3)))
+    expect(["a", "b", "c"], list("abc"))
+    expect([0, 1, 2, 3, 4], list(range(5)))
+    expect((1, 2, 3), tuple([1, 2, 3]))
+    expect(("a", "b", "c"), tuple("abc"))
+
+def test_len():
+    expect(5, len("hello"))
+    expect(5, len([1, 2, 3, 4, 5]))
+    expect(3, len((1, 2, 3)))
+    expect(2, len({"a": 1, "b": 2}))
+
+def test_min_max():
+    expect(1, min(5, 2, 8, 1, 9))
+    expect(9, max(5, 2, 8, 1, 9))
+    expect(1, min([5, 2, 8, 1, 9]))
+    expect(9, max([5, 2, 8, 1, 9]))
+
+def test_sum():
+    expect(15, sum([1, 2, 3, 4, 5]))
+    expect(45, sum(range(10)))
+    expect(0, sum([]))
+
+def test_abs():
+    expect(42, abs(42))
+    expect(42, abs(-42))
+    expect(3.14, abs(-3.14))
+    expect(0, abs(0))
+
+def test_ord_chr():
+    expect(97, ord("a"))
+    expect(65, ord("A"))
+    expect("a", chr(97))
+    expect("A", chr(65))
+
+def test_isinstance():
+    expect(True, isinstance(42, int))
+    expect(True, isinstance("hello", str))
+    expect(True, isinstance([1, 2], list))
+
+def test_range():
+    expect([0, 1, 2, 3, 4], list(range(5)))
+    expect([2, 3, 4, 5, 6], list(range(2, 7)))
+    expect([0, 2, 4, 6, 8], list(range(0, 10, 2)))
+    expect([10, 9, 8, 7, 6, 5, 4, 3, 2, 1], list(range(10, 0, -1)))
+    expect([], list(range(5, 2)))
+
+def test_enumerate():
+    expect([(0, "a"), (1, "b"), (2, "c")], list(enumerate(["a", "b", "c"])))
+    expect([(1, "x"), (2, "y")], list(enumerate(["x", "y"], 1)))
+    expect([], list(enumerate([])))
+    expect([(0, "h"), (1, "i")], list(enumerate("hi")))
+
+def test_zip():
+    expect([(1, "a"), (2, "b"), (3, "c")], list(zip([1, 2, 3], ["a", "b", "c"])))
+    expect([(1, "a"), (2, "b")], list(zip([1, 2], ["a", "b", "c", "d"])))
+    expect([], list(zip()))
+    expect([(1,), (2,), (3,)], list(zip([1, 2, 3])))
+    expect([(1, "a", True), (2, "b", False)], list(zip([1, 2], ["a", "b"], [True, False])))
+
+def test_map():
+    expect([2, 4, 6, 8], list(map(double, [1, 2, 3, 4])))
+    expect(["1", "2", "3"], list(map(str, [1, 2, 3])))
+    expect([11, 22, 33], list(map(add, [1, 2, 3], [10, 20, 30])))
+    expect([], list(map(double, [])))
+
+def test_filter():
+    expect([2, 4, 6], list(filter(is_even, [1, 2, 3, 4, 5, 6])))
+    expect([1, 2], list(filter(is_positive, [-2, -1, 0, 1, 2])))
+    expect([1, "hello", [1]], list(filter(None, [0, 1, "", "hello", [], [1]])))
+    expect([], list(filter(is_even, [])))
+    expect([], list(filter(is_even, [1, 3, 5])))
+
+def test_reversed():
+    expect([5, 4, 3, 2, 1], list(reversed([1, 2, 3, 4, 5])))
+    expect(["o", "l", "l", "e", "h"], list(reversed("hello")))
+    expect([3, 2, 1], list(reversed((1, 2, 3))))
+    expect([], list(reversed([])))
+    expect([42], list(reversed([42])))
+
+def test_sorted():
+    expect([1, 1, 2, 3, 4, 5, 6, 9], sorted([3, 1, 4, 1, 5, 9, 2, 6]))
+    expect(["e", "h", "l", "l", "o"], sorted("hello"))
+    expect([3, 2, 1], sorted([3, 1, 2], reverse=True))
+    expect([], sorted([]))
+    expect([42], sorted([42]))
+    expect([1, 2, 3, 4, 5], sorted([1, 2, 3, 4, 5]))
+    expect(["a", "pie", "apple"], sorted(["apple", "pie", "a"], key=get_len))
+
+def test_all():
+    expect(True, all([True, True, True]))
+    expect(False, all([True, False, True]))
+    expect(True, all([]))
+    expect(True, all([1, 2, 3]))
+    expect(False, all([1, 0, 3]))
+    expect(True, all(["a", "b", "c"]))
+    expect(False, all(["a", "", "c"]))
+
+def test_any():
+    expect(True, any([False, False, True]))
+    expect(False, any([False, False, False]))
+    expect(False, any([]))
+    expect(True, any([0, 0, 1]))
+    expect(False, any([0, 0, 0]))
+    expect(True, any([0, "", [], "hello"]))
+
+def test_hasattr():
+    obj = AttrTest()
+    expect(True, hasattr(obj, "x"))
+    expect(False, hasattr(obj, "z"))
+    expect(True, hasattr(obj, "__init__"))
+
+def test_getattr():
+    obj = AttrTest()
+    expect(10, getattr(obj, "x"))
+    expect(99, getattr(obj, "z", 99))
+    expect(None, getattr(obj, "missing", None))
+
+def test_setattr():
+    obj = AttrTest()
+    setattr(obj, "z", 30)
+    expect(30, obj.z)
+    setattr(obj, "x", 100)
+    expect(100, obj.x)
+
+def test_delattr():
+    obj = AttrTest()
+    setattr(obj, "temp", 42)
+    expect(True, hasattr(obj, "temp"))
+    delattr(obj, "temp")
+    expect(False, hasattr(obj, "temp"))
+
+def test_pow():
+    expect(8, pow(2, 3))
+    expect(1024, pow(2, 10))
+    expect(3, pow(2, 3, 5))
+    expect(10, pow(7, 2, 13))
+    expect(1, pow(5, 0))
+    expect(5, pow(5, 1))
+
+def test_divmod():
+    expect((3, 2), divmod(17, 5))
+    expect((5, 0), divmod(10, 2))
+    expect((-4, 3), divmod(-17, 5))
+    expect((-4, -3), divmod(17, -5))
+
+def test_hex():
+    expect("0xff", hex(255))
+    expect("0x10", hex(16))
+    expect("0x0", hex(0))
+    expect("-0xff", hex(-255))
+
+def test_oct():
+    expect("0o10", oct(8))
+    expect("0o100", oct(64))
+    expect("0o0", oct(0))
+    expect("-0o10", oct(-8))
+
+def test_bin():
+    expect("0b101", bin(5))
+    expect("0b11111111", bin(255))
+    expect("0b0", bin(0))
+    expect("-0b101", bin(-5))
+
+def test_round():
+    expect(4, round(3.7))
+    expect(3, round(3.2))
+    expect(2, round(2.5))  # Banker's rounding
+    expect(4, round(3.5))  # Banker's rounding
+    expect(3.14, round(3.14159, 2))
+    expect(3.1416, round(3.14159, 4))
+    expect(1200, round(1234, -2))
+    expect(-2, round(-2.5))
+    expect(0, round(0.0))
+
+def test_callable():
+    expect(True, callable(test_func))
+    expect(True, callable(TestClass))
+    expect(True, callable(CallableClass()))
+    expect(False, callable(TestClass()))
+    expect(False, callable(42))
+    expect(False, callable("hello"))
+    expect(False, callable([1, 2]))
+    expect(True, callable(print))
+    expect(False, callable(None))
+
+test("type_constructors", test_type_constructors)
+test("bool_conversion", test_bool_conversion)
+test("list_tuple_conversion", test_list_tuple_conversion)
+test("len", test_len)
+test("min_max", test_min_max)
+test("sum", test_sum)
+test("abs", test_abs)
+test("ord_chr", test_ord_chr)
+test("isinstance", test_isinstance)
+test("range", test_range)
+test("enumerate", test_enumerate)
+test("zip", test_zip)
+test("map", test_map)
+test("filter", test_filter)
+test("reversed", test_reversed)
+test("sorted", test_sorted)
+test("all", test_all)
+test("any", test_any)
+test("hasattr", test_hasattr)
+test("getattr", test_getattr)
+test("setattr", test_setattr)
+test("delattr", test_delattr)
+test("pow", test_pow)
+test("divmod", test_divmod)
+test("hex", test_hex)
+test("oct", test_oct)
+test("bin", test_bin)
+test("round", test_round)
+test("callable", test_callable)
 
 print("Builtins tests completed")

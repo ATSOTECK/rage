@@ -1,102 +1,117 @@
 # Test: Control Flow
 # Tests if/else, for, while, break, continue
 
-results = {}
+def test_if_statements():
+    # Simple if
+    x = 10
+    result = None
+    if x > 5:
+        result = "greater"
+    expect("greater", result)
 
-# Simple if
-x = 10
-if x > 5:
-    results["if_simple"] = "greater"
+    # If-else
+    x = 3
+    if x > 5:
+        result = "greater"
+    else:
+        result = "not greater"
+    expect("not greater", result)
 
-# If-else
-x = 3
-if x > 5:
-    results["if_else"] = "greater"
-else:
-    results["if_else"] = "not greater"
+    # If-elif-else
+    x = 5
+    if x > 5:
+        result = "greater"
+    elif x == 5:
+        result = "equal"
+    else:
+        result = "less"
+    expect("equal", result)
 
-# If-elif-else
-x = 5
-if x > 5:
-    results["if_elif"] = "greater"
-elif x == 5:
-    results["if_elif"] = "equal"
-else:
-    results["if_elif"] = "less"
+    # Nested if
+    x = 10
+    y = 20
+    result = None
+    if x > 5:
+        if y > 15:
+            result = "both"
+    expect("both", result)
 
-# Nested if
-x = 10
-y = 20
-if x > 5:
-    if y > 15:
-        results["nested_if"] = "both"
+def test_for_loops():
+    # For loop with range
+    total = 0
+    for i in range(5):
+        total = total + i
+    expect(10, total)
 
-# For loop with range
-total = 0
-for i in range(5):
-    total = total + i
-results["for_range"] = total
+    # For loop with list
+    items = [1, 2, 3, 4, 5]
+    total = 0
+    for item in items:
+        total = total + item
+    expect(15, total)
 
-# For loop with list
-items = [1, 2, 3, 4, 5]
-total = 0
-for item in items:
-    total = total + item
-results["for_list"] = total
+    # For loop with string
+    chars = ""
+    for c in "hello":
+        chars = chars + c
+    expect("hello", chars)
 
-# For loop with string
-chars = ""
-for c in "hello":
-    chars = chars + c
-results["for_string"] = chars
+    # Nested for loops
+    total = 0
+    for i in range(3):
+        for j in range(3):
+            total = total + 1
+    expect(9, total)
 
-# Nested for loops
-total = 0
-for i in range(3):
-    for j in range(3):
-        total = total + 1
-results["nested_for"] = total
+def test_while_loops():
+    count = 0
+    while count < 5:
+        count = count + 1
+    expect(5, count)
 
-# While loop
-count = 0
-while count < 5:
-    count = count + 1
-results["while_simple"] = count
-
-# Break in for loop
-found = -1
-for i in range(10):
-    if i == 7:
-        found = i
-        break
-results["break_in_for"] = found
-
-# Continue in for loop
-evens = []
-for i in range(10):
-    if i % 2 != 0:
-        continue
-    evens.append(i)
-results["continue_in_for"] = evens
-
-# Break in while loop
-count = 0
-while True:
-    count = count + 1
-    if count >= 5:
-        break
-results["break_in_while"] = count
-
-# Complex control flow - find primes
-primes = []
-for num in range(2, 20):
-    is_prime = True
-    for i in range(2, num):
-        if num % i == 0:
-            is_prime = False
+def test_break():
+    # Break in for loop
+    found = -1
+    for i in range(10):
+        if i == 7:
+            found = i
             break
-    if is_prime:
-        primes.append(num)
-results["find_primes"] = primes
+    expect(7, found)
+
+    # Break in while loop
+    count = 0
+    while True:
+        count = count + 1
+        if count >= 5:
+            break
+    expect(5, count)
+
+def test_continue():
+    evens = []
+    for i in range(10):
+        if i % 2 != 0:
+            continue
+        evens.append(i)
+    expect([0, 2, 4, 6, 8], evens)
+
+def test_complex_control_flow():
+    # Find primes
+    primes = []
+    for num in range(2, 20):
+        is_prime = True
+        for i in range(2, num):
+            if num % i == 0:
+                is_prime = False
+                break
+        if is_prime:
+            primes.append(num)
+    expect([2, 3, 5, 7, 11, 13, 17, 19], primes)
+
+test("if_statements", test_if_statements)
+test("for_loops", test_for_loops)
+test("while_loops", test_while_loops)
+test("break", test_break)
+test("continue", test_continue)
+test("complex_control_flow", test_complex_control_flow)
 
 print("Control flow tests completed")

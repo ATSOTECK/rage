@@ -1,103 +1,104 @@
 # Test: Functions
 # Tests function definitions, arguments, and recursion
 
-results = {}
-
-# Simple function
-def simple():
-    return 42
-
-results["simple_func"] = simple()
-
-# Function with arguments
-def add(a, b):
-    return a + b
-
-results["func_args"] = add(10, 20)
-
-# Function with default arguments
-def greet(name, greeting="Hello"):
-    return greeting + ", " + name
-
-results["default_arg_used"] = greet("World")
-results["default_arg_override"] = greet("World", "Hi")
-
-# Function with multiple default arguments
-def make_point(x=0, y=0, z=0):
-    return [x, y, z]
-
-results["multi_default_none"] = make_point()
-results["multi_default_some"] = make_point(1, 2)
-results["multi_default_all"] = make_point(1, 2, 3)
-
-# Recursive function
+# Define helper functions at module level so recursion works
 def factorial(n):
     if n <= 1:
         return 1
     return n * factorial(n - 1)
 
-results["factorial_0"] = factorial(0)
-results["factorial_5"] = factorial(5)
-
-# Recursive Fibonacci
 def fib(n):
     if n <= 1:
         return n
     return fib(n - 1) + fib(n - 2)
 
-results["fib_0"] = fib(0)
-results["fib_1"] = fib(1)
-results["fib_10"] = fib(10)
+def test_simple_function():
+    def simple():
+        return 42
+    expect(42, simple())
 
-# Nested functions (not closures)
-def outer(x):
-    def inner(y):
-        return y * 2
-    return inner(x) + 10
+def test_function_args():
+    def add(a, b):
+        return a + b
+    expect(30, add(10, 20))
 
-results["nested_func"] = outer(5)
+def test_default_args():
+    def greet(name, greeting="Hello"):
+        return greeting + ", " + name
+    expect("Hello, World", greet("World"))
+    expect("Hi, World", greet("World", "Hi"))
 
-# Lambda expressions
-square = lambda x: x * x
-results["lambda_simple"] = square(5)
+def test_multi_default_args():
+    def make_point(x=0, y=0, z=0):
+        return [x, y, z]
+    expect([0, 0, 0], make_point())
+    expect([1, 2, 0], make_point(1, 2))
+    expect([1, 2, 3], make_point(1, 2, 3))
 
-add_lambda = lambda a, b: a + b
-results["lambda_two_args"] = add_lambda(3, 4)
+def test_recursion():
+    expect(1, factorial(0))
+    expect(120, factorial(5))
 
-# Higher-order function with lambda
-def apply(func, value):
-    return func(value)
+def test_fibonacci():
+    expect(0, fib(0))
+    expect(1, fib(1))
+    expect(55, fib(10))
 
-results["higher_order_lambda"] = apply(lambda x: x * 2, 21)
+def test_nested_functions():
+    def outer(x):
+        def inner(y):
+            return y * 2
+        return inner(x) + 10
+    expect(20, outer(5))
 
-# Global variable access
-global_var = 100
+def test_lambda():
+    square = lambda x: x * x
+    expect(25, square(5))
 
-def use_global():
-    return global_var
+    add_lambda = lambda a, b: a + b
+    expect(7, add_lambda(3, 4))
 
-results["access_global"] = use_global()
+def test_higher_order():
+    def apply(func, value):
+        return func(value)
+    expect(42, apply(lambda x: x * 2, 21))
 
-# Early return
-def find_first_even(numbers):
-    for n in numbers:
-        if n % 2 == 0:
-            return n
-    return None
+def test_global_access():
+    global_var = 100
+    def use_global():
+        return global_var
+    expect(100, use_global())
 
-results["early_return_found"] = find_first_even([1, 3, 5, 6, 7])
-results["early_return_none"] = find_first_even([1, 3, 5, 7])
+def test_early_return():
+    def find_first_even(numbers):
+        for n in numbers:
+            if n % 2 == 0:
+                return n
+        return None
+    expect(6, find_first_even([1, 3, 5, 6, 7]))
+    expect(None, find_first_even([1, 3, 5, 7]))
 
-# Function as argument
-def double(x):
-    return x * 2
+def test_func_as_arg():
+    def double(x):
+        return x * 2
+    def apply_to_list(func, lst):
+        result = []
+        for item in lst:
+            result.append(func(item))
+        return result
+    expect([2, 4, 6, 8, 10], apply_to_list(double, [1, 2, 3, 4, 5]))
 
-def apply_to_list(func, lst):
-    result = []
-    for item in lst:
-        result.append(func(item))
-    return result
-
-results["func_as_arg"] = apply_to_list(double, [1, 2, 3, 4, 5])
+test("simple_function", test_simple_function)
+test("function_args", test_function_args)
+test("default_args", test_default_args)
+test("multi_default_args", test_multi_default_args)
+test("recursion", test_recursion)
+test("fibonacci", test_fibonacci)
+test("nested_functions", test_nested_functions)
+test("lambda", test_lambda)
+test("higher_order", test_higher_order)
+test("global_access", test_global_access)
+test("early_return", test_early_return)
+test("func_as_arg", test_func_as_arg)
 
 print("Functions tests completed")

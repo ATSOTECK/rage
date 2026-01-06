@@ -3,136 +3,137 @@
 
 import itertools
 
-results = {}
+def test_count():
+    counter = itertools.count(10, 2)
+    expect([10, 12, 14, 16, 18], list(itertools.islice(counter, 5)))
 
-# ===================================
-# Infinite Iterators (with islice)
-# ===================================
+def test_cycle():
+    cycler = itertools.cycle([1, 2, 3])
+    expect([1, 2, 3, 1, 2, 3, 1], list(itertools.islice(cycler, 7)))
 
-# count - generates consecutive integers
-counter = itertools.count(10, 2)
-results["count_with_islice"] = list(itertools.islice(counter, 5))
+def test_repeat():
+    expect(["x", "x", "x", "x"], list(itertools.repeat("x", 4)))
+    expect([42], list(itertools.repeat(42, 1)))
 
-# cycle - cycles through an iterable
-cycler = itertools.cycle([1, 2, 3])
-results["cycle_with_islice"] = list(itertools.islice(cycler, 7))
+def test_accumulate():
+    expect([1, 3, 6, 10, 15], list(itertools.accumulate([1, 2, 3, 4, 5])))
+    expect([1, 2, 6, 24], list(itertools.accumulate([1, 2, 3, 4], lambda x, y: x * y)))
+    expect([10, 11, 13, 16], list(itertools.accumulate([1, 2, 3], None, 10)))
+    expect(["a", "ab", "abc"], list(itertools.accumulate(["a", "b", "c"])))
 
-# repeat - repeats an object
-results["repeat_with_times"] = list(itertools.repeat("x", 4))
-results["repeat_single"] = list(itertools.repeat(42, 1))
+def test_chain():
+    expect([1, 2, 3, 4, 5, 6], list(itertools.chain([1, 2], [3, 4], [5, 6])))
+    expect(["a", "b", "c", "d"], list(itertools.chain("ab", "cd")))
+    expect([1], list(itertools.chain([], [1], [])))
+    expect([1, 2, 3], list(itertools.chain([1, 2, 3])))
 
-# ===================================
-# Terminating Iterators
-# ===================================
+def test_compress():
+    expect(["A", "C", "E", "F"], list(itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])))
+    expect([1, 3], list(itertools.compress([1, 2, 3, 4], [True, False, True, False])))
+    expect([1, 2], list(itertools.compress([1, 2, 3, 4, 5], [1, 1])))
 
-# accumulate - running totals
-results["accumulate_simple"] = list(itertools.accumulate([1, 2, 3, 4, 5]))
-results["accumulate_with_func"] = list(itertools.accumulate([1, 2, 3, 4], lambda x, y: x * y))
-results["accumulate_with_initial"] = list(itertools.accumulate([1, 2, 3], None, 10))
-results["accumulate_strings"] = list(itertools.accumulate(["a", "b", "c"]))
+def test_dropwhile():
+    expect([6, 3, 8], list(itertools.dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8])))
+    expect([1, 2, 3], list(itertools.dropwhile(lambda x: x > 10, [1, 2, 3])))
+    expect([], list(itertools.dropwhile(lambda x: x < 10, [1, 2, 3])))
 
-# chain - chains iterables
-results["chain_simple"] = list(itertools.chain([1, 2], [3, 4], [5, 6]))
-results["chain_strings"] = list(itertools.chain("ab", "cd"))
-results["chain_empty"] = list(itertools.chain([], [1], []))
-results["chain_single"] = list(itertools.chain([1, 2, 3]))
+def test_filterfalse():
+    expect([2, 4, 6], list(itertools.filterfalse(lambda x: x % 2, [1, 2, 3, 4, 5, 6])))
+    expect([-2, -1, 0], list(itertools.filterfalse(lambda x: x > 0, [-2, -1, 0, 1, 2])))
 
-# compress - filters by selector
-results["compress_simple"] = list(itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1]))
-results["compress_bools"] = list(itertools.compress([1, 2, 3, 4], [True, False, True, False]))
-results["compress_shorter_selector"] = list(itertools.compress([1, 2, 3, 4, 5], [1, 1]))
+def test_groupby():
+    data = [1, 1, 2, 2, 2, 3, 1, 1]
+    groups = []
+    for key, group in itertools.groupby(data):
+        groups.append([key, list(group)])
+    expect([[1, [1, 1]], [2, [2, 2, 2]], [3, [3]], [1, [1, 1]]], groups)
 
-# dropwhile - drops while predicate is true
-results["dropwhile_simple"] = list(itertools.dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]))
-results["dropwhile_all_false"] = list(itertools.dropwhile(lambda x: x > 10, [1, 2, 3]))
-results["dropwhile_all_true"] = list(itertools.dropwhile(lambda x: x < 10, [1, 2, 3]))
+def test_groupby_with_key():
+    words = ["apple", "apricot", "banana", "berry", "cherry"]
+    groups2 = []
+    for key, group in itertools.groupby(words, lambda x: x[0]):
+        groups2.append([key, list(group)])
+    expect([["a", ["apple", "apricot"]], ["b", ["banana", "berry"]], ["c", ["cherry"]]], groups2)
 
-# filterfalse - elements where predicate is false
-results["filterfalse_even"] = list(itertools.filterfalse(lambda x: x % 2, [1, 2, 3, 4, 5, 6]))
-results["filterfalse_positive"] = list(itertools.filterfalse(lambda x: x > 0, [-2, -1, 0, 1, 2]))
+def test_islice():
+    expect([0, 1, 2, 3, 4], list(itertools.islice(range(10), 5)))
+    expect([2, 3, 4, 5, 6], list(itertools.islice(range(10), 2, 7)))
+    expect([1, 3, 5, 7], list(itertools.islice(range(10), 1, 9, 2)))
+    expect([1, 2, 3], list(itertools.islice([1, 2, 3], 10)))
 
-# groupby - group consecutive elements
-data = [1, 1, 2, 2, 2, 3, 1, 1]
-groups = []
-for key, group in itertools.groupby(data):
-    groups.append([key, list(group)])
-results["groupby_simple"] = groups
+def test_pairwise():
+    expect([(1, 2), (2, 3), (3, 4), (4, 5)], list(itertools.pairwise([1, 2, 3, 4, 5])))
+    expect([("A", "B"), ("B", "C"), ("C", "D")], list(itertools.pairwise("ABCD")))
+    expect([], list(itertools.pairwise([1])))
+    expect([], list(itertools.pairwise([])))
 
-# groupby with key function
-words = ["apple", "apricot", "banana", "berry", "cherry"]
-groups2 = []
-for key, group in itertools.groupby(words, lambda x: x[0]):
-    groups2.append([key, list(group)])
-results["groupby_with_key"] = groups2
+def test_starmap():
+    expect([8, 9, 100], list(itertools.starmap(pow, [(2, 3), (3, 2), (10, 2)])))
+    expect([3, 7, 11], list(itertools.starmap(lambda a, b: a + b, [(1, 2), (3, 4), (5, 6)])))
 
-# islice - slice an iterator
-results["islice_stop_only"] = list(itertools.islice(range(10), 5))
-results["islice_start_stop"] = list(itertools.islice(range(10), 2, 7))
-results["islice_with_step"] = list(itertools.islice(range(10), 1, 9, 2))
-results["islice_beyond_length"] = list(itertools.islice([1, 2, 3], 10))
+def test_takewhile():
+    expect([1, 4], list(itertools.takewhile(lambda x: x < 5, [1, 4, 6, 3, 8])))
+    expect([1, 2, 3], list(itertools.takewhile(lambda x: x < 10, [1, 2, 3])))
+    expect([], list(itertools.takewhile(lambda x: x > 10, [1, 2, 3])))
 
-# pairwise - consecutive pairs
-results["pairwise_simple"] = list(itertools.pairwise([1, 2, 3, 4, 5]))
-results["pairwise_string"] = list(itertools.pairwise("ABCD"))
-results["pairwise_short"] = list(itertools.pairwise([1]))
-results["pairwise_empty"] = list(itertools.pairwise([]))
+def test_zip_longest():
+    expect([(1, 4), (2, 5), (3, None)], list(itertools.zip_longest([1, 2, 3], [4, 5])))
+    expect([(1, 2, 4), (None, 3, 5), (None, None, 6)], list(itertools.zip_longest([1], [2, 3], [4, 5, 6])))
+    expect([(1, 3), (2, 4)], list(itertools.zip_longest([1, 2], [3, 4])))
 
-# starmap - map with unpacked arguments
-results["starmap_pow"] = list(itertools.starmap(pow, [(2, 3), (3, 2), (10, 2)]))
-results["starmap_add"] = list(itertools.starmap(lambda a, b: a + b, [(1, 2), (3, 4), (5, 6)]))
+def test_product():
+    expect([(1, 3), (1, 4), (2, 3), (2, 4)], list(itertools.product([1, 2], [3, 4])))
+    expect([(1, "a", True), (1, "b", True), (2, "a", True), (2, "b", True)], list(itertools.product([1, 2], ["a", "b"], [True])))
+    expect([(1,), (2,), (3,)], list(itertools.product([1, 2, 3])))
+    expect([("A", "x"), ("A", "y"), ("B", "x"), ("B", "y")], list(itertools.product("AB", "xy")))
 
-# takewhile - take while predicate is true
-results["takewhile_simple"] = list(itertools.takewhile(lambda x: x < 5, [1, 4, 6, 3, 8]))
-results["takewhile_all_true"] = list(itertools.takewhile(lambda x: x < 10, [1, 2, 3]))
-results["takewhile_all_false"] = list(itertools.takewhile(lambda x: x > 10, [1, 2, 3]))
+def test_permutations():
+    expect([(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)], list(itertools.permutations([1, 2, 3])))
+    expect([(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)], list(itertools.permutations([1, 2, 3], 2)))
+    expect([(1,), (2,), (3,)], list(itertools.permutations([1, 2, 3], 1)))
+    expect([("A", "B"), ("B", "A")], list(itertools.permutations("AB")))
 
-# zip_longest - zip to longest iterable
-results["zip_longest_simple"] = list(itertools.zip_longest([1, 2, 3], [4, 5]))
-results["zip_longest_three"] = list(itertools.zip_longest([1], [2, 3], [4, 5, 6]))
-results["zip_longest_equal"] = list(itertools.zip_longest([1, 2], [3, 4]))
+def test_combinations():
+    expect([(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)], list(itertools.combinations([1, 2, 3, 4], 2)))
+    expect([(1, 2, 3), (1, 2, 4), (1, 3, 4), (2, 3, 4)], list(itertools.combinations([1, 2, 3, 4], 3)))
+    expect([(1,), (2,), (3,)], list(itertools.combinations([1, 2, 3], 1)))
+    expect([()], list(itertools.combinations([1, 2, 3], 0)))
+    expect([("A", "B"), ("A", "C"), ("A", "D"), ("B", "C"), ("B", "D"), ("C", "D")], list(itertools.combinations("ABCD", 2)))
 
-# ===================================
-# Combinatoric Iterators
-# ===================================
+def test_combinations_with_replacement():
+    expect([(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)], list(itertools.combinations_with_replacement([1, 2, 3], 2)))
+    expect([(1, 1, 1), (1, 1, 2), (1, 2, 2), (2, 2, 2)], list(itertools.combinations_with_replacement([1, 2], 3)))
+    expect([(1,), (2,), (3,)], list(itertools.combinations_with_replacement([1, 2, 3], 1)))
+    expect([("A", "A"), ("A", "B"), ("B", "B")], list(itertools.combinations_with_replacement("AB", 2)))
 
-# product - Cartesian product
-results["product_two_lists"] = list(itertools.product([1, 2], [3, 4]))
-results["product_three_lists"] = list(itertools.product([1, 2], ["a", "b"], [True]))
-results["product_single"] = list(itertools.product([1, 2, 3]))
-results["product_string"] = list(itertools.product("AB", "xy"))
+def test_edge_cases():
+    expect([], list(itertools.chain([], [], [])))
+    expect([], list(itertools.product([1, 2], [])))
+    expect([], list(itertools.combinations([], 2)))
+    expect([], list(itertools.permutations([], 2)))
+    expect([(1,)], list(itertools.product([1])))
+    expect([(1,)], list(itertools.combinations([1], 1)))
+    expect([(1,)], list(itertools.permutations([1], 1)))
 
-# permutations - r-length permutations
-results["permutations_full"] = list(itertools.permutations([1, 2, 3]))
-results["permutations_r2"] = list(itertools.permutations([1, 2, 3], 2))
-results["permutations_r1"] = list(itertools.permutations([1, 2, 3], 1))
-results["permutations_string"] = list(itertools.permutations("AB"))
-
-# combinations - r-length combinations
-results["combinations_r2"] = list(itertools.combinations([1, 2, 3, 4], 2))
-results["combinations_r3"] = list(itertools.combinations([1, 2, 3, 4], 3))
-results["combinations_r1"] = list(itertools.combinations([1, 2, 3], 1))
-results["combinations_r0"] = list(itertools.combinations([1, 2, 3], 0))
-results["combinations_string"] = list(itertools.combinations("ABCD", 2))
-
-# combinations_with_replacement
-results["cwr_r2"] = list(itertools.combinations_with_replacement([1, 2, 3], 2))
-results["cwr_r3"] = list(itertools.combinations_with_replacement([1, 2], 3))
-results["cwr_r1"] = list(itertools.combinations_with_replacement([1, 2, 3], 1))
-results["cwr_string"] = list(itertools.combinations_with_replacement("AB", 2))
-
-# ===================================
-# Edge Cases
-# ===================================
-
-# Empty iterables
-results["chain_all_empty"] = list(itertools.chain([], [], []))
-results["product_empty"] = list(itertools.product([1, 2], []))
-results["combinations_empty"] = list(itertools.combinations([], 2))
-results["permutations_empty"] = list(itertools.permutations([], 2))
-
-# Single element
-results["product_single_elem"] = list(itertools.product([1]))
-results["combinations_single"] = list(itertools.combinations([1], 1))
-results["permutations_single"] = list(itertools.permutations([1], 1))
+test("count", test_count)
+test("cycle", test_cycle)
+test("repeat", test_repeat)
+test("accumulate", test_accumulate)
+test("chain", test_chain)
+test("compress", test_compress)
+test("dropwhile", test_dropwhile)
+test("filterfalse", test_filterfalse)
+test("groupby", test_groupby)
+test("groupby_with_key", test_groupby_with_key)
+test("islice", test_islice)
+test("pairwise", test_pairwise)
+test("starmap", test_starmap)
+test("takewhile", test_takewhile)
+test("zip_longest", test_zip_longest)
+test("product", test_product)
+test("permutations", test_permutations)
+test("combinations", test_combinations)
+test("combinations_with_replacement", test_combinations_with_replacement)
+test("edge_cases", test_edge_cases)
 
 print("itertools tests completed")

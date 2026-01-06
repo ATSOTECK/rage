@@ -1,59 +1,70 @@
 # Test: String Operations
 # Tests string methods and operations
 
-results = {}
+def test_str_basic():
+    s = "Hello, World!"
+    expect(13, len(s))
+    expect("H", s[0])
+    expect("!", s[-1])
 
-# Basic string operations
-s = "Hello, World!"
-results["str_len"] = len(s)
-results["str_index"] = s[0]
-results["str_negative_index"] = s[-1]
+def test_str_concat():
+    expect("Hello World", "Hello" + " " + "World")
+    expect("abababab", "ab" * 4)
 
-# String concatenation
-results["str_concat"] = "Hello" + " " + "World"
-results["str_repeat"] = "ab" * 4
+def test_str_case():
+    expect("HELLO", "hello".upper())
+    expect("hello", "HELLO".lower())
 
-# String methods - case
-results["upper"] = "hello".upper()
-results["lower"] = "HELLO".lower()
+def test_str_strip():
+    expect("hello", "  hello  ".strip())
 
-# String methods - whitespace
-results["strip"] = "  hello  ".strip()
+def test_str_split_join():
+    expect(["hello", "world", "python"], "hello world python".split())
+    expect(["a", "b", "c", "d"], "a,b,c,d".split(","))
+    expect("a,b,c", ",".join(["a", "b", "c"]))
 
-# String methods - split/join
-results["split_default"] = "hello world python".split()
-results["split_char"] = "a,b,c,d".split(",")
-results["join_list"] = ",".join(["a", "b", "c"])
+def test_str_replace():
+    expect("hi hi hi", "hello hello hello".replace("hello", "hi"))
 
-# String methods - replace
-results["replace_all"] = "hello hello hello".replace("hello", "hi")
+def test_str_membership():
+    expect(True, "ell" in "hello")
+    expect(True, "xyz" not in "hello")
 
-# String membership
-results["in_str"] = "ell" in "hello"
-results["not_in_str"] = "xyz" not in "hello"
+def test_str_comparison():
+    expect(True, "hello" == "hello")
+    expect(True, "hello" != "world")
+    expect(True, "apple" < "banana")
+    expect(True, "banana" > "apple")
 
-# String comparison
-results["str_eq"] = "hello" == "hello"
-results["str_ne"] = "hello" != "world"
-results["str_lt"] = "apple" < "banana"
-results["str_gt"] = "banana" > "apple"
+def test_str_word_count():
+    text = "The quick brown fox"
+    words = text.split()
+    expect(4, len(words))
 
-# Multi-character operations
-text = "The quick brown fox"
-words = text.split()
-results["word_count"] = len(words)
+def test_str_empty():
+    expect(0, len(""))
+    expect(False, bool(""))
 
-# Empty string operations
-results["empty_str_len"] = len("")
-results["empty_str_bool"] = bool("")
+def test_str_mult_edge():
+    expect("", "hello" * 0)
+    expect("hello", "hello" * 1)
 
-# String multiplication edge cases
-results["str_mult_zero"] = "hello" * 0
-results["str_mult_one"] = "hello" * 1
+def test_str_case_insensitive():
+    s1 = "Hello"
+    s2 = "hello"
+    expect(True, s1.lower() == s2.lower())
 
-# Case-insensitive comparison
-s1 = "Hello"
-s2 = "hello"
-results["case_insensitive"] = s1.lower() == s2.lower()
+test("str_basic", test_str_basic)
+test("str_concat", test_str_concat)
+test("str_case", test_str_case)
+test("str_strip", test_str_strip)
+test("str_split_join", test_str_split_join)
+test("str_replace", test_str_replace)
+test("str_membership", test_str_membership)
+test("str_comparison", test_str_comparison)
+test("str_word_count", test_str_word_count)
+test("str_empty", test_str_empty)
+test("str_mult_edge", test_str_mult_edge)
+test("str_case_insensitive", test_str_case_insensitive)
 
 print("Strings tests completed")
