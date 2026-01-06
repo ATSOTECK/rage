@@ -185,7 +185,7 @@ func runScript(scriptPath string, timeout time.Duration) (map[string]any, error)
 	defer state.Close()
 
 	// Set up temp directory
-	if strings.Contains(filepath.Base(scriptPath), "file_io") || strings.Contains(filepath.Base(scriptPath), "io_") {
+	if strings.Contains(filepath.Base(scriptPath), "file_io") || strings.Contains(filepath.Base(scriptPath), "io_") || strings.Contains(filepath.Base(scriptPath), "_os") {
 		// Create temp directory for file I/O tests
 		tmpDir, err := os.MkdirTemp("", "rage_io_test_")
 		if err != nil {
