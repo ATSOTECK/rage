@@ -312,9 +312,15 @@ func (c *Compiler) currentOffset() int {
 }
 
 func (c *Compiler) addConstant(value any) int {
-	for i, v := range c.code.Constants {
-		if v == value {
-			return i
+	// Skip deduplication for slice types (they can't be compared with ==)
+	switch value.(type) {
+	case []string, []any, []int, []float64:
+		// Don't deduplicate slices, just add them
+	default:
+		for i, v := range c.code.Constants {
+			if v == value {
+				return i
+			}
 		}
 	}
 	c.code.Constants = append(c.code.Constants, value)
@@ -847,14 +853,17 @@ func (c *Compiler) compileCall(e *model.Call) {
 	}
 
 	if len(e.Keywords) > 0 {
-		// Compile keyword arguments
+		// Compile keyword argument values
+		kwNames := make([]string, 0, len(e.Keywords))
 		for _, kw := range e.Keywords {
-			if kw.Arg != nil {
-				c.emitLoadConst(kw.Arg.Name)
-			}
 			c.compileExpr(kw.Value)
+			if kw.Arg != nil {
+				kwNames = append(kwNames, kw.Arg.Name)
+			}
 		}
-		c.emitArg(runtime.OpCallKw, len(e.Args)+len(e.Keywords)*2)
+		// Push tuple of keyword names at the end
+		c.emitLoadConst(kwNames)
+		c.emitArg(runtime.OpCallKw, len(e.Args)+len(e.Keywords))
 	} else {
 		c.emitArg(runtime.OpCall, len(e.Args))
 	}

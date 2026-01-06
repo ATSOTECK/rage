@@ -3,16 +3,123 @@
   "abs_negative": 42,
   "abs_positive": 42,
   "abs_zero": 0,
+  "all_empty": true,
+  "all_false": false,
+  "all_numbers_false": false,
+  "all_numbers_true": true,
+  "all_strings": true,
+  "all_strings_empty": false,
+  "all_true": true,
+  "any_empty": false,
+  "any_false": false,
+  "any_mixed": true,
+  "any_numbers_false": false,
+  "any_numbers_true": true,
+  "any_true": true,
+  "bin_0": "0b0",
+  "bin_255": "0b11111111",
+  "bin_5": "0b101",
+  "bin_neg": "-0b101",
   "bool_from_int_false": false,
   "bool_from_int_true": true,
   "bool_from_list_false": false,
   "bool_from_list_true": true,
   "bool_from_str_false": false,
   "bool_from_str_true": true,
+  "callable_builtin": true,
+  "callable_callable_inst": true,
+  "callable_class": true,
+  "callable_func": true,
+  "callable_inst": false,
+  "callable_int": false,
+  "callable_list": false,
+  "callable_none": false,
+  "callable_str": false,
   "chr_65": "A",
   "chr_97": "a",
+  "delattr_after": false,
+  "delattr_before": true,
+  "divmod_basic": [
+    3,
+    2
+  ],
+  "divmod_exact": [
+    5,
+    0
+  ],
+  "divmod_neg1": [
+    -4,
+    3
+  ],
+  "divmod_neg2": [
+    -4,
+    -3
+  ],
+  "enumerate_basic": [
+    [
+      0,
+      "a"
+    ],
+    [
+      1,
+      "b"
+    ],
+    [
+      2,
+      "c"
+    ]
+  ],
+  "enumerate_empty": [],
+  "enumerate_start": [
+    [
+      1,
+      "x"
+    ],
+    [
+      2,
+      "y"
+    ]
+  ],
+  "enumerate_string": [
+    [
+      0,
+      "h"
+    ],
+    [
+      1,
+      "i"
+    ]
+  ],
+  "filter_all_fail": [],
+  "filter_basic": [
+    2,
+    4,
+    6
+  ],
+  "filter_empty": [],
+  "filter_none": [
+    1,
+    "hello",
+    [
+      1
+    ]
+  ],
+  "filter_positive": [
+    1,
+    2
+  ],
   "float_from_int": 42,
   "float_from_str": 3.14,
+  "getattr_default": 99,
+  "getattr_default_none": null,
+  "getattr_exists": 10,
+  "hasattr_exists": true,
+  "hasattr_method": true,
+  "hasattr_missing": false,
+  "hex_0": "0x0",
+  "hex_16": "0x10",
+  "hex_255": "0xff",
+  "hex_neg": "-0xff",
   "int_from_bool": 1,
   "int_from_float": 3,
   "int_from_str": 42,
@@ -41,12 +148,39 @@
     2,
     3
   ],
+  "map_basic": [
+    2,
+    4,
+    6,
+    8
+  ],
+  "map_empty": [],
+  "map_strings": [
+    "1",
+    "2",
+    "3"
+  ],
+  "map_two_args": [
+    11,
+    22,
+    33
+  ],
   "max_args": 9,
   "max_list": 9,
   "min_args": 1,
   "min_list": 1,
+  "oct_0": "0o0",
+  "oct_64": "0o100",
+  "oct_8": "0o10",
+  "oct_neg": "-0o10",
   "ord_A": 65,
   "ord_a": 97,
+  "pow_int": 8,
+  "pow_large": 1024,
+  "pow_mod": 3,
+  "pow_mod2": 10,
+  "pow_one": 5,
+  "pow_zero": 1,
   "range_empty": [],
   "range_negative": [
     10,
@@ -81,6 +215,78 @@
     6,
     8
   ],
+  "reversed_empty": [],
+  "reversed_list": [
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "reversed_single": [
+    42
+  ],
+  "reversed_string": [
+    "o",
+    "l",
+    "l",
+    "e",
+    "h"
+  ],
+  "reversed_tuple": [
+    3,
+    2,
+    1
+  ],
+  "round_digits": 3.14,
+  "round_digits4": 3.1416,
+  "round_down": 3,
+  "round_half_even1": 2,
+  "round_half_even2": 4,
+  "round_neg_digits": 1200,
+  "round_negative": -2,
+  "round_up": 4,
+  "round_zero": 0,
+  "setattr_existing": 100,
+  "setattr_new": 30,
+  "sorted_already": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "sorted_basic": [
+    1,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    9
+  ],
+  "sorted_empty": [],
+  "sorted_key": [
+    "a",
+    "pie",
+    "apple"
+  ],
+  "sorted_reverse": [
+    3,
+    2,
+    1
+  ],
+  "sorted_single": [
+    42
+  ],
+  "sorted_string": [
+    "e",
+    "h",
+    "l",
+    "l",
+    "o"
+  ],
   "str_from_bool": "True",
   "str_from_float": "3.14",
   "str_from_int": "42",
@@ -96,5 +302,53 @@
     "a",
     "b",
     "c"
+  ],
+  "zip_basic": [
+    [
+      1,
+      "a"
+    ],
+    [
+      2,
+      "b"
+    ],
+    [
+      3,
+      "c"
+    ]
+  ],
+  "zip_empty": [],
+  "zip_single": [
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ]
+  ],
+  "zip_three": [
+    [
+      1,
+      "a",
+      true
+    ],
+    [
+      2,
+      "b",
+      false
+    ]
+  ],
+  "zip_unequal": [
+    [
+      1,
+      "a"
+    ],
+    [
+      2,
+      "b"
+    ]
   ]
 }

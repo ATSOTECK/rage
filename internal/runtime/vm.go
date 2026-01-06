@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -681,6 +682,532 @@ func (vm *VM) initBuiltins() {
 			}
 			i := vm.toInt(args[0])
 			return &PyString{Value: string(rune(i))}, nil
+		},
+	}
+
+	// enumerate(iterable, start=0) - returns iterator of (index, value) tuples
+	vm.builtins["enumerate"] = &PyBuiltinFunc{
+		Name: "enumerate",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return nil, fmt.Errorf("enumerate expected 1 to 2 arguments, got %d", len(args))
+			}
+			items, err := vm.toList(args[0])
+			if err != nil {
+				return nil, err
+			}
+			var start int64 = 0
+			if len(args) == 2 {
+				start = vm.toInt(args[1])
+			}
+			if s, ok := kwargs["start"]; ok {
+				start = vm.toInt(s)
+			}
+			result := make([]Value, len(items))
+			for i, item := range items {
+				result[i] = &PyTuple{Items: []Value{MakeInt(start + int64(i)), item}}
+			}
+			return &PyIterator{Items: result, Index: 0}, nil
+		},
+	}
+
+	// zip(*iterables) - returns iterator of tuples
+	vm.builtins["zip"] = &PyBuiltinFunc{
+		Name: "zip",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) == 0 {
+				return &PyIterator{Items: []Value{}, Index: 0}, nil
+			}
+			// Convert all args to lists
+			lists := make([][]Value, len(args))
+			minLen := -1
+			for i, arg := range args {
+				items, err := vm.toList(arg)
+				if err != nil {
+					return nil, err
+				}
+				lists[i] = items
+				if minLen == -1 || len(items) < minLen {
+					minLen = len(items)
+				}
+			}
+			// Build result tuples
+			result := make([]Value, minLen)
+			for i := 0; i < minLen; i++ {
+				tuple := make([]Value, len(lists))
+				for j, list := range lists {
+					tuple[j] = list[i]
+				}
+				result[i] = &PyTuple{Items: tuple}
+			}
+			return &PyIterator{Items: result, Index: 0}, nil
+		},
+	}
+
+	// map(func, *iterables) - applies function to items from iterables
+	vm.builtins["map"] = &PyBuiltinFunc{
+		Name: "map",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 2 {
+				return nil, fmt.Errorf("map() must have at least two arguments")
+			}
+			fn := args[0]
+			// Convert remaining args to lists
+			lists := make([][]Value, len(args)-1)
+			minLen := -1
+			for i, arg := range args[1:] {
+				items, err := vm.toList(arg)
+				if err != nil {
+					return nil, err
+				}
+				lists[i] = items
+				if minLen == -1 || len(items) < minLen {
+					minLen = len(items)
+				}
+			}
+			// Apply function to each set of items
+			result := make([]Value, minLen)
+			for i := 0; i < minLen; i++ {
+				fnArgs := make([]Value, len(lists))
+				for j, list := range lists {
+					fnArgs[j] = list[i]
+				}
+				val, err := vm.call(fn, fnArgs, nil)
+				if err != nil {
+					return nil, err
+				}
+				result[i] = val
+			}
+			return &PyIterator{Items: result, Index: 0}, nil
+		},
+	}
+
+	// filter(func, iterable) - filters items based on function
+	vm.builtins["filter"] = &PyBuiltinFunc{
+		Name: "filter",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("filter expected 2 arguments, got %d", len(args))
+			}
+			fn := args[0]
+			items, err := vm.toList(args[1])
+			if err != nil {
+				return nil, err
+			}
+			var result []Value
+			for _, item := range items {
+				var keep bool
+				if fn == None {
+					// If function is None, filter by truthiness
+					keep = vm.truthy(item)
+				} else {
+					val, err := vm.call(fn, []Value{item}, nil)
+					if err != nil {
+						return nil, err
+					}
+					keep = vm.truthy(val)
+				}
+				if keep {
+					result = append(result, item)
+				}
+			}
+			return &PyIterator{Items: result, Index: 0}, nil
+		},
+	}
+
+	// reversed(seq) - returns reversed iterator
+	vm.builtins["reversed"] = &PyBuiltinFunc{
+		Name: "reversed",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("reversed() takes exactly one argument (%d given)", len(args))
+			}
+			items, err := vm.toList(args[0])
+			if err != nil {
+				return nil, err
+			}
+			// Create reversed copy
+			result := make([]Value, len(items))
+			for i, item := range items {
+				result[len(items)-1-i] = item
+			}
+			return &PyIterator{Items: result, Index: 0}, nil
+		},
+	}
+
+	// sorted(iterable, key=None, reverse=False) - returns sorted list
+	vm.builtins["sorted"] = &PyBuiltinFunc{
+		Name: "sorted",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("sorted expected 1 argument, got %d", len(args))
+			}
+			items, err := vm.toList(args[0])
+			if err != nil {
+				return nil, err
+			}
+			// Make a copy to avoid modifying the original
+			result := make([]Value, len(items))
+			copy(result, items)
+
+			// Check for key function
+			var keyFn Value
+			if k, ok := kwargs["key"]; ok && k != None {
+				keyFn = k
+			}
+
+			// Check for reverse flag
+			reverse := false
+			if r, ok := kwargs["reverse"]; ok {
+				reverse = vm.truthy(r)
+			}
+
+			// Sort using comparison
+			var sortErr error
+			sort.SliceStable(result, func(i, j int) bool {
+				if sortErr != nil {
+					return false
+				}
+				a, b := result[i], result[j]
+				// Apply key function if provided
+				if keyFn != nil {
+					var err error
+					a, err = vm.call(keyFn, []Value{a}, nil)
+					if err != nil {
+						sortErr = err
+						return false
+					}
+					b, err = vm.call(keyFn, []Value{b}, nil)
+					if err != nil {
+						sortErr = err
+						return false
+					}
+				}
+				cmp := vm.compare(a, b)
+				if reverse {
+					return cmp > 0
+				}
+				return cmp < 0
+			})
+			if sortErr != nil {
+				return nil, sortErr
+			}
+			return &PyList{Items: result}, nil
+		},
+	}
+
+	// all(iterable) - returns True if all elements are truthy
+	vm.builtins["all"] = &PyBuiltinFunc{
+		Name: "all",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("all() takes exactly one argument (%d given)", len(args))
+			}
+			items, err := vm.toList(args[0])
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range items {
+				if !vm.truthy(item) {
+					return False, nil
+				}
+			}
+			return True, nil
+		},
+	}
+
+	// any(iterable) - returns True if any element is truthy
+	vm.builtins["any"] = &PyBuiltinFunc{
+		Name: "any",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("any() takes exactly one argument (%d given)", len(args))
+			}
+			items, err := vm.toList(args[0])
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range items {
+				if vm.truthy(item) {
+					return True, nil
+				}
+			}
+			return False, nil
+		},
+	}
+
+	// hasattr(obj, name) - returns True if object has the attribute
+	vm.builtins["hasattr"] = &PyBuiltinFunc{
+		Name: "hasattr",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("hasattr() takes exactly 2 arguments (%d given)", len(args))
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			_, err := vm.getAttr(args[0], name.Value)
+			if err != nil {
+				return False, nil
+			}
+			return True, nil
+		},
+	}
+
+	// getattr(obj, name[, default]) - get attribute from object
+	vm.builtins["getattr"] = &PyBuiltinFunc{
+		Name: "getattr",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 2 || len(args) > 3 {
+				return nil, fmt.Errorf("getattr expected 2 or 3 arguments, got %d", len(args))
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			val, err := vm.getAttr(args[0], name.Value)
+			if err != nil {
+				if len(args) == 3 {
+					return args[2], nil // Return default
+				}
+				return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(args[0]), name.Value)
+			}
+			return val, nil
+		},
+	}
+
+	// setattr(obj, name, value) - set attribute on object
+	vm.builtins["setattr"] = &PyBuiltinFunc{
+		Name: "setattr",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 3 {
+				return nil, fmt.Errorf("setattr() takes exactly 3 arguments (%d given)", len(args))
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			err := vm.setAttr(args[0], name.Value, args[2])
+			if err != nil {
+				return nil, err
+			}
+			return None, nil
+		},
+	}
+
+	// delattr(obj, name) - delete attribute from object
+	vm.builtins["delattr"] = &PyBuiltinFunc{
+		Name: "delattr",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("delattr() takes exactly 2 arguments (%d given)", len(args))
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			// Handle deletion based on object type
+			switch o := args[0].(type) {
+			case *PyInstance:
+				if _, exists := o.Dict[name.Value]; exists {
+					delete(o.Dict, name.Value)
+					return None, nil
+				}
+				return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Class.Name, name.Value)
+			case *PyModule:
+				if _, exists := o.Dict[name.Value]; exists {
+					delete(o.Dict, name.Value)
+					return None, nil
+				}
+				return nil, fmt.Errorf("module '%s' has no attribute '%s'", o.Name, name.Value)
+			case *PyDict:
+				// Allow delattr on dict for dynamic attribute-style access
+				for k := range o.Items {
+					if str, ok := k.(*PyString); ok && str.Value == name.Value {
+						delete(o.Items, k)
+						return None, nil
+					}
+				}
+				return nil, fmt.Errorf("'dict' object has no attribute '%s'", name.Value)
+			default:
+				return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(args[0]), name.Value)
+			}
+		},
+	}
+
+	// pow(base, exp[, mod]) - power with optional modulo
+	vm.builtins["pow"] = &PyBuiltinFunc{
+		Name: "pow",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 2 || len(args) > 3 {
+				return nil, fmt.Errorf("pow expected 2 or 3 arguments, got %d", len(args))
+			}
+			base := vm.toFloat(args[0])
+			exp := vm.toFloat(args[1])
+
+			if len(args) == 3 {
+				// Modular exponentiation - requires integers
+				baseInt := vm.toInt(args[0])
+				expInt := vm.toInt(args[1])
+				modInt := vm.toInt(args[2])
+				if modInt == 0 {
+					return nil, fmt.Errorf("pow() 3rd argument cannot be 0")
+				}
+				// Simple modular exponentiation
+				result := int64(1)
+				baseInt = baseInt % modInt
+				for expInt > 0 {
+					if expInt%2 == 1 {
+						result = (result * baseInt) % modInt
+					}
+					expInt = expInt / 2
+					baseInt = (baseInt * baseInt) % modInt
+				}
+				return MakeInt(result), nil
+			}
+
+			result := math.Pow(base, exp)
+			// Return int if result is a whole number and inputs were ints
+			_, baseIsInt := args[0].(*PyInt)
+			_, expIsInt := args[1].(*PyInt)
+			if baseIsInt && expIsInt && result == float64(int64(result)) {
+				return MakeInt(int64(result)), nil
+			}
+			return &PyFloat{Value: result}, nil
+		},
+	}
+
+	// divmod(a, b) - returns (quotient, remainder)
+	vm.builtins["divmod"] = &PyBuiltinFunc{
+		Name: "divmod",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("divmod expected 2 arguments, got %d", len(args))
+			}
+			// Check if both are integers
+			aInt, aIsInt := args[0].(*PyInt)
+			bInt, bIsInt := args[1].(*PyInt)
+			if aIsInt && bIsInt {
+				if bInt.Value == 0 {
+					return nil, fmt.Errorf("integer division or modulo by zero")
+				}
+				q := aInt.Value / bInt.Value
+				r := aInt.Value % bInt.Value
+				// Python's divmod uses floor division
+				if r != 0 && (aInt.Value < 0) != (bInt.Value < 0) {
+					q--
+					r += bInt.Value
+				}
+				return &PyTuple{Items: []Value{MakeInt(q), MakeInt(r)}}, nil
+			}
+			// Float division
+			a := vm.toFloat(args[0])
+			b := vm.toFloat(args[1])
+			if b == 0 {
+				return nil, fmt.Errorf("float division by zero")
+			}
+			q := math.Floor(a / b)
+			r := a - q*b
+			return &PyTuple{Items: []Value{&PyFloat{Value: q}, &PyFloat{Value: r}}}, nil
+		},
+	}
+
+	// hex(x) - convert integer to hexadecimal string
+	vm.builtins["hex"] = &PyBuiltinFunc{
+		Name: "hex",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("hex() takes exactly one argument (%d given)", len(args))
+			}
+			n := vm.toInt(args[0])
+			if n < 0 {
+				return &PyString{Value: fmt.Sprintf("-0x%x", -n)}, nil
+			}
+			return &PyString{Value: fmt.Sprintf("0x%x", n)}, nil
+		},
+	}
+
+	// oct(x) - convert integer to octal string
+	vm.builtins["oct"] = &PyBuiltinFunc{
+		Name: "oct",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("oct() takes exactly one argument (%d given)", len(args))
+			}
+			n := vm.toInt(args[0])
+			if n < 0 {
+				return &PyString{Value: fmt.Sprintf("-0o%o", -n)}, nil
+			}
+			return &PyString{Value: fmt.Sprintf("0o%o", n)}, nil
+		},
+	}
+
+	// bin(x) - convert integer to binary string
+	vm.builtins["bin"] = &PyBuiltinFunc{
+		Name: "bin",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("bin() takes exactly one argument (%d given)", len(args))
+			}
+			n := vm.toInt(args[0])
+			if n < 0 {
+				return &PyString{Value: fmt.Sprintf("-0b%b", -n)}, nil
+			}
+			return &PyString{Value: fmt.Sprintf("0b%b", n)}, nil
+		},
+	}
+
+	// round(number[, ndigits]) - round to given precision
+	vm.builtins["round"] = &PyBuiltinFunc{
+		Name: "round",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return nil, fmt.Errorf("round() takes 1 or 2 arguments (%d given)", len(args))
+			}
+			num := vm.toFloat(args[0])
+
+			if len(args) == 1 {
+				// Round to integer - use banker's rounding (round half to even)
+				rounded := math.RoundToEven(num)
+				return MakeInt(int64(rounded)), nil
+			}
+
+			// Round to ndigits decimal places
+			ndigits := vm.toInt(args[1])
+			multiplier := math.Pow(10, float64(ndigits))
+			rounded := math.RoundToEven(num*multiplier) / multiplier
+
+			// If ndigits is negative, return int
+			if ndigits < 0 {
+				return MakeInt(int64(rounded)), nil
+			}
+			return &PyFloat{Value: rounded}, nil
+		},
+	}
+
+	// callable(obj) - check if object is callable
+	vm.builtins["callable"] = &PyBuiltinFunc{
+		Name: "callable",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("callable() takes exactly one argument (%d given)", len(args))
+			}
+			switch args[0].(type) {
+			case *PyFunction, *PyBuiltinFunc, *PyGoFunc, *PyMethod, *PyClass:
+				return True, nil
+			case *PyInstance:
+				// Check if instance has __call__ method
+				inst := args[0].(*PyInstance)
+				for _, cls := range inst.Class.Mro {
+					if _, ok := cls.Dict["__call__"]; ok {
+						return True, nil
+					}
+				}
+				return False, nil
+			default:
+				return False, nil
+			}
 		},
 	}
 
@@ -4934,6 +5461,19 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 					frame.Cells[cellIdx].Value = args[argIdx]
 				}
 				break
+			}
+		}
+	}
+
+	// Apply keyword arguments to the appropriate local slots
+	if kwargs != nil {
+		for name, val := range kwargs {
+			// Find the parameter index by name
+			for i, varName := range code.VarNames {
+				if varName == name && i < code.ArgCount {
+					frame.Locals[i] = val
+					break
+				}
 			}
 		}
 	}
