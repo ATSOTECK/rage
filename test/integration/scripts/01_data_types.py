@@ -1,6 +1,8 @@
 # Test: Data Types
 # Tests basic Python data types
 
+from test_framework import test, expect
+
 def test_none():
     expect(None, None)
     expect(True, None is None)

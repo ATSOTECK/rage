@@ -1,6 +1,8 @@
 # Test: Standard Library Modules
 # Tests math, random, string, time, sys
 
+from test_framework import test, expect
+
 import math
 import random
 import string

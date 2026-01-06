@@ -1,6 +1,8 @@
 # Test: Async/Await and Asyncio
 # Tests async functions, await expressions, and asyncio module
 
+from test_framework import test, expect
+
 import asyncio
 
 async def simple_async():

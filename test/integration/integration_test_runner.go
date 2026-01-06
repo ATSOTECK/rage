@@ -11,28 +11,6 @@ import (
 	"github.com/ATSOTECK/rage/pkg/rage"
 )
 
-// Test framework injected into each Python script
-const testFramework = `
-__test_passed__ = 0
-__test_failed__ = 0
-__test_failures__ = ""
-
-def expect(expected, actual):
-    if expected != actual:
-        raise Exception("Expected " + str(expected) + " but got " + str(actual))
-
-def test(name, fn):
-    global __test_passed__, __test_failed__, __test_failures__
-    try:
-        fn()
-        __test_passed__ = __test_passed__ + 1
-        print("[PASS] " + name)
-    except Exception as e:
-        __test_failed__ = __test_failed__ + 1
-        __test_failures__ = __test_failures__ + name + ": " + str(e) + "\n"
-        print("[FAIL] " + name + ": " + str(e))
-`
-
 // ScriptResult holds the results of running a single test script
 type ScriptResult struct {
 	Script   string        `json:"script"`
@@ -88,19 +66,19 @@ func convertValue(v rage.Value) any {
 	}
 }
 
-// extractTestCounts extracts pass/fail counts from Python globals
+// extractTestCounts extracts pass/fail counts from the test_framework module
 func extractTestCounts(state *rage.State) (passed, failed int, failures string) {
-	if v := state.GetGlobal("__test_passed__"); v != nil {
+	if v := state.GetModuleAttr("test_framework", "__test_passed__"); v != nil {
 		if i, ok := rage.AsInt(v); ok {
 			passed = int(i)
 		}
 	}
-	if v := state.GetGlobal("__test_failed__"); v != nil {
+	if v := state.GetModuleAttr("test_framework", "__test_failed__"); v != nil {
 		if i, ok := rage.AsInt(v); ok {
 			failed = int(i)
 		}
 	}
-	if v := state.GetGlobal("__test_failures__"); v != nil {
+	if v := state.GetModuleAttr("test_framework", "__test_failures__"); v != nil {
 		if s, ok := rage.AsString(v); ok {
 			failures = s
 		}
@@ -109,19 +87,28 @@ func extractTestCounts(state *rage.State) (passed, failed int, failures string) 
 }
 
 // runScript executes a Python test script and returns the results
-func runScript(scriptPath string, timeout time.Duration) (passed, failed int, failures string, err error) {
+func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (passed, failed int, failures string, err error) {
+	// Read test framework module
+	frameworkPath := filepath.Join(scriptsDir, "test_framework.py")
+	frameworkSource, err := os.ReadFile(frameworkPath)
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("failed to read test framework: %w", err)
+	}
+
 	// Read script
 	source, err := os.ReadFile(scriptPath)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to read script: %w", err)
 	}
 
-	// Prepend test framework
-	fullSource := testFramework + "\n" + string(source)
-
 	// Create a new state with all modules enabled
 	state := rage.NewState()
 	defer state.Close()
+
+	// Register the test framework as an importable module
+	if err := state.RegisterPythonModule("test_framework", string(frameworkSource)); err != nil {
+		return 0, 0, "", fmt.Errorf("failed to register test framework module: %w", err)
+	}
 
 	// Set up temp directory for file I/O tests
 	if strings.Contains(filepath.Base(scriptPath), "file_io") ||
@@ -136,12 +123,12 @@ func runScript(scriptPath string, timeout time.Duration) (passed, failed int, fa
 	}
 
 	// Execute with timeout
-	_, err = state.RunWithTimeout(fullSource, timeout)
+	_, err = state.RunWithTimeout(string(source), timeout)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("execution error: %w", err)
 	}
 
-	// Extract test counts
+	// Extract test counts from the test_framework module
 	passed, failed, failures = extractTestCounts(state)
 	return passed, failed, failures, nil
 }
@@ -159,7 +146,8 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 	totalFailed := 0
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".py") {
+		// Skip non-Python files, directories, and the test framework module itself
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".py") || entry.Name() == "test_framework.py" {
 			continue
 		}
 
@@ -172,7 +160,7 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 		start := time.Now()
 
 		// Run script
-		passed, failed, failures, err := runScript(scriptPath, 30*time.Second)
+		passed, failed, failures, err := runScript(scriptPath, scriptsDir, 30*time.Second)
 		result.Duration = time.Since(start)
 
 		if err != nil {

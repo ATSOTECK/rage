@@ -1,6 +1,8 @@
 # Test: Comprehensions
 # Tests list comprehensions, dict comprehensions, and set comprehensions
 
+from test_framework import test, expect
+
 # Walrus helper function
 def walrus_func():
     inner_result = [(walrus_z := j + 100) for j in range(3)]

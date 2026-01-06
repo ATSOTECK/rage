@@ -1,6 +1,8 @@
 # Test: os module
 # Tests os functions and os.path submodule
 
+from test_framework import test, expect
+
 import os
 
 # Get temp directory from test runner

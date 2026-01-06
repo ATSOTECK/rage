@@ -1,6 +1,8 @@
 # Test: Exceptions
 # Tests try/except/finally, raise, exception types, inheritance
 
+from test_framework import test, expect
+
 # Helper functions at module level
 def raise_in_func():
     raise ValueError

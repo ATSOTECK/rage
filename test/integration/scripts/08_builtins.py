@@ -1,6 +1,8 @@
 # Test: Built-in Functions
 # Tests commonly used built-in functions
 
+from test_framework import test, expect
+
 # Helper functions and classes at module level
 def double(x):
     return x * 2

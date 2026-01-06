@@ -1,6 +1,8 @@
 # Test: Functions
 # Tests function definitions, arguments, and recursion
 
+from test_framework import test, expect
+
 # Define helper functions at module level so recursion works
 def factorial(n):
     if n <= 1:

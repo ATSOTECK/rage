@@ -2024,6 +2024,28 @@ func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, 
 	return vm.run()
 }
 
+// ExecuteInModule runs bytecode with a module's dict as the global namespace.
+// This is used to populate a module's namespace when registering Python modules.
+func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) error {
+	frame := &Frame{
+		Code:     code,
+		IP:       0,
+		Stack:    make([]Value, code.StackSize+16),
+		SP:       0,
+		Locals:   make([]Value, len(code.VarNames)),
+		Globals:  mod.Dict,
+		Builtins: vm.builtins,
+	}
+
+	vm.frames = append(vm.frames, frame)
+	vm.frame = frame
+	vm.ctx = context.Background()
+	vm.checkCounter = vm.checkInterval
+
+	_, err := vm.run()
+	return err
+}
+
 func (vm *VM) run() (Value, error) {
 	frame := vm.frame
 

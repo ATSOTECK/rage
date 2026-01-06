@@ -1,6 +1,8 @@
 # Test: Decorators and Closures
 # Tests decorator syntax, closures, and nested functions
 
+from test_framework import test, expect
+
 # Closure and decorator helpers at module level
 def make_counter():
     count = 0

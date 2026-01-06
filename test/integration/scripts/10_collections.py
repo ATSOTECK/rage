@@ -1,6 +1,8 @@
 # Test: Collection Operations
 # Tests list, dict, and tuple operations
 
+from test_framework import test, expect
+
 def test_list_append():
     lst = [1, 2, 3]
     lst.append(4)

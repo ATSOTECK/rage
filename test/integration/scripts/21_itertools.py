@@ -1,6 +1,8 @@
 # Test: itertools module
 # Tests the itertools standard library module
 
+from test_framework import test, expect
+
 import itertools
 
 def test_count():

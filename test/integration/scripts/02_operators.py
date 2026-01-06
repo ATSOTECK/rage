@@ -1,6 +1,8 @@
 # Test: Operators
 # Tests all Python operators
 
+from test_framework import test, expect
+
 def test_arithmetic():
     expect(15, 10 + 5)
     expect(5, 10 - 5)

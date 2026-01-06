@@ -1,6 +1,8 @@
 # Test: datetime module
 # Tests datetime, date, time, timedelta classes
 
+from test_framework import test, expect
+
 import datetime
 
 def test_datetime_constants():

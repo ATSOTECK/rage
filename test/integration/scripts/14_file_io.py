@@ -1,6 +1,8 @@
 # Test: File I/O Operations
 # Tests open(), read(), write(), and file object methods
 
+from test_framework import test, expect
+
 import io
 
 # Get temp directory from test runner

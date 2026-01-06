@@ -1,6 +1,8 @@
 # Test: String Operations
 # Tests string methods and operations
 
+from test_framework import test, expect
+
 def test_str_basic():
     s = "Hello, World!"
     expect(13, len(s))

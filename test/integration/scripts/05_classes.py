@@ -1,6 +1,8 @@
 # Test: Classes
 # Tests class definitions, instances, methods, inheritance
 
+from test_framework import test, expect
+
 # Define all classes at module level
 
 class Point:

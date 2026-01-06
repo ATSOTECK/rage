@@ -1,6 +1,8 @@
 # Test: typing module
 # Tests type hints, type variables, generic types, and utility functions
 
+from test_framework import test, expect
+
 from typing import List, Dict, Set, Tuple, Optional, Union, Any, Callable
 from typing import TypeVar, Generic, Protocol
 from typing import Sequence, Mapping, Iterable, Iterator

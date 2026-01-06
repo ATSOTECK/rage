@@ -1,6 +1,8 @@
 # Test: Control Flow
 # Tests if/else, for, while, break, continue
 
+from test_framework import test, expect
+
 def test_if_statements():
     # Simple if
     x = 10

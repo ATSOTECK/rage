@@ -1,6 +1,8 @@
 # Test: JSON Module
 # Tests json.dumps and json.loads
 
+from test_framework import test, expect
+
 import json
 
 def test_dumps_basic_types():

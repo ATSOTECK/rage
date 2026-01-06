@@ -377,6 +377,50 @@ func (s *State) GetGlobals() map[string]Value {
 	return result
 }
 
+// GetModuleAttr retrieves an attribute from an imported module.
+// Returns nil if the module doesn't exist or the attribute isn't found.
+func (s *State) GetModuleAttr(moduleName, attrName string) Value {
+	if s.closed {
+		return nil
+	}
+	mod, ok := s.vm.GetModule(moduleName)
+	if !ok {
+		return nil
+	}
+	val, ok := mod.Get(attrName)
+	if !ok {
+		return nil
+	}
+	return fromRuntime(val)
+}
+
+// RegisterPythonModule compiles and registers Python source code as an importable module.
+// The module can then be imported using "import moduleName" or "from moduleName import ...".
+func (s *State) RegisterPythonModule(moduleName, source string) error {
+	if err := s.checkClosed(); err != nil {
+		return err
+	}
+
+	// Compile the source
+	code, errs := compiler.CompileSource(source, moduleName+".py")
+	if len(errs) > 0 {
+		return &CompileErrors{Errors: errs}
+	}
+
+	// Create a new module
+	mod := runtime.NewModule(moduleName)
+
+	// Execute the code to populate the module's namespace
+	err := s.vm.ExecuteInModule(code, mod)
+	if err != nil {
+		return err
+	}
+
+	// Register the module so it can be imported
+	s.vm.RegisterModuleInstance(moduleName, mod)
+	return nil
+}
+
 // Register registers a Go function that can be called from Python.
 //
 // Example:

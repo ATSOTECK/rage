@@ -1,6 +1,8 @@
 # Test: Match Statements
 # Tests Python 3.10+ structural pattern matching
 
+from test_framework import test, expect
+
 class Point:
     __match_args__ = ("x", "y")
 
