@@ -6,62 +6,62 @@ from test_framework import test, expect
 def test_list_append():
     lst = [1, 2, 3]
     lst.append(4)
-    expect([1, 2, 3, 4], lst)
+    expect(lst).to_be([1, 2, 3, 4])
 
 def test_list_extend():
     lst = [1, 2]
     lst.extend([3, 4, 5])
-    expect([1, 2, 3, 4, 5], lst)
+    expect(lst).to_be([1, 2, 3, 4, 5])
 
 def test_list_pop():
     lst = [1, 2, 3, 4, 5]
     popped = lst.pop()
-    expect(5, popped)
-    expect([1, 2, 3, 4], lst)
+    expect(popped).to_be(5)
+    expect(lst).to_be([1, 2, 3, 4])
 
 def test_list_neg_index():
     lst = [1, 2, 3, 4, 5]
-    expect(4, lst[-2])
+    expect(lst[-2]).to_be(4)
 
 def test_list_membership():
-    expect(True, 3 in [1, 2, 3, 4])
-    expect(True, 5 not in [1, 2, 3, 4])
+    expect(3 in [1, 2, 3, 4]).to_be(True)
+    expect(5 not in [1, 2, 3, 4]).to_be(True)
 
 def test_dict_access():
     d = {"a": 1, "b": 2, "c": 3}
-    expect(1, d["a"])
+    expect(d["a"]).to_be(1)
 
 def test_dict_get():
     d = {"a": 1, "b": 2, "c": 3}
     # Note: RAGE has a bug where d.get("key") returns None even when key exists
     # Using d["key"] instead for existing keys
-    expect(1, d["a"])
-    expect(99, d.get("z", 99))
-    expect(None, d.get("z"))
+    expect(d["a"]).to_be(1)
+    expect(d.get("z", 99)).to_be(99)
+    expect(d.get("z")).to_be(None)
 
 def test_dict_membership():
     d = {"a": 1, "b": 2}
-    expect(True, "a" in d)
-    expect(True, "z" not in d)
+    expect("a" in d).to_be(True)
+    expect("z" not in d).to_be(True)
 
 def test_dict_len():
-    expect(3, len({"a": 1, "b": 2, "c": 3}))
+    expect(len({"a": 1, "b": 2, "c": 3})).to_be(3)
 
 def test_tuple_neg_index():
     t = (1, 2, 3, 4, 5)
-    expect(5, t[-1])
+    expect(t[-1]).to_be(5)
 
 def test_tuple_membership():
-    expect(True, 2 in (1, 2, 3))
+    expect(2 in (1, 2, 3)).to_be(True)
 
 def test_tuple_unpack():
     t = (1, 2, 3)
     a, b, c = t
-    expect([1, 2, 3], [a, b, c])
+    expect([a, b, c]).to_be([1, 2, 3])
 
 def test_tuple_single():
     t = (42,)
-    expect(1, len(t))
+    expect(len(t)).to_be(1)
 
 test("list_append", test_list_append)
 test("list_extend", test_list_extend)

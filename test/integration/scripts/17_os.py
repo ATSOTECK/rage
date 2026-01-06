@@ -13,185 +13,185 @@ except:
     pass
 
 def test_os_constants():
-    expect(True, os.name in ["posix", "nt"])
-    expect(True, os.sep in ["/", "\\"])
-    expect(".", os.curdir)
-    expect("..", os.pardir)
-    expect(".", os.extsep)
-    expect(True, len(os.devnull) > 0)
+    expect(os.name in ["posix", "nt"]).to_be(True)
+    expect(os.sep in ["/", "\\"]).to_be(True)
+    expect(os.curdir).to_be(".")
+    expect(os.pardir).to_be("..")
+    expect(os.extsep).to_be(".")
+    expect(len(os.devnull) > 0).to_be(True)
 
 def test_os_getenv():
-    expect("default_value", os.getenv("__RAGE_TEST_MISSING_VAR__", "default_value"))
+    expect(os.getenv("__RAGE_TEST_MISSING_VAR__", "default_value")).to_be("default_value")
     home = os.getenv("HOME")
     if home is None:
         home = os.getenv("USERPROFILE")
-    expect(True, home is not None and len(home) > 0)
+    expect(home is not None and len(home) > 0).to_be(True)
 
 def test_os_getcwd():
     cwd = os.getcwd()
-    expect(True, len(cwd) > 0)
-    expect(True, os.path.isabs(cwd))
+    expect(len(cwd) > 0).to_be(True)
+    expect(os.path.isabs(cwd)).to_be(True)
 
 def test_os_listdir():
     files = os.listdir(".")
-    expect(True, isinstance(files, list))
-    expect(True, len(files) > 0)
+    expect(isinstance(files, list)).to_be(True)
+    expect(len(files) > 0).to_be(True)
 
 def test_os_process():
-    expect(True, os.getpid() > 0)
-    expect(True, os.cpu_count() > 0)
+    expect(os.getpid() > 0).to_be(True)
+    expect(os.cpu_count() > 0).to_be(True)
     uname = os.uname()
-    expect(True, "sysname" in uname)
-    expect(True, "machine" in uname)
-    expect(True, "nodename" in uname)
+    expect("sysname" in uname).to_be(True)
+    expect("machine" in uname).to_be(True)
+    expect("nodename" in uname).to_be(True)
 
 def test_os_path_join():
-    expect("a" + os.sep + "b", os.path.join("a", "b"))
-    expect("a" + os.sep + "b" + os.sep + "c" + os.sep + "d", os.path.join("a", "b", "c", "d"))
-    expect("/root" + os.sep + "sub" + os.sep + "file.txt", os.path.join("/root", "sub", "file.txt"))
+    expect(os.path.join("a", "b")).to_be("a" + os.sep + "b")
+    expect(os.path.join("a", "b", "c", "d")).to_be("a" + os.sep + "b" + os.sep + "c" + os.sep + "d")
+    expect(os.path.join("/root", "sub", "file.txt")).to_be("/root" + os.sep + "sub" + os.sep + "file.txt")
 
 def test_os_path_split():
     split_result = os.path.split("/foo/bar/baz.txt")
-    expect("/foo/bar", split_result[0])
-    expect("baz.txt", split_result[1])
+    expect(split_result[0]).to_be("/foo/bar")
+    expect(split_result[1]).to_be("baz.txt")
 
 def test_os_path_splitext():
     splitext_result = os.path.splitext("document.tar.gz")
-    expect("document.tar", splitext_result[0])
-    expect(".gz", splitext_result[1])
+    expect(splitext_result[0]).to_be("document.tar")
+    expect(splitext_result[1]).to_be(".gz")
 
     splitext_result2 = os.path.splitext("noextension")
-    expect("noextension", splitext_result2[0])
-    expect("", splitext_result2[1])
+    expect(splitext_result2[0]).to_be("noextension")
+    expect(splitext_result2[1]).to_be("")
 
 def test_os_path_basename_dirname():
-    expect("file.txt", os.path.basename("/foo/bar/file.txt"))
+    expect(os.path.basename("/foo/bar/file.txt")).to_be("file.txt")
     # RAGE returns "bar" for trailing slash, Python returns ""
     result = os.path.basename("/foo/bar/")
-    expect(True, result == "" or result == "bar")
-    expect("/foo/bar", os.path.dirname("/foo/bar/file.txt"))
+    expect(result == "" or result == "bar").to_be(True)
+    expect(os.path.dirname("/foo/bar/file.txt")).to_be("/foo/bar")
     # dirname of /file.txt might return / or empty string depending on implementation
-    expect(True, os.path.dirname("/file.txt") in ["/", ""])
+    expect(os.path.dirname("/file.txt") in ["/", ""]).to_be(True)
 
 def test_os_path_exists():
-    expect(True, os.path.exists("."))
-    expect(False, os.path.exists("__nonexistent_path_12345__"))
+    expect(os.path.exists(".")).to_be(True)
+    expect(os.path.exists("__nonexistent_path_12345__")).to_be(False)
 
 def test_os_path_isdir_isfile():
-    expect(True, os.path.isdir("."))
-    expect(False, os.path.isfile("."))
+    expect(os.path.isdir(".")).to_be(True)
+    expect(os.path.isfile(".")).to_be(False)
 
 def test_os_path_isabs():
-    expect(True, os.path.isabs("/foo/bar"))
-    expect(False, os.path.isabs("foo/bar"))
-    expect(False, os.path.isabs("."))
+    expect(os.path.isabs("/foo/bar")).to_be(True)
+    expect(os.path.isabs("foo/bar")).to_be(False)
+    expect(os.path.isabs(".")).to_be(False)
 
 def test_os_path_normpath():
-    expect("foo" + os.sep + "baz", os.path.normpath("foo/./bar/../baz"))
-    expect("foo" + os.sep + "bar" + os.sep + "baz", os.path.normpath("foo//bar///baz"))
+    expect(os.path.normpath("foo/./bar/../baz")).to_be("foo" + os.sep + "baz")
+    expect(os.path.normpath("foo//bar///baz")).to_be("foo" + os.sep + "bar" + os.sep + "baz")
 
 def test_os_path_abspath():
     abspath = os.path.abspath(".")
-    expect(True, os.path.isabs(abspath))
+    expect(os.path.isabs(abspath)).to_be(True)
 
 def test_os_path_expanduser():
     expanded = os.path.expanduser("~")
-    expect(True, expanded != "~")
-    expect(True, len(expanded) > 0)
+    expect(expanded != "~").to_be(True)
+    expect(len(expanded) > 0).to_be(True)
 
 def test_os_path_commonprefix():
     # Common prefix might or might not include trailing slash
     result = os.path.commonprefix(["/usr/lib", "/usr/local", "/usr/share"])
-    expect(True, "/usr" in result)
+    expect("/usr" in result).to_be(True)
     # /foo and /bar share only "/" as common prefix
     result2 = os.path.commonprefix(["/foo", "/bar"])
-    expect(True, result2 == "/" or result2 == "")
+    expect(result2 == "/" or result2 == "").to_be(True)
 
 def test_os_path_relpath():
-    expect(".", os.path.relpath("/foo/bar", "/foo/bar"))
-    expect("baz", os.path.relpath("/foo/bar/baz", "/foo/bar"))
+    expect(os.path.relpath("/foo/bar", "/foo/bar")).to_be(".")
+    expect(os.path.relpath("/foo/bar/baz", "/foo/bar")).to_be("baz")
 
 def test_os_urandom():
     random_bytes = os.urandom(16)
-    expect(16, len(random_bytes))
+    expect(len(random_bytes)).to_be(16)
 
 def test_os_fspath():
-    expect("/some/path", os.fspath("/some/path"))
+    expect(os.fspath("/some/path")).to_be("/some/path")
     encoded = os.fsencode("/path")
-    expect(True, len(encoded) > 0)
+    expect(len(encoded) > 0).to_be(True)
     decoded = os.fsdecode(b"/path")
-    expect(True, isinstance(decoded, str))
+    expect(isinstance(decoded, str)).to_be(True)
 
 def test_os_file_operations():
     if tmp_dir is None:
-        expect(True, True)  # Skip if no tmp_dir
+        expect(True).to_be(True)  # Skip if no tmp_dir
         return
 
     # Test stat
     stat_result = os.stat(tmp_dir)
-    expect(True, "st_mode" in stat_result)
-    expect(True, "st_size" in stat_result)
-    expect(True, "st_mtime" in stat_result)
-    expect(True, isinstance(stat_result["st_mode"], int))
+    expect("st_mode" in stat_result).to_be(True)
+    expect("st_size" in stat_result).to_be(True)
+    expect("st_mtime" in stat_result).to_be(True)
+    expect(isinstance(stat_result["st_mode"], int)).to_be(True)
 
     # Test access
-    expect(True, os.access(tmp_dir, 0))
-    expect(True, os.access(tmp_dir, 4))
+    expect(os.access(tmp_dir, 0)).to_be(True)
+    expect(os.access(tmp_dir, 4)).to_be(True)
 
     # Test getsize and getmtime
-    expect(True, os.path.getsize(tmp_dir) >= 0)
-    expect(True, os.path.getmtime(tmp_dir) > 0)
+    expect(os.path.getsize(tmp_dir) >= 0).to_be(True)
+    expect(os.path.getmtime(tmp_dir) > 0).to_be(True)
 
 def test_os_mkdir_rmdir():
     if tmp_dir is None:
-        expect(True, True)  # Skip if no tmp_dir
+        expect(True).to_be(True)  # Skip if no tmp_dir
         return
 
     test_subdir = os.path.join(tmp_dir, "test_subdir_17")
     os.mkdir(test_subdir)
-    expect(True, os.path.isdir(test_subdir))
+    expect(os.path.isdir(test_subdir)).to_be(True)
     os.rmdir(test_subdir)
-    expect(False, os.path.exists(test_subdir))
+    expect(os.path.exists(test_subdir)).to_be(False)
 
 def test_os_rename():
     if tmp_dir is None:
-        expect(True, True)  # Skip if no tmp_dir
+        expect(True).to_be(True)  # Skip if no tmp_dir
         return
 
     rename_src = os.path.join(tmp_dir, "rename_src_17")
     rename_dst = os.path.join(tmp_dir, "rename_dst_17")
     os.mkdir(rename_src)
     os.rename(rename_src, rename_dst)
-    expect(True, os.path.isdir(rename_dst))
-    expect(False, os.path.exists(rename_src))
+    expect(os.path.isdir(rename_dst)).to_be(True)
+    expect(os.path.exists(rename_src)).to_be(False)
     os.rmdir(rename_dst)
 
 def test_os_makedirs():
     if tmp_dir is None:
-        expect(True, True)  # Skip if no tmp_dir
+        expect(True).to_be(True)  # Skip if no tmp_dir
         return
 
     nested_dir = os.path.join(tmp_dir, "nested_17", "a", "b", "c")
     os.makedirs(nested_dir)
-    expect(True, os.path.isdir(nested_dir))
+    expect(os.path.isdir(nested_dir)).to_be(True)
     os.removedirs(nested_dir)
-    expect(False, os.path.exists(os.path.join(tmp_dir, "nested_17")))
+    expect(os.path.exists(os.path.join(tmp_dir, "nested_17"))).to_be(False)
 
 def test_os_scandir():
     if tmp_dir is None:
-        expect(True, True)  # Skip if no tmp_dir
+        expect(True).to_be(True)  # Skip if no tmp_dir
         return
 
     test_subdir = os.path.join(tmp_dir, "scandir_test_17")
     os.mkdir(test_subdir)
     scan_results = os.scandir(tmp_dir)
-    expect(True, isinstance(scan_results, list))
-    expect(True, len(scan_results) > 0)
+    expect(isinstance(scan_results, list)).to_be(True)
+    expect(len(scan_results) > 0).to_be(True)
     if len(scan_results) > 0:
         entry = scan_results[0]
-        expect(True, "name" in entry)
-        expect(True, "path" in entry)
-        expect(True, "is_dir" in entry)
+        expect("name" in entry).to_be(True)
+        expect("path" in entry).to_be(True)
+        expect("is_dir" in entry).to_be(True)
     os.rmdir(test_subdir)
 
 test("os_constants", test_os_constants)

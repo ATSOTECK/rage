@@ -194,93 +194,93 @@ def test_class_keyword(obj):
             return "other"
 
 def test_int_literals():
-    expect("one", test_int_literal(1))
-    expect("two", test_int_literal(2))
-    expect("three", test_int_literal(3))
-    expect("other", test_int_literal(99))
+    expect(test_int_literal(1)).to_be("one")
+    expect(test_int_literal(2)).to_be("two")
+    expect(test_int_literal(3)).to_be("three")
+    expect(test_int_literal(99)).to_be("other")
 
 def test_str_literals():
-    expect("starting", test_str_literal("start"))
-    expect("stopping", test_str_literal("stop"))
-    expect("unknown", test_str_literal("pause"))
+    expect(test_str_literal("start")).to_be("starting")
+    expect(test_str_literal("stop")).to_be("stopping")
+    expect(test_str_literal("pause")).to_be("unknown")
 
 def test_singletons():
-    expect("is_true", test_singleton(True))
-    expect("is_false", test_singleton(False))
-    expect("is_none", test_singleton(None))
-    expect("other", test_singleton(42))
+    expect(test_singleton(True)).to_be("is_true")
+    expect(test_singleton(False)).to_be("is_false")
+    expect(test_singleton(None)).to_be("is_none")
+    expect(test_singleton(42)).to_be("other")
 
 def test_captures():
-    expect("zero", test_capture(0))
-    expect("captured: 42", test_capture(42))
+    expect(test_capture(0)).to_be("zero")
+    expect(test_capture(42)).to_be("captured: 42")
 
 def test_wildcards():
-    expect("one", test_wildcard(1))
-    expect("wildcard", test_wildcard(999))
+    expect(test_wildcard(1)).to_be("one")
+    expect(test_wildcard(999)).to_be("wildcard")
 
 def test_or_patterns():
-    expect("small", test_or_pattern(2))
-    expect("medium", test_or_pattern(5))
-    expect("large", test_or_pattern(100))
+    expect(test_or_pattern(2)).to_be("small")
+    expect(test_or_pattern(5)).to_be("medium")
+    expect(test_or_pattern(100)).to_be("large")
 
 def test_list_patterns():
-    expect("empty", test_list_empty([]))
-    expect("one: 1", test_list_one([1]))
-    expect("two: 1, 2", test_list_two([1, 2]))
-    expect("three: 1, 2, 3", test_list_three([1, 2, 3]))
-    expect("many", test_list_many([1, 2, 3, 4, 5]))
+    expect(test_list_empty([])).to_be("empty")
+    expect(test_list_one([1])).to_be("one: 1")
+    expect(test_list_two([1, 2])).to_be("two: 1, 2")
+    expect(test_list_three([1, 2, 3])).to_be("three: 1, 2, 3")
+    expect(test_list_many([1, 2, 3, 4, 5])).to_be("many")
 
 def test_tuple_patterns():
-    expect("pair: 10, 20", test_tuple_pattern((10, 20)))
-    expect("triple: 1, 2, 3", test_tuple_pattern((1, 2, 3)))
+    expect(test_tuple_pattern((10, 20))).to_be("pair: 10, 20")
+    expect(test_tuple_pattern((1, 2, 3))).to_be("triple: 1, 2, 3")
 
 def test_star_patterns():
     # Test the star pattern functionality without exact string matching
     result1 = test_star_pattern([1, 2, 3, 4])
-    expect(True, "first=1" in result1)
+    expect("first=1" in result1).to_be(True)
     result2 = test_star_pattern([1])
-    expect(True, "first=1" in result2)
+    expect("first=1" in result2).to_be(True)
     result3 = test_star_middle([1, 2, 3, 4, 5])
-    expect(True, "first=1" in result3 and "last=5" in result3)
+    expect("first=1" in result3 and "last=5" in result3).to_be(True)
     result4 = test_star_middle([1, 2])
-    expect(True, "first=1" in result4 and "last=2" in result4)
+    expect("first=1" in result4 and "last=2" in result4).to_be(True)
 
 def test_mapping_patterns():
-    expect("start server", test_mapping_pattern({"action": "start", "target": "server"}))
-    expect("stop", test_mapping_pattern({"action": "stop", "extra": "ignored"}))
-    expect("point: (10, 20)", test_mapping_pattern({"x": 10, "y": 20}))
-    expect("unknown", test_mapping_pattern({"foo": "bar"}))
+    expect(test_mapping_pattern({"action": "start", "target": "server"})).to_be("start server")
+    expect(test_mapping_pattern({"action": "stop", "extra": "ignored"})).to_be("stop")
+    expect(test_mapping_pattern({"x": 10, "y": 20})).to_be("point: (10, 20)")
+    expect(test_mapping_pattern({"foo": "bar"})).to_be("unknown")
 
 def test_guards():
-    expect("negative", test_guard(-5))
-    expect("zero", test_guard(0))
-    expect("positive", test_guard(10))
+    expect(test_guard(-5)).to_be("negative")
+    expect(test_guard(0)).to_be("zero")
+    expect(test_guard(10)).to_be("positive")
 
 def test_guard_complex_patterns():
-    expect("diagonal", test_guard_complex((5, 5)))
-    expect("on x-axis", test_guard_complex((3, 0)))
-    expect("on y-axis", test_guard_complex((0, 7)))
-    expect("(1, 2)", test_guard_complex((1, 2)))
+    expect(test_guard_complex((5, 5))).to_be("diagonal")
+    expect(test_guard_complex((3, 0))).to_be("on x-axis")
+    expect(test_guard_complex((0, 7))).to_be("on y-axis")
+    expect(test_guard_complex((1, 2))).to_be("(1, 2)")
 
 def test_as_patterns():
     result = test_as_pattern([10, 20])
-    expect(True, "x=10" in result and "y=20" in result)
+    expect("x=10" in result and "y=20" in result).to_be(True)
 
 def test_nested_patterns():
-    expect("user: Alice, age: 30", test_nested_pattern({"user": {"name": "Alice", "age": 30}}))
-    expect("ids: 1, 2", test_nested_pattern([{"id": 1}, {"id": 2}]))
+    expect(test_nested_pattern({"user": {"name": "Alice", "age": 30}})).to_be("user: Alice, age: 30")
+    expect(test_nested_pattern([{"id": 1}, {"id": 2}])).to_be("ids: 1, 2")
 
 def test_class_patterns():
-    expect("origin", test_class_pattern(Point(0, 0)))
-    expect("on x-axis at 5", test_class_pattern(Point(5, 0)))
-    expect("on y-axis at 3", test_class_pattern(Point(0, 3)))
-    expect("point at (2, 4)", test_class_pattern(Point(2, 4)))
-    expect("not a point", test_class_pattern("not a point"))
+    expect(test_class_pattern(Point(0, 0))).to_be("origin")
+    expect(test_class_pattern(Point(5, 0))).to_be("on x-axis at 5")
+    expect(test_class_pattern(Point(0, 3))).to_be("on y-axis at 3")
+    expect(test_class_pattern(Point(2, 4))).to_be("point at (2, 4)")
+    expect(test_class_pattern("not a point")).to_be("not a point")
 
 def test_class_keyword_patterns():
-    expect("origin", test_class_keyword(Point(0, 0)))
-    expect("diagonal at 3", test_class_keyword(Point(3, 3)))
-    expect("other", test_class_keyword(Point(1, 2)))
+    expect(test_class_keyword(Point(0, 0))).to_be("origin")
+    expect(test_class_keyword(Point(3, 3))).to_be("diagonal at 3")
+    expect(test_class_keyword(Point(1, 2))).to_be("other")
 
 test("int_literals", test_int_literals)
 test("str_literals", test_str_literals)

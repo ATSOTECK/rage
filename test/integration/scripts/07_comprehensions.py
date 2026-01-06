@@ -9,83 +9,83 @@ def walrus_func():
     return walrus_z
 
 def test_list_comp_simple():
-    expect([0, 1, 2, 3, 4], [x for x in range(5)])
+    expect([x for x in range(5)]).to_be([0, 1, 2, 3, 4])
 
 def test_list_comp_expr():
-    expect([0, 2, 4, 6, 8], [x * 2 for x in range(5)])
+    expect([x * 2 for x in range(5)]).to_be([0, 2, 4, 6, 8])
 
 def test_list_comp_squares():
-    expect([0, 1, 4, 9, 16, 25], [x * x for x in range(6)])
+    expect([x * x for x in range(6)]).to_be([0, 1, 4, 9, 16, 25])
 
 def test_list_comp_filter():
-    expect([0, 2, 4, 6, 8], [x for x in range(10) if x % 2 == 0])
+    expect([x for x in range(10) if x % 2 == 0]).to_be([0, 2, 4, 6, 8])
 
 def test_list_comp_multi_filter():
-    expect([0, 6, 12, 18, 24], [x for x in range(30) if x % 2 == 0 if x % 3 == 0])
+    expect([x for x in range(30) if x % 2 == 0 if x % 3 == 0]).to_be([0, 6, 12, 18, 24])
 
 def test_list_comp_expr_filter():
-    expect([1, 9, 25, 49, 81], [x * x for x in range(10) if x % 2 == 1])
+    expect([x * x for x in range(10) if x % 2 == 1]).to_be([1, 9, 25, 49, 81])
 
 def test_list_comp_string():
-    expect(["h", "e", "l", "l", "o"], [c for c in "hello"])
+    expect([c for c in "hello"]).to_be(["h", "e", "l", "l", "o"])
 
 def test_list_comp_list():
-    expect([11, 12, 13, 14, 15], [x + 10 for x in [1, 2, 3, 4, 5]])
+    expect([x + 10 for x in [1, 2, 3, 4, 5]]).to_be([11, 12, 13, 14, 15])
 
 def test_list_comp_empty():
-    expect([], [x for x in []])
+    expect([x for x in []]).to_be([])
 
 def test_list_comp_filter_all():
-    expect([], [x for x in range(5) if x > 100])
+    expect([x for x in range(5) if x > 100]).to_be([])
 
 def test_list_comp_ternary():
-    expect(["even", "odd", "even", "odd", "even"], ["even" if x % 2 == 0 else "odd" for x in range(5)])
+    expect(["even" if x % 2 == 0 else "odd" for x in range(5)]).to_be(["even", "odd", "even", "odd", "even"])
 
 def test_list_comp_negative():
-    expect([0, -1, -2, -3, -4], [-x for x in range(5)])
+    expect([-x for x in range(5)]).to_be([0, -1, -2, -3, -4])
 
 def test_list_comp_tuples():
-    expect([(0, 0), (1, 1), (2, 4), (3, 9)], [(x, x * x) for x in range(4)])
+    expect([(x, x * x) for x in range(4)]).to_be([(0, 0), (1, 1), (2, 4), (3, 9)])
 
 def test_dict_comp_simple():
-    expect({0: 0, 1: 1, 2: 4, 3: 9, 4: 16}, {x: x * x for x in range(5)})
+    expect({x: x * x for x in range(5)}).to_be({0: 0, 1: 1, 2: 4, 3: 9, 4: 16})
 
 def test_dict_comp_filter():
-    expect({0: 0, 2: 4, 4: 8, 6: 12, 8: 16}, {x: x * 2 for x in range(10) if x % 2 == 0})
+    expect({x: x * 2 for x in range(10) if x % 2 == 0}).to_be({0: 0, 2: 4, 4: 8, 6: 12, 8: 16})
 
 def test_dict_comp_str_keys():
-    expect({"0": 0, "1": 1, "2": 2, "3": 3}, {str(x): x for x in range(4)})
+    expect({str(x): x for x in range(4)}).to_be({"0": 0, "1": 1, "2": 2, "3": 3})
 
 def test_dict_comp_empty():
-    expect({}, {x: x for x in []})
+    expect({x: x for x in []}).to_be({})
 
 def test_set_comp_simple():
     set_result = {x % 3 for x in range(10)}
-    expect(3, len(set_result))
+    expect(len(set_result)).to_be(3)
 
 def test_set_comp_filter():
     set_filtered = {x for x in range(10) if x > 5}
-    expect(4, len(set_filtered))
+    expect(len(set_filtered)).to_be(4)
 
 def test_list_comp_nested():
     matrix = [[1, 2, 3], [4, 5, 6]]
-    expect([1, 2, 3, 4, 5, 6], [x for row in matrix for x in row])
+    expect([x for row in matrix for x in row]).to_be([1, 2, 3, 4, 5, 6])
 
 def test_list_comp_nested_expr():
-    expect([10, 100, 20, 200, 30, 300], [x * y for x in [1, 2, 3] for y in [10, 100]])
+    expect([x * y for x in [1, 2, 3] for y in [10, 100]]).to_be([10, 100, 20, 200, 30, 300])
 
 def test_walrus_basic():
-    expect(42, (walrus_x := 42))
+    expect((walrus_x := 42)).to_be(42)
 
 def test_walrus_expr():
-    expect(15, (walrus_y := 10) + 5)
-    expect(10, walrus_y)
+    expect((walrus_y := 10) + 5).to_be(15)
+    expect(walrus_y).to_be(10)
 
 def test_walrus_if():
     result = None
     if (walrus_n := 7) > 5:
         result = walrus_n
-    expect(7, result)
+    expect(result).to_be(7)
 
 # Note: walrus in while condition has RAGE VM bug (stack underflow), test simplified
 def test_walrus_while():
@@ -96,18 +96,18 @@ def test_walrus_while():
         walrus_sum = walrus_sum + walrus_val
         walrus_count = walrus_count + 1
         walrus_val = walrus_count
-    expect(3, walrus_sum)
-    expect(3, walrus_val)
+    expect(walrus_sum).to_be(3)
+    expect(walrus_val).to_be(3)
 
 def test_walrus_list_comp():
     result = [(walrus_i := i * 2) for i in range(4)]
-    expect([0, 2, 4, 6], result)
-    expect(6, walrus_i)
+    expect(result).to_be([0, 2, 4, 6])
+    expect(walrus_i).to_be(6)
 
 def test_walrus_dict_comp():
     result = {k: (walrus_v := k * 3) for k in range(3)}
-    expect({0: 0, 1: 3, 2: 6}, result)
-    expect(6, walrus_v)
+    expect(result).to_be({0: 0, 1: 3, 2: 6})
+    expect(walrus_v).to_be(6)
 
 def test_walrus_nested():
     result_a = None
@@ -115,15 +115,15 @@ def test_walrus_nested():
     if (walrus_a := (walrus_b := 5) + 10) > 10:
         result_a = walrus_a
         result_b = walrus_b
-    expect(15, result_a)
-    expect(5, result_b)
+    expect(result_a).to_be(15)
+    expect(result_b).to_be(5)
 
 def test_walrus_string():
-    expect(5, len(walrus_s := "hello"))
-    expect("hello", walrus_s)
+    expect(len(walrus_s := "hello")).to_be(5)
+    expect(walrus_s).to_be("hello")
 
 def test_walrus_in_func():
-    expect(102, walrus_func())
+    expect(walrus_func()).to_be(102)
 
 test("list_comp_simple", test_list_comp_simple)
 test("list_comp_expr", test_list_comp_expr)

@@ -6,77 +6,77 @@ from test_framework import test, expect
 import json
 
 def test_dumps_basic_types():
-    expect("null", json.dumps(None))
-    expect("true", json.dumps(True))
-    expect("false", json.dumps(False))
-    expect("42", json.dumps(42))
-    expect("-17", json.dumps(-17))
-    expect("3.14159", json.dumps(3.14159))
-    expect('"hello"', json.dumps("hello"))
-    expect('""', json.dumps(""))
+    expect(json.dumps(None)).to_be("null")
+    expect(json.dumps(True)).to_be("true")
+    expect(json.dumps(False)).to_be("false")
+    expect(json.dumps(42)).to_be("42")
+    expect(json.dumps(-17)).to_be("-17")
+    expect(json.dumps(3.14159)).to_be("3.14159")
+    expect(json.dumps("hello")).to_be('"hello"')
+    expect(json.dumps("")).to_be('""')
 
 def test_dumps_escapes():
-    expect('"line1\\nline2"', json.dumps("line1\nline2"))
-    expect('"col1\\tcol2"', json.dumps("col1\tcol2"))
-    expect('"say \\"hello\\""', json.dumps('say "hello"'))
-    expect('"path\\\\to\\\\file"', json.dumps("path\\to\\file"))
+    expect(json.dumps("line1\nline2")).to_be('"line1\\nline2"')
+    expect(json.dumps("col1\tcol2")).to_be('"col1\\tcol2"')
+    expect(json.dumps('say "hello"')).to_be('"say \\"hello\\""')
+    expect(json.dumps("path\\to\\file")).to_be('"path\\\\to\\\\file"')
 
 def test_dumps_collections():
-    expect("[]", json.dumps([]))
+    expect(json.dumps([])).to_be("[]")
     # RAGE json module doesn't include spaces after commas
-    expect("[1,2,3]", json.dumps([1, 2, 3]))
-    expect("[[1,2],[3,4]]", json.dumps([[1, 2], [3, 4]]))
-    expect("{}", json.dumps({}))
+    expect(json.dumps([1, 2, 3])).to_be("[1,2,3]")
+    expect(json.dumps([[1, 2], [3, 4]])).to_be("[[1,2],[3,4]]")
+    expect(json.dumps({})).to_be("{}")
     # Dict roundtrip (order not guaranteed)
-    expect(True, json.loads(json.dumps({"a": 1, "b": 2})) == {"a": 1, "b": 2})
-    expect(True, json.loads(json.dumps({"outer": {"inner": "value"}})) == {"outer": {"inner": "value"}})
-    expect("[1,2,3]", json.dumps((1, 2, 3)))
+    expect(json.loads(json.dumps({"a": 1, "b": 2})) == {"a": 1, "b": 2}).to_be(True)
+    expect(json.loads(json.dumps({"outer": {"inner": "value"}})) == {"outer": {"inner": "value"}}).to_be(True)
+    expect(json.dumps((1, 2, 3))).to_be("[1,2,3]")
 
 def test_dumps_indent():
     indented = json.dumps({"x": 1, "y": 2}, 2)
-    expect(True, "\n" in indented)
-    expect(True, "  " in indented)
+    expect("\n" in indented).to_be(True)
+    expect("  " in indented).to_be(True)
 
 def test_dumps_sort_keys():
     sorted_json = json.dumps({"z": 1, "a": 2, "m": 3}, None, None, True)
-    expect(True, json.loads(sorted_json) == {"z": 1, "a": 2, "m": 3})
+    expect(json.loads(sorted_json) == {"z": 1, "a": 2, "m": 3}).to_be(True)
 
 def test_loads_basic_types():
-    expect(None, json.loads("null"))
-    expect(True, json.loads("true"))
-    expect(False, json.loads("false"))
-    expect(42, json.loads("42"))
-    expect(-17, json.loads("-17"))
-    expect(3.14159, json.loads("3.14159"))
-    expect("hello", json.loads('"hello"'))
-    expect("", json.loads('""'))
+    expect(json.loads("null")).to_be(None)
+    expect(json.loads("true")).to_be(True)
+    expect(json.loads("false")).to_be(False)
+    expect(json.loads("42")).to_be(42)
+    expect(json.loads("-17")).to_be(-17)
+    expect(json.loads("3.14159")).to_be(3.14159)
+    expect(json.loads('"hello"')).to_be("hello")
+    expect(json.loads('""')).to_be("")
 
 def test_loads_escapes():
-    expect("line1\nline2", json.loads('"line1\\nline2"'))
-    expect("col1\tcol2", json.loads('"col1\\tcol2"'))
-    expect('say "hello"', json.loads('"say \\"hello\\""'))
-    expect("path\\to\\file", json.loads('"path\\\\to\\\\file"'))
-    expect("Hi", json.loads('"\\u0048\\u0069"'))
+    expect(json.loads('"line1\\nline2"')).to_be("line1\nline2")
+    expect(json.loads('"col1\\tcol2"')).to_be("col1\tcol2")
+    expect(json.loads('"say \\"hello\\""')).to_be('say "hello"')
+    expect(json.loads('"path\\\\to\\\\file"')).to_be("path\\to\\file")
+    expect(json.loads('"\\u0048\\u0069"')).to_be("Hi")
 
 def test_loads_collections():
-    expect([], json.loads("[]"))
-    expect([1, 2, 3], json.loads("[1, 2, 3]"))
-    expect([[1, 2], [3, 4]], json.loads("[[1, 2], [3, 4]]"))
-    expect([1, "two", True, None], json.loads('[1, "two", true, null]'))
-    expect({}, json.loads("{}"))
-    expect({"a": 1, "b": 2}, json.loads('{"a": 1, "b": 2}'))
-    expect({"outer": {"inner": "value"}}, json.loads('{"outer": {"inner": "value"}}'))
+    expect(json.loads("[]")).to_be([])
+    expect(json.loads("[1, 2, 3]")).to_be([1, 2, 3])
+    expect(json.loads("[[1, 2], [3, 4]]")).to_be([[1, 2], [3, 4]])
+    expect(json.loads('[1, "two", true, null]')).to_be([1, "two", True, None])
+    expect(json.loads("{}")).to_be({})
+    expect(json.loads('{"a": 1, "b": 2}')).to_be({"a": 1, "b": 2})
+    expect(json.loads('{"outer": {"inner": "value"}}')).to_be({"outer": {"inner": "value"}})
 
 def test_loads_whitespace():
-    expect({"x": 1}, json.loads('  {  "x"  :  1  }  '))
-    expect({"x": 1}, json.loads('{\n  "x": 1\n}'))
+    expect(json.loads('  {  "x"  :  1  }  ')).to_be({"x": 1})
+    expect(json.loads('{\n  "x": 1\n}')).to_be({"x": 1})
 
 def test_roundtrip():
     original_list = [1, 2.5, "hello", None, True, False]
-    expect(True, json.loads(json.dumps(original_list)) == original_list)
+    expect(json.loads(json.dumps(original_list)) == original_list).to_be(True)
 
     original_dict = {"name": "test", "value": 123, "active": True}
-    expect(True, json.loads(json.dumps(original_dict)) == original_dict)
+    expect(json.loads(json.dumps(original_dict)) == original_dict).to_be(True)
 
     complex_data = {
         "users": [
@@ -88,12 +88,12 @@ def test_roundtrip():
             "active": True
         }
     }
-    expect(True, json.loads(json.dumps(complex_data)) == complex_data)
+    expect(json.loads(json.dumps(complex_data)) == complex_data).to_be(True)
 
 def test_type_preservation():
-    expect(True, json.loads("42") == 42)
-    expect(True, json.loads("3.14") == 3.14)
-    expect(True, json.loads("[1,2,3]") == [1, 2, 3])
+    expect(json.loads("42") == 42).to_be(True)
+    expect(json.loads("3.14") == 3.14).to_be(True)
+    expect(json.loads("[1,2,3]") == [1, 2, 3]).to_be(True)
 
 test("dumps_basic_types", test_dumps_basic_types)
 test("dumps_escapes", test_dumps_escapes)

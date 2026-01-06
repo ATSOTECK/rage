@@ -61,194 +61,194 @@ def sample_func(x, y):
     return x + y
 
 def test_generic_types_exist():
-    expect(True, List is not None)
-    expect(True, Dict is not None)
-    expect(True, Set is not None)
-    expect(True, Tuple is not None)
-    expect(True, Optional is not None)
-    expect(True, Union is not None)
-    expect(True, Any is not None)
-    expect(True, Callable is not None)
+    expect(List is not None).to_be(True)
+    expect(Dict is not None).to_be(True)
+    expect(Set is not None).to_be(True)
+    expect(Tuple is not None).to_be(True)
+    expect(Optional is not None).to_be(True)
+    expect(Union is not None).to_be(True)
+    expect(Any is not None).to_be(True)
+    expect(Callable is not None).to_be(True)
 
 def test_subscripted_types():
     list_int = List[int]
-    expect(True, list_int is not None)
+    expect(list_int is not None).to_be(True)
     optional_str = Optional[str]
-    expect(True, optional_str is not None)
+    expect(optional_str is not None).to_be(True)
     union_int_str = Union[int]
-    expect(True, union_int_str is not None)
+    expect(union_int_str is not None).to_be(True)
     tuple_int = Tuple[int]
-    expect(True, tuple_int is not None)
+    expect(tuple_int is not None).to_be(True)
     set_str = Set[str]
-    expect(True, set_str is not None)
+    expect(set_str is not None).to_be(True)
 
 def test_typevar():
-    expect(True, T is not None)
-    expect(True, K is not None and V is not None)
-    expect(True, Num is not None)
+    expect(T is not None).to_be(True)
+    expect(K is not None and V is not None).to_be(True)
+    expect(Num is not None).to_be(True)
 
 def test_get_origin_args():
     list_int = List[int]
     origin = get_origin(list_int)
-    expect("List", origin)
+    expect(origin).to_be("List")
     args = get_args(list_int)
-    expect(1, len(args))
-    expect("list", get_origin(List))
-    expect(0, len(get_args(List)))
+    expect(len(args)).to_be(1)
+    expect(get_origin(List)).to_be("list")
+    expect(len(get_args(List))).to_be(0)
 
 def test_cast():
     x = cast(int, "hello")
-    expect("hello", x)
+    expect(x).to_be("hello")
     y = cast(str, 42)
-    expect(42, y)
+    expect(y).to_be(42)
 
 def test_type_checking():
-    expect(False, TYPE_CHECKING)
+    expect(TYPE_CHECKING).to_be(False)
 
 def test_newtype():
     user_id = UserId(42)
-    expect(42, user_id)
-    expect(True, isinstance(user_id, int))
+    expect(user_id).to_be(42)
+    expect(isinstance(user_id, int)).to_be(True)
 
 def test_decorators():
-    expect(5, process(5))
-    expect("final", final_func())
-    expect(11, unchecked_func(10))
+    expect(process(5)).to_be(5)
+    expect(final_func()).to_be("final")
+    expect(unchecked_func(10)).to_be(11)
 
 def test_reveal_assert():
     val = reveal_type(42)
-    expect(42, val)
+    expect(val).to_be(42)
     val2 = assert_type(42, int)
-    expect(42, val2)
+    expect(val2).to_be(42)
 
 def test_get_overloads():
     overloads = get_overloads(process)
-    expect(True, isinstance(overloads, list))
+    expect(isinstance(overloads, list)).to_be(True)
     clear_overloads()
 
 def test_sequence_types():
-    expect(True, Sequence is not None)
-    expect(True, Mapping is not None)
-    expect(True, Iterable is not None)
-    expect(True, Iterator is not None)
+    expect(Sequence is not None).to_be(True)
+    expect(Mapping is not None).to_be(True)
+    expect(Iterable is not None).to_be(True)
+    expect(Iterator is not None).to_be(True)
     seq_int = Sequence[int]
-    expect(True, seq_int is not None)
+    expect(seq_int is not None).to_be(True)
     iter_str = Iterable[str]
-    expect(True, iter_str is not None)
+    expect(iter_str is not None).to_be(True)
 
 def test_additional_types():
-    expect(True, FrozenSet is not None)
-    expect(True, Type is not None)
+    expect(FrozenSet is not None).to_be(True)
+    expect(Type is not None).to_be(True)
     frozenset_int = FrozenSet[int]
-    expect(True, frozenset_int is not None)
+    expect(frozenset_int is not None).to_be(True)
     type_int = Type[int]
-    expect(True, type_int is not None)
+    expect(type_int is not None).to_be(True)
 
 def test_protocol_generic():
-    expect(True, Generic is not None)
-    expect(True, Protocol is not None)
+    expect(Generic is not None).to_be(True)
+    expect(Protocol is not None).to_be(True)
 
 def test_special_forms():
-    expect(True, Final is not None)
-    expect(True, ClassVar is not None)
-    expect(True, Literal is not None)
+    expect(Final is not None).to_be(True)
+    expect(ClassVar is not None).to_be(True)
+    expect(Literal is not None).to_be(True)
     final_int = Final[int]
-    expect(True, final_int is not None)
+    expect(final_int is not None).to_be(True)
     classvar_str = ClassVar[str]
-    expect(True, classvar_str is not None)
+    expect(classvar_str is not None).to_be(True)
     literal_one = Literal[1]
-    expect(True, literal_one is not None)
+    expect(literal_one is not None).to_be(True)
 
 def test_special_types():
-    expect(True, NoReturn is not None)
-    expect(True, Never is not None)
-    expect(True, Self is not None)
+    expect(NoReturn is not None).to_be(True)
+    expect(Never is not None).to_be(True)
+    expect(Self is not None).to_be(True)
 
 def test_paramspec_typevartuple():
-    expect(True, P is not None)
-    expect(True, Ts is not None)
+    expect(P is not None).to_be(True)
+    expect(Ts is not None).to_be(True)
 
 def test_namedtuple_typeddict():
-    expect(True, Point is not None)
-    expect(True, Movie is not None)
-    expect(False, is_typeddict(Movie))
+    expect(Point is not None).to_be(True)
+    expect(Movie is not None).to_be(True)
+    expect(is_typeddict(Movie)).to_be(False)
     hints = get_type_hints(sample_func)
-    expect(True, isinstance(hints, dict))
+    expect(isinstance(hints, dict)).to_be(True)
 
 def test_annotated():
     annotated_int = Annotated[int]
-    expect(True, annotated_int is not None)
+    expect(annotated_int is not None).to_be(True)
 
 def test_required_notreq_readonly():
-    expect(True, Required is not None)
-    expect(True, NotRequired is not None)
-    expect(True, ReadOnly is not None)
+    expect(Required is not None).to_be(True)
+    expect(NotRequired is not None).to_be(True)
+    expect(ReadOnly is not None).to_be(True)
     required_int = Required[int]
-    expect(True, required_int is not None)
+    expect(required_int is not None).to_be(True)
 
 def test_concatenate_typeguard_unpack():
-    expect(True, Concatenate is not None)
-    expect(True, TypeGuard is not None)
-    expect(True, Unpack is not None)
+    expect(Concatenate is not None).to_be(True)
+    expect(TypeGuard is not None).to_be(True)
+    expect(Unpack is not None).to_be(True)
     typeguard_bool = TypeGuard[bool]
-    expect(True, typeguard_bool is not None)
+    expect(typeguard_bool is not None).to_be(True)
 
 def test_collection_aliases():
-    expect(True, Counter is not None)
-    expect(True, ChainMap is not None)
-    expect(True, OrderedDict is not None)
-    expect(True, DefaultDict is not None)
-    expect(True, Deque is not None)
+    expect(Counter is not None).to_be(True)
+    expect(ChainMap is not None).to_be(True)
+    expect(OrderedDict is not None).to_be(True)
+    expect(DefaultDict is not None).to_be(True)
+    expect(Deque is not None).to_be(True)
     counter_int = Counter[int]
-    expect(True, counter_int is not None)
+    expect(counter_int is not None).to_be(True)
     deque_str = Deque[str]
-    expect(True, deque_str is not None)
+    expect(deque_str is not None).to_be(True)
 
 def test_context_managers():
-    expect(True, ContextManager is not None)
-    expect(True, AsyncContextManager is not None)
+    expect(ContextManager is not None).to_be(True)
+    expect(AsyncContextManager is not None).to_be(True)
 
 def test_async_types():
-    expect(True, Coroutine is not None)
-    expect(True, AsyncGenerator is not None)
-    expect(True, AsyncIterable is not None)
-    expect(True, AsyncIterator is not None)
-    expect(True, Awaitable is not None)
+    expect(Coroutine is not None).to_be(True)
+    expect(AsyncGenerator is not None).to_be(True)
+    expect(AsyncIterable is not None).to_be(True)
+    expect(AsyncIterator is not None).to_be(True)
+    expect(Awaitable is not None).to_be(True)
 
 def test_io_types():
-    expect(True, IO is not None)
-    expect(True, TextIO is not None)
-    expect(True, BinaryIO is not None)
+    expect(IO is not None).to_be(True)
+    expect(TextIO is not None).to_be(True)
+    expect(BinaryIO is not None).to_be(True)
 
 def test_pattern_match():
-    expect(True, Pattern is not None)
-    expect(True, Match is not None)
+    expect(Pattern is not None).to_be(True)
+    expect(Match is not None).to_be(True)
     pattern_str = Pattern[str]
-    expect(True, pattern_str is not None)
+    expect(pattern_str is not None).to_be(True)
 
 def test_supports_protocols():
-    expect(True, SupportsInt is not None)
-    expect(True, SupportsFloat is not None)
-    expect(True, SupportsAbs is not None)
-    expect(True, SupportsRound is not None)
-    expect(True, SupportsIndex is not None)
+    expect(SupportsInt is not None).to_be(True)
+    expect(SupportsFloat is not None).to_be(True)
+    expect(SupportsAbs is not None).to_be(True)
+    expect(SupportsRound is not None).to_be(True)
+    expect(SupportsIndex is not None).to_be(True)
 
 def test_abc_types():
-    expect(True, Hashable is not None)
-    expect(True, Sized is not None)
-    expect(True, Reversible is not None)
+    expect(Hashable is not None).to_be(True)
+    expect(Sized is not None).to_be(True)
+    expect(Reversible is not None).to_be(True)
 
 def test_mutable_types():
-    expect(True, MutableMapping is not None)
-    expect(True, MutableSequence is not None)
-    expect(True, MutableSet is not None)
+    expect(MutableMapping is not None).to_be(True)
+    expect(MutableSequence is not None).to_be(True)
+    expect(MutableSet is not None).to_be(True)
     mutableseq_int = MutableSequence[int]
-    expect(True, mutableseq_int is not None)
+    expect(mutableseq_int is not None).to_be(True)
 
 def test_generator():
-    expect(True, Generator is not None)
+    expect(Generator is not None).to_be(True)
     gen_int = Generator[int]
-    expect(True, gen_int is not None)
+    expect(gen_int is not None).to_be(True)
 
 test("generic_types_exist", test_generic_types_exist)
 test("subscripted_types", test_subscripted_types)

@@ -52,7 +52,7 @@ def test_basic_try_except():
         raise ValueError
     except ValueError:
         result = "caught"
-    expect("caught", result)
+    expect(result).to_be("caught")
 
 def test_exception_as_binding():
     caught = False
@@ -60,7 +60,7 @@ def test_exception_as_binding():
         raise ValueError
     except ValueError as e:
         caught = True
-    expect(True, caught)
+    expect(caught).to_be(True)
 
 def test_multiple_except():
     # KeyError case
@@ -73,7 +73,7 @@ def test_multiple_except():
         result = "key"
     except TypeError:
         result = "type"
-    expect("key", result)
+    expect(result).to_be("key")
 
     # TypeError case
     result2 = ""
@@ -85,7 +85,7 @@ def test_multiple_except():
         result2 = "key"
     except TypeError:
         result2 = "type"
-    expect("type", result2)
+    expect(result2).to_be("type")
 
 def test_bare_except():
     result = ""
@@ -93,7 +93,7 @@ def test_bare_except():
         raise RuntimeError
     except:
         result = "caught"
-    expect("caught", result)
+    expect(result).to_be("caught")
 
 def test_finally_no_exception():
     finally_ran = False
@@ -101,7 +101,7 @@ def test_finally_no_exception():
         x = 1
     finally:
         finally_ran = True
-    expect(True, finally_ran)
+    expect(finally_ran).to_be(True)
 
 def test_finally_with_caught_exception():
     finally_ran = False
@@ -112,8 +112,8 @@ def test_finally_with_caught_exception():
         caught = True
     finally:
         finally_ran = True
-    expect(True, finally_ran)
-    expect(True, caught)
+    expect(finally_ran).to_be(True)
+    expect(caught).to_be(True)
 
 def test_finally_propagates():
     outer_finally_ran = False
@@ -128,9 +128,9 @@ def test_finally_propagates():
         outer_caught = True
     finally:
         outer_finally_ran = True
-    expect(True, inner_finally_ran)
-    expect(True, outer_finally_ran)
-    expect(True, outer_caught)
+    expect(inner_finally_ran).to_be(True)
+    expect(outer_finally_ran).to_be(True)
+    expect(outer_caught).to_be(True)
 
 def test_else_clause():
     # Runs when no exception
@@ -141,7 +141,7 @@ def test_else_clause():
         pass
     else:
         else_ran = True
-    expect(True, else_ran)
+    expect(else_ran).to_be(True)
 
     # Doesn't run when exception
     else_ran2 = False
@@ -151,7 +151,7 @@ def test_else_clause():
         pass
     else:
         else_ran2 = True
-    expect(False, else_ran2)
+    expect(else_ran2).to_be(False)
 
 def test_reraise():
     caught_outer = False
@@ -162,7 +162,7 @@ def test_reraise():
             raise
     except ValueError:
         caught_outer = True
-    expect(True, caught_outer)
+    expect(caught_outer).to_be(True)
 
 def test_exception_inheritance():
     # ValueError is Exception
@@ -171,7 +171,7 @@ def test_exception_inheritance():
         raise ValueError
     except Exception:
         caught1 = True
-    expect(True, caught1)
+    expect(caught1).to_be(True)
 
     # KeyError is Exception
     caught2 = False
@@ -179,7 +179,7 @@ def test_exception_inheritance():
         raise KeyError
     except Exception:
         caught2 = True
-    expect(True, caught2)
+    expect(caught2).to_be(True)
 
     # IndexError is Exception
     caught3 = False
@@ -187,7 +187,7 @@ def test_exception_inheritance():
         raise IndexError
     except Exception:
         caught3 = True
-    expect(True, caught3)
+    expect(caught3).to_be(True)
 
     # ZeroDivisionError is Exception
     caught4 = False
@@ -195,7 +195,7 @@ def test_exception_inheritance():
         raise ZeroDivisionError
     except Exception:
         caught4 = True
-    expect(True, caught4)
+    expect(caught4).to_be(True)
 
 def test_nested_try():
     inner_caught = False
@@ -207,8 +207,8 @@ def test_nested_try():
             inner_caught = True
     except KeyError:
         outer_caught = True
-    expect(False, inner_caught)
-    expect(True, outer_caught)
+    expect(inner_caught).to_be(False)
+    expect(outer_caught).to_be(True)
 
 def test_full_try_except_else_finally():
     # No exception case
@@ -223,9 +223,9 @@ def test_full_try_except_else_finally():
         else_ran = True
     finally:
         finally_ran = True
-    expect(False, caught)
-    expect(True, else_ran)
-    expect(True, finally_ran)
+    expect(caught).to_be(False)
+    expect(else_ran).to_be(True)
+    expect(finally_ran).to_be(True)
 
     # With exception case
     caught2 = False
@@ -239,9 +239,9 @@ def test_full_try_except_else_finally():
         else_ran2 = True
     finally:
         finally_ran2 = True
-    expect(True, caught2)
-    expect(False, else_ran2)
-    expect(True, finally_ran2)
+    expect(caught2).to_be(True)
+    expect(else_ran2).to_be(False)
+    expect(finally_ran2).to_be(True)
 
 def test_tuple_except():
     # Catching ValueError
@@ -250,7 +250,7 @@ def test_tuple_except():
         raise ValueError
     except (ValueError, KeyError):
         result1 = "caught"
-    expect("caught", result1)
+    expect(result1).to_be("caught")
 
     # Catching KeyError
     result2 = ""
@@ -258,7 +258,7 @@ def test_tuple_except():
         raise KeyError
     except (ValueError, KeyError):
         result2 = "caught"
-    expect("caught", result2)
+    expect(result2).to_be("caught")
 
 def test_exception_classes():
     count = 0
@@ -288,7 +288,7 @@ def test_exception_classes():
     except StopIteration:
         count = count + 1
 
-    expect(5, count)
+    expect(count).to_be(5)
 
 def test_deeply_nested():
     depth_reached = 0
@@ -305,7 +305,7 @@ def test_deeply_nested():
             depth_reached = -2
     except ValueError:
         pass
-    expect(3, depth_reached)
+    expect(depth_reached).to_be(3)
 
 def test_var_preserved():
     x = 10
@@ -314,7 +314,7 @@ def test_var_preserved():
         raise ValueError
     except ValueError:
         pass
-    expect(20, x)
+    expect(x).to_be(20)
 
 def test_finally_after_handler_raises():
     finally_after_reraise = False
@@ -330,8 +330,8 @@ def test_finally_after_handler_raises():
         pass
     finally:
         outer_finally = True
-    expect(True, finally_after_reraise)
-    expect(True, outer_finally)
+    expect(finally_after_reraise).to_be(True)
+    expect(outer_finally).to_be(True)
 
 def test_func_exception():
     func_exc_caught = False
@@ -339,7 +339,7 @@ def test_func_exception():
         raise_in_func()
     except ValueError:
         func_exc_caught = True
-    expect(True, func_exc_caught)
+    expect(func_exc_caught).to_be(True)
 
 def test_nested_func_exception():
     nested_func_exc_caught = False
@@ -347,7 +347,7 @@ def test_nested_func_exception():
         outer_call()
     except KeyError:
         nested_func_exc_caught = True
-    expect(True, nested_func_exc_caught)
+    expect(nested_func_exc_caught).to_be(True)
 
 def test_generator_throw_caught():
     g = gen_catches_throw()
@@ -357,8 +357,8 @@ def test_generator_throw_caught():
         if v == 1:
             gen_throw_results.append(g.throw(ValueError, "test"))
             break
-    expect(1, gen_throw_results[0])
-    expect("caught", gen_throw_results[1])
+    expect(gen_throw_results[0]).to_be(1)
+    expect(gen_throw_results[1]).to_be("caught")
 
 def test_generator_throw_propagates():
     g2 = gen_no_catch()
@@ -370,7 +370,7 @@ def test_generator_throw_propagates():
             except RuntimeError:
                 gen_throw_propagated = True
             break
-    expect(True, gen_throw_propagated)
+    expect(gen_throw_propagated).to_be(True)
 
 def test_generator_close_finally():
     global gen_finally_ran
@@ -379,15 +379,15 @@ def test_generator_close_finally():
     for v in g3:
         break
     g3.close()
-    expect(True, gen_finally_ran)
+    expect(gen_finally_ran).to_be(True)
 
 def test_generator_internal_except():
     gen_internal_results = []
     for v in gen_internal_except():
         gen_internal_results.append(v)
-    expect(1, gen_internal_results[0])
-    expect("internal_caught", gen_internal_results[1])
-    expect(3, gen_internal_results[2])
+    expect(gen_internal_results[0]).to_be(1)
+    expect(gen_internal_results[1]).to_be("internal_caught")
+    expect(gen_internal_results[2]).to_be(3)
 
 def test_throw_into_closed_gen():
     g4 = simple_gen()
@@ -399,7 +399,7 @@ def test_throw_into_closed_gen():
         g4.throw(ValueError, "to closed")
     except:
         throw_into_closed_raised = True
-    expect(True, throw_into_closed_raised)
+    expect(throw_into_closed_raised).to_be(True)
 
 test("basic_try_except", test_basic_try_except)
 test("exception_as_binding", test_exception_as_binding)

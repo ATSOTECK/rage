@@ -17,59 +17,59 @@ def fib(n):
 def test_simple_function():
     def simple():
         return 42
-    expect(42, simple())
+    expect(simple()).to_be(42)
 
 def test_function_args():
     def add(a, b):
         return a + b
-    expect(30, add(10, 20))
+    expect(add(10, 20)).to_be(30)
 
 def test_default_args():
     def greet(name, greeting="Hello"):
         return greeting + ", " + name
-    expect("Hello, World", greet("World"))
-    expect("Hi, World", greet("World", "Hi"))
+    expect(greet("World")).to_be("Hello, World")
+    expect(greet("World", "Hi")).to_be("Hi, World")
 
 def test_multi_default_args():
     def make_point(x=0, y=0, z=0):
         return [x, y, z]
-    expect([0, 0, 0], make_point())
-    expect([1, 2, 0], make_point(1, 2))
-    expect([1, 2, 3], make_point(1, 2, 3))
+    expect(make_point()).to_be([0, 0, 0])
+    expect(make_point(1, 2)).to_be([1, 2, 0])
+    expect(make_point(1, 2, 3)).to_be([1, 2, 3])
 
 def test_recursion():
-    expect(1, factorial(0))
-    expect(120, factorial(5))
+    expect(factorial(0)).to_be(1)
+    expect(factorial(5)).to_be(120)
 
 def test_fibonacci():
-    expect(0, fib(0))
-    expect(1, fib(1))
-    expect(55, fib(10))
+    expect(fib(0)).to_be(0)
+    expect(fib(1)).to_be(1)
+    expect(fib(10)).to_be(55)
 
 def test_nested_functions():
     def outer(x):
         def inner(y):
             return y * 2
         return inner(x) + 10
-    expect(20, outer(5))
+    expect(outer(5)).to_be(20)
 
 def test_lambda():
     square = lambda x: x * x
-    expect(25, square(5))
+    expect(square(5)).to_be(25)
 
     add_lambda = lambda a, b: a + b
-    expect(7, add_lambda(3, 4))
+    expect(add_lambda(3, 4)).to_be(7)
 
 def test_higher_order():
     def apply(func, value):
         return func(value)
-    expect(42, apply(lambda x: x * 2, 21))
+    expect(apply(lambda x: x * 2, 21)).to_be(42)
 
 def test_global_access():
     global_var = 100
     def use_global():
         return global_var
-    expect(100, use_global())
+    expect(use_global()).to_be(100)
 
 def test_early_return():
     def find_first_even(numbers):
@@ -77,8 +77,8 @@ def test_early_return():
             if n % 2 == 0:
                 return n
         return None
-    expect(6, find_first_even([1, 3, 5, 6, 7]))
-    expect(None, find_first_even([1, 3, 5, 7]))
+    expect(find_first_even([1, 3, 5, 6, 7])).to_be(6)
+    expect(find_first_even([1, 3, 5, 7])).to_be(None)
 
 def test_func_as_arg():
     def double(x):
@@ -88,7 +88,7 @@ def test_func_as_arg():
         for item in lst:
             result.append(func(item))
         return result
-    expect([2, 4, 6, 8, 10], apply_to_list(double, [1, 2, 3, 4, 5]))
+    expect(apply_to_list(double, [1, 2, 3, 4, 5])).to_be([2, 4, 6, 8, 10])
 
 test("simple_function", test_simple_function)
 test("function_args", test_function_args)

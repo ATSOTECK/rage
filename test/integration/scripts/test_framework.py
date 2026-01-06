@@ -4,9 +4,16 @@ __test_passed__ = 0
 __test_failed__ = 0
 __test_failures__ = ""
 
-def expect(expected, actual):
-    if expected != actual:
-        raise Exception("Expected " + str(expected) + " but got " + str(actual))
+class Expectation:
+    def __init__(self, actual):
+        self.actual = actual
+
+    def to_be(self, expected):
+        if self.actual != expected:
+            raise Exception("Expected " + str(expected) + " but got " + str(self.actual))
+
+def expect(actual):
+    return Expectation(actual)
 
 def test(name, fn):
     global __test_passed__, __test_failed__, __test_failures__

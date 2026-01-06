@@ -7,115 +7,115 @@ import itertools
 
 def test_count():
     counter = itertools.count(10, 2)
-    expect([10, 12, 14, 16, 18], list(itertools.islice(counter, 5)))
+    expect(list(itertools.islice(counter, 5))).to_be([10, 12, 14, 16, 18])
 
 def test_cycle():
     cycler = itertools.cycle([1, 2, 3])
-    expect([1, 2, 3, 1, 2, 3, 1], list(itertools.islice(cycler, 7)))
+    expect(list(itertools.islice(cycler, 7))).to_be([1, 2, 3, 1, 2, 3, 1])
 
 def test_repeat():
-    expect(["x", "x", "x", "x"], list(itertools.repeat("x", 4)))
-    expect([42], list(itertools.repeat(42, 1)))
+    expect(list(itertools.repeat("x", 4))).to_be(["x", "x", "x", "x"])
+    expect(list(itertools.repeat(42, 1))).to_be([42])
 
 def test_accumulate():
-    expect([1, 3, 6, 10, 15], list(itertools.accumulate([1, 2, 3, 4, 5])))
-    expect([1, 2, 6, 24], list(itertools.accumulate([1, 2, 3, 4], lambda x, y: x * y)))
-    expect([10, 11, 13, 16], list(itertools.accumulate([1, 2, 3], None, 10)))
-    expect(["a", "ab", "abc"], list(itertools.accumulate(["a", "b", "c"])))
+    expect(list(itertools.accumulate([1, 2, 3, 4, 5]))).to_be([1, 3, 6, 10, 15])
+    expect(list(itertools.accumulate([1, 2, 3, 4], lambda x, y: x * y))).to_be([1, 2, 6, 24])
+    expect(list(itertools.accumulate([1, 2, 3], None, 10))).to_be([10, 11, 13, 16])
+    expect(list(itertools.accumulate(["a", "b", "c"]))).to_be(["a", "ab", "abc"])
 
 def test_chain():
-    expect([1, 2, 3, 4, 5, 6], list(itertools.chain([1, 2], [3, 4], [5, 6])))
-    expect(["a", "b", "c", "d"], list(itertools.chain("ab", "cd")))
-    expect([1], list(itertools.chain([], [1], [])))
-    expect([1, 2, 3], list(itertools.chain([1, 2, 3])))
+    expect(list(itertools.chain([1, 2], [3, 4], [5, 6]))).to_be([1, 2, 3, 4, 5, 6])
+    expect(list(itertools.chain("ab", "cd"))).to_be(["a", "b", "c", "d"])
+    expect(list(itertools.chain([], [1], []))).to_be([1])
+    expect(list(itertools.chain([1, 2, 3]))).to_be([1, 2, 3])
 
 def test_compress():
-    expect(["A", "C", "E", "F"], list(itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])))
-    expect([1, 3], list(itertools.compress([1, 2, 3, 4], [True, False, True, False])))
-    expect([1, 2], list(itertools.compress([1, 2, 3, 4, 5], [1, 1])))
+    expect(list(itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1]))).to_be(["A", "C", "E", "F"])
+    expect(list(itertools.compress([1, 2, 3, 4], [True, False, True, False]))).to_be([1, 3])
+    expect(list(itertools.compress([1, 2, 3, 4, 5], [1, 1]))).to_be([1, 2])
 
 def test_dropwhile():
-    expect([6, 3, 8], list(itertools.dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8])))
-    expect([1, 2, 3], list(itertools.dropwhile(lambda x: x > 10, [1, 2, 3])))
-    expect([], list(itertools.dropwhile(lambda x: x < 10, [1, 2, 3])))
+    expect(list(itertools.dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]))).to_be([6, 3, 8])
+    expect(list(itertools.dropwhile(lambda x: x > 10, [1, 2, 3]))).to_be([1, 2, 3])
+    expect(list(itertools.dropwhile(lambda x: x < 10, [1, 2, 3]))).to_be([])
 
 def test_filterfalse():
-    expect([2, 4, 6], list(itertools.filterfalse(lambda x: x % 2, [1, 2, 3, 4, 5, 6])))
-    expect([-2, -1, 0], list(itertools.filterfalse(lambda x: x > 0, [-2, -1, 0, 1, 2])))
+    expect(list(itertools.filterfalse(lambda x: x % 2, [1, 2, 3, 4, 5, 6]))).to_be([2, 4, 6])
+    expect(list(itertools.filterfalse(lambda x: x > 0, [-2, -1, 0, 1, 2]))).to_be([-2, -1, 0])
 
 def test_groupby():
     data = [1, 1, 2, 2, 2, 3, 1, 1]
     groups = []
     for key, group in itertools.groupby(data):
         groups.append([key, list(group)])
-    expect([[1, [1, 1]], [2, [2, 2, 2]], [3, [3]], [1, [1, 1]]], groups)
+    expect(groups).to_be([[1, [1, 1]], [2, [2, 2, 2]], [3, [3]], [1, [1, 1]]])
 
 def test_groupby_with_key():
     words = ["apple", "apricot", "banana", "berry", "cherry"]
     groups2 = []
     for key, group in itertools.groupby(words, lambda x: x[0]):
         groups2.append([key, list(group)])
-    expect([["a", ["apple", "apricot"]], ["b", ["banana", "berry"]], ["c", ["cherry"]]], groups2)
+    expect(groups2).to_be([["a", ["apple", "apricot"]], ["b", ["banana", "berry"]], ["c", ["cherry"]]])
 
 def test_islice():
-    expect([0, 1, 2, 3, 4], list(itertools.islice(range(10), 5)))
-    expect([2, 3, 4, 5, 6], list(itertools.islice(range(10), 2, 7)))
-    expect([1, 3, 5, 7], list(itertools.islice(range(10), 1, 9, 2)))
-    expect([1, 2, 3], list(itertools.islice([1, 2, 3], 10)))
+    expect(list(itertools.islice(range(10), 5))).to_be([0, 1, 2, 3, 4])
+    expect(list(itertools.islice(range(10), 2, 7))).to_be([2, 3, 4, 5, 6])
+    expect(list(itertools.islice(range(10), 1, 9, 2))).to_be([1, 3, 5, 7])
+    expect(list(itertools.islice([1, 2, 3], 10))).to_be([1, 2, 3])
 
 def test_pairwise():
-    expect([(1, 2), (2, 3), (3, 4), (4, 5)], list(itertools.pairwise([1, 2, 3, 4, 5])))
-    expect([("A", "B"), ("B", "C"), ("C", "D")], list(itertools.pairwise("ABCD")))
-    expect([], list(itertools.pairwise([1])))
-    expect([], list(itertools.pairwise([])))
+    expect(list(itertools.pairwise([1, 2, 3, 4, 5]))).to_be([(1, 2), (2, 3), (3, 4), (4, 5)])
+    expect(list(itertools.pairwise("ABCD"))).to_be([("A", "B"), ("B", "C"), ("C", "D")])
+    expect(list(itertools.pairwise([1]))).to_be([])
+    expect(list(itertools.pairwise([]))).to_be([])
 
 def test_starmap():
-    expect([8, 9, 100], list(itertools.starmap(pow, [(2, 3), (3, 2), (10, 2)])))
-    expect([3, 7, 11], list(itertools.starmap(lambda a, b: a + b, [(1, 2), (3, 4), (5, 6)])))
+    expect(list(itertools.starmap(pow, [(2, 3), (3, 2), (10, 2)]))).to_be([8, 9, 100])
+    expect(list(itertools.starmap(lambda a, b: a + b, [(1, 2), (3, 4), (5, 6)]))).to_be([3, 7, 11])
 
 def test_takewhile():
-    expect([1, 4], list(itertools.takewhile(lambda x: x < 5, [1, 4, 6, 3, 8])))
-    expect([1, 2, 3], list(itertools.takewhile(lambda x: x < 10, [1, 2, 3])))
-    expect([], list(itertools.takewhile(lambda x: x > 10, [1, 2, 3])))
+    expect(list(itertools.takewhile(lambda x: x < 5, [1, 4, 6, 3, 8]))).to_be([1, 4])
+    expect(list(itertools.takewhile(lambda x: x < 10, [1, 2, 3]))).to_be([1, 2, 3])
+    expect(list(itertools.takewhile(lambda x: x > 10, [1, 2, 3]))).to_be([])
 
 def test_zip_longest():
-    expect([(1, 4), (2, 5), (3, None)], list(itertools.zip_longest([1, 2, 3], [4, 5])))
-    expect([(1, 2, 4), (None, 3, 5), (None, None, 6)], list(itertools.zip_longest([1], [2, 3], [4, 5, 6])))
-    expect([(1, 3), (2, 4)], list(itertools.zip_longest([1, 2], [3, 4])))
+    expect(list(itertools.zip_longest([1, 2, 3], [4, 5]))).to_be([(1, 4), (2, 5), (3, None)])
+    expect(list(itertools.zip_longest([1], [2, 3], [4, 5, 6]))).to_be([(1, 2, 4), (None, 3, 5), (None, None, 6)])
+    expect(list(itertools.zip_longest([1, 2], [3, 4]))).to_be([(1, 3), (2, 4)])
 
 def test_product():
-    expect([(1, 3), (1, 4), (2, 3), (2, 4)], list(itertools.product([1, 2], [3, 4])))
-    expect([(1, "a", True), (1, "b", True), (2, "a", True), (2, "b", True)], list(itertools.product([1, 2], ["a", "b"], [True])))
-    expect([(1,), (2,), (3,)], list(itertools.product([1, 2, 3])))
-    expect([("A", "x"), ("A", "y"), ("B", "x"), ("B", "y")], list(itertools.product("AB", "xy")))
+    expect(list(itertools.product([1, 2], [3, 4]))).to_be([(1, 3), (1, 4), (2, 3), (2, 4)])
+    expect(list(itertools.product([1, 2], ["a", "b"], [True]))).to_be([(1, "a", True), (1, "b", True), (2, "a", True), (2, "b", True)])
+    expect(list(itertools.product([1, 2, 3]))).to_be([(1,), (2,), (3,)])
+    expect(list(itertools.product("AB", "xy"))).to_be([("A", "x"), ("A", "y"), ("B", "x"), ("B", "y")])
 
 def test_permutations():
-    expect([(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)], list(itertools.permutations([1, 2, 3])))
-    expect([(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)], list(itertools.permutations([1, 2, 3], 2)))
-    expect([(1,), (2,), (3,)], list(itertools.permutations([1, 2, 3], 1)))
-    expect([("A", "B"), ("B", "A")], list(itertools.permutations("AB")))
+    expect(list(itertools.permutations([1, 2, 3]))).to_be([(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)])
+    expect(list(itertools.permutations([1, 2, 3], 2))).to_be([(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)])
+    expect(list(itertools.permutations([1, 2, 3], 1))).to_be([(1,), (2,), (3,)])
+    expect(list(itertools.permutations("AB"))).to_be([("A", "B"), ("B", "A")])
 
 def test_combinations():
-    expect([(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)], list(itertools.combinations([1, 2, 3, 4], 2)))
-    expect([(1, 2, 3), (1, 2, 4), (1, 3, 4), (2, 3, 4)], list(itertools.combinations([1, 2, 3, 4], 3)))
-    expect([(1,), (2,), (3,)], list(itertools.combinations([1, 2, 3], 1)))
-    expect([()], list(itertools.combinations([1, 2, 3], 0)))
-    expect([("A", "B"), ("A", "C"), ("A", "D"), ("B", "C"), ("B", "D"), ("C", "D")], list(itertools.combinations("ABCD", 2)))
+    expect(list(itertools.combinations([1, 2, 3, 4], 2))).to_be([(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)])
+    expect(list(itertools.combinations([1, 2, 3, 4], 3))).to_be([(1, 2, 3), (1, 2, 4), (1, 3, 4), (2, 3, 4)])
+    expect(list(itertools.combinations([1, 2, 3], 1))).to_be([(1,), (2,), (3,)])
+    expect(list(itertools.combinations([1, 2, 3], 0))).to_be([()])
+    expect(list(itertools.combinations("ABCD", 2))).to_be([("A", "B"), ("A", "C"), ("A", "D"), ("B", "C"), ("B", "D"), ("C", "D")])
 
 def test_combinations_with_replacement():
-    expect([(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)], list(itertools.combinations_with_replacement([1, 2, 3], 2)))
-    expect([(1, 1, 1), (1, 1, 2), (1, 2, 2), (2, 2, 2)], list(itertools.combinations_with_replacement([1, 2], 3)))
-    expect([(1,), (2,), (3,)], list(itertools.combinations_with_replacement([1, 2, 3], 1)))
-    expect([("A", "A"), ("A", "B"), ("B", "B")], list(itertools.combinations_with_replacement("AB", 2)))
+    expect(list(itertools.combinations_with_replacement([1, 2, 3], 2))).to_be([(1, 1), (1, 2), (1, 3), (2, 2), (2, 3), (3, 3)])
+    expect(list(itertools.combinations_with_replacement([1, 2], 3))).to_be([(1, 1, 1), (1, 1, 2), (1, 2, 2), (2, 2, 2)])
+    expect(list(itertools.combinations_with_replacement([1, 2, 3], 1))).to_be([(1,), (2,), (3,)])
+    expect(list(itertools.combinations_with_replacement("AB", 2))).to_be([("A", "A"), ("A", "B"), ("B", "B")])
 
 def test_edge_cases():
-    expect([], list(itertools.chain([], [], [])))
-    expect([], list(itertools.product([1, 2], [])))
-    expect([], list(itertools.combinations([], 2)))
-    expect([], list(itertools.permutations([], 2)))
-    expect([(1,)], list(itertools.product([1])))
-    expect([(1,)], list(itertools.combinations([1], 1)))
-    expect([(1,)], list(itertools.permutations([1], 1)))
+    expect(list(itertools.chain([], [], []))).to_be([])
+    expect(list(itertools.product([1, 2], []))).to_be([])
+    expect(list(itertools.combinations([], 2))).to_be([])
+    expect(list(itertools.permutations([], 2))).to_be([])
+    expect(list(itertools.product([1]))).to_be([(1,)])
+    expect(list(itertools.combinations([1], 1))).to_be([(1,)])
+    expect(list(itertools.permutations([1], 1))).to_be([(1,)])
 
 test("count", test_count)
 test("cycle", test_cycle)

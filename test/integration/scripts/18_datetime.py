@@ -6,178 +6,178 @@ from test_framework import test, expect
 import datetime
 
 def test_datetime_constants():
-    expect(1, datetime.MINYEAR)
-    expect(9999, datetime.MAXYEAR)
+    expect(datetime.MINYEAR).to_be(1)
+    expect(datetime.MAXYEAR).to_be(9999)
 
 def test_datetime_constructor():
     dt = datetime.datetime(2024, 6, 15, 14, 30, 45, 123456)
-    expect(2024, dt.year())
-    expect(6, dt.month())
-    expect(15, dt.day())
-    expect(14, dt.hour())
-    expect(30, dt.minute())
-    expect(45, dt.second())
-    expect(123456, dt.microsecond())
+    expect(dt.year()).to_be(2024)
+    expect(dt.month()).to_be(6)
+    expect(dt.day()).to_be(15)
+    expect(dt.hour()).to_be(14)
+    expect(dt.minute()).to_be(30)
+    expect(dt.second()).to_be(45)
+    expect(dt.microsecond()).to_be(123456)
 
     dt2 = datetime.datetime(2024, 1, 1)
-    expect(0, dt2.hour())
-    expect(0, dt2.minute())
-    expect(0, dt2.second())
+    expect(dt2.hour()).to_be(0)
+    expect(dt2.minute()).to_be(0)
+    expect(dt2.second()).to_be(0)
 
 def test_datetime_weekday():
     dt3 = datetime.datetime(2024, 6, 17)  # Monday
-    expect(0, dt3.weekday())
-    expect(1, dt3.isoweekday())
+    expect(dt3.weekday()).to_be(0)
+    expect(dt3.isoweekday()).to_be(1)
 
     dt4 = datetime.datetime(2024, 6, 22)  # Saturday
-    expect(5, dt4.weekday())
-    expect(6, dt4.isoweekday())
+    expect(dt4.weekday()).to_be(5)
+    expect(dt4.isoweekday()).to_be(6)
 
 def test_datetime_isoformat():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
-    expect("2024-03-14T09:26:53", dt5.isoformat())
-    expect("2024-03-14 09:26:53", dt5.isoformat(" "))
+    expect(dt5.isoformat()).to_be("2024-03-14T09:26:53")
+    expect(dt5.isoformat(" ")).to_be("2024-03-14 09:26:53")
 
     dt6 = datetime.datetime(2024, 3, 14, 9, 26, 53, 500000)
-    expect("2024-03-14T09:26:53.500000", dt6.isoformat())
+    expect(dt6.isoformat()).to_be("2024-03-14T09:26:53.500000")
 
 def test_datetime_strftime():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
-    expect("2024-03-14", dt5.strftime("%Y-%m-%d"))
-    expect("09:26:53", dt5.strftime("%H:%M:%S"))
-    expect("2024-03-14 09:26:53", dt5.strftime("%Y-%m-%d %H:%M:%S"))
-    expect("Thursday", dt5.strftime("%A"))
-    expect("March", dt5.strftime("%B"))
+    expect(dt5.strftime("%Y-%m-%d")).to_be("2024-03-14")
+    expect(dt5.strftime("%H:%M:%S")).to_be("09:26:53")
+    expect(dt5.strftime("%Y-%m-%d %H:%M:%S")).to_be("2024-03-14 09:26:53")
+    expect(dt5.strftime("%A")).to_be("Thursday")
+    expect(dt5.strftime("%B")).to_be("March")
 
 def test_datetime_timetuple():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
     tt = dt5.timetuple()
-    expect(2024, tt[0])
-    expect(3, tt[1])
-    expect(14, tt[2])
-    expect(9, tt[3])
-    expect(26, tt[4])
-    expect(53, tt[5])
+    expect(tt[0]).to_be(2024)
+    expect(tt[1]).to_be(3)
+    expect(tt[2]).to_be(14)
+    expect(tt[3]).to_be(9)
+    expect(tt[4]).to_be(26)
+    expect(tt[5]).to_be(53)
 
 def test_datetime_toordinal():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
     # Check ordinal is a reasonable value (around 739000 for 2024)
     ordinal = dt5.toordinal()
-    expect(True, 738000 < ordinal < 740000)
+    expect(738000 < ordinal < 740000).to_be(True)
 
 def test_datetime_timestamp():
     dt_epoch = datetime.datetime(1970, 1, 1, 0, 0, 0)
     ts = dt_epoch.timestamp()
-    expect(True, ts == ts)  # Check not NaN
+    expect(ts == ts).to_be(True)  # Check not NaN
 
 def test_datetime_replace():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
     dt7 = dt5.replace(2025)
-    expect(2025, dt7.year())
+    expect(dt7.year()).to_be(2025)
     dt8 = dt5.replace(None, 12)
-    expect(12, dt8.month())
+    expect(dt8.month()).to_be(12)
 
 def test_datetime_date_time():
     dt5 = datetime.datetime(2024, 3, 14, 9, 26, 53)
     d = dt5.date()
-    expect(2024, d.year())
-    expect(3, d.month())
-    expect(14, d.day())
+    expect(d.year()).to_be(2024)
+    expect(d.month()).to_be(3)
+    expect(d.day()).to_be(14)
 
     t = dt5.time()
-    expect(9, t.hour())
-    expect(26, t.minute())
-    expect(53, t.second())
+    expect(t.hour()).to_be(9)
+    expect(t.minute()).to_be(26)
+    expect(t.second()).to_be(53)
 
 def test_date_class():
     d1 = datetime.date(2024, 12, 25)
-    expect(2024, d1.year())
-    expect(12, d1.month())
-    expect(25, d1.day())
-    expect(2, d1.weekday())
-    expect(3, d1.isoweekday())
-    expect("2024-12-25", d1.isoformat())
-    expect("2024/12/25", d1.strftime("%Y/%m/%d"))
+    expect(d1.year()).to_be(2024)
+    expect(d1.month()).to_be(12)
+    expect(d1.day()).to_be(25)
+    expect(d1.weekday()).to_be(2)
+    expect(d1.isoweekday()).to_be(3)
+    expect(d1.isoformat()).to_be("2024-12-25")
+    expect(d1.strftime("%Y/%m/%d")).to_be("2024/12/25")
 
     d2 = d1.replace(2025)
-    expect(2025, d2.year())
+    expect(d2.year()).to_be(2025)
 
     dtt = d1.timetuple()
-    expect(2024, dtt[0])
-    expect(0, dtt[3])  # Hour should be 0 for date
+    expect(dtt[0]).to_be(2024)
+    expect(dtt[3]).to_be(0)  # Hour should be 0 for date
 
 def test_time_class():
     t1 = datetime.time(10, 30, 45, 123456)
-    expect(10, t1.hour())
-    expect(30, t1.minute())
-    expect(45, t1.second())
-    expect(123456, t1.microsecond())
-    expect("10:30:45.123456", t1.isoformat())
-    expect("10:30:45", t1.strftime("%H:%M:%S"))
+    expect(t1.hour()).to_be(10)
+    expect(t1.minute()).to_be(30)
+    expect(t1.second()).to_be(45)
+    expect(t1.microsecond()).to_be(123456)
+    expect(t1.isoformat()).to_be("10:30:45.123456")
+    expect(t1.strftime("%H:%M:%S")).to_be("10:30:45")
 
     t2 = datetime.time(12, 30)
-    expect(0, t2.second())
-    expect(0, t2.microsecond())
-    expect("12:30:00", t2.isoformat())
+    expect(t2.second()).to_be(0)
+    expect(t2.microsecond()).to_be(0)
+    expect(t2.isoformat()).to_be("12:30:00")
 
     t3 = t1.replace(15)
-    expect(15, t3.hour())
+    expect(t3.hour()).to_be(15)
 
 def test_timedelta_class():
     td1 = datetime.timedelta(5, 3600, 500000)
-    expect(5, td1.days())
-    expect(3600, td1.seconds())
-    expect(500000, td1.microseconds())
-    expect(435600.5, td1.total_seconds())
+    expect(td1.days()).to_be(5)
+    expect(td1.seconds()).to_be(3600)
+    expect(td1.microseconds()).to_be(500000)
+    expect(td1.total_seconds()).to_be(435600.5)
 
     td2 = datetime.timedelta(1, 0, 0, 0, 30, 2, 1)  # 1 day + 30 min + 2 hours + 1 week
-    expect(True, td2.total_seconds() > 0)
+    expect(td2.total_seconds() > 0).to_be(True)
 
     td3 = datetime.timedelta(0, 0, 0, 0, 0, 0, 2)  # 2 weeks
-    expect(14, td3.days())
+    expect(td3.days()).to_be(14)
 
     td4 = datetime.timedelta(0, 90061)  # 90061 seconds = 1 day + 1 hour + 1 minute + 1 second
-    expect(1, td4.days())
-    expect(3661, td4.seconds())
+    expect(td4.days()).to_be(1)
+    expect(td4.seconds()).to_be(3661)
 
 def test_datetime_now_today():
     now = datetime.now()
-    expect(True, now.year() >= 2024)
-    expect(True, 1 <= now.month() <= 12)
-    expect(True, 1 <= now.day() <= 31)
+    expect(now.year() >= 2024).to_be(True)
+    expect(1 <= now.month() <= 12).to_be(True)
+    expect(1 <= now.day() <= 31).to_be(True)
 
     today = datetime.today()
-    expect(True, today.year() >= 2024)
-    expect(True, 1 <= today.month() <= 12)
+    expect(today.year() >= 2024).to_be(True)
+    expect(1 <= today.month() <= 12).to_be(True)
 
 def test_datetime_fromtimestamp():
     dt_from_ts = datetime.fromtimestamp(1000000000)  # 2001-09-09
-    expect(2001, dt_from_ts.year())
-    expect(9, dt_from_ts.month())
-    expect(True, dt_from_ts.day() >= 8)  # May vary by timezone
+    expect(dt_from_ts.year()).to_be(2001)
+    expect(dt_from_ts.month()).to_be(9)
+    expect(dt_from_ts.day() >= 8).to_be(True)  # May vary by timezone
 
 def test_datetime_fromisoformat():
     dt_parsed = datetime.fromisoformat("2024-07-04T12:00:00")
-    expect(2024, dt_parsed.year())
-    expect(7, dt_parsed.month())
-    expect(4, dt_parsed.day())
-    expect(12, dt_parsed.hour())
+    expect(dt_parsed.year()).to_be(2024)
+    expect(dt_parsed.month()).to_be(7)
+    expect(dt_parsed.day()).to_be(4)
+    expect(dt_parsed.hour()).to_be(12)
 
     dt_parsed2 = datetime.fromisoformat("2024-07-04 15:30:00")
-    expect(15, dt_parsed2.hour())
-    expect(30, dt_parsed2.minute())
+    expect(dt_parsed2.hour()).to_be(15)
+    expect(dt_parsed2.minute()).to_be(30)
 
     dt_parsed3 = datetime.fromisoformat("2024-07-04")
-    expect(2024, dt_parsed3.year())
-    expect(0, dt_parsed3.hour())
+    expect(dt_parsed3.year()).to_be(2024)
+    expect(dt_parsed3.hour()).to_be(0)
 
 def test_datetime_combine():
     d_combine = datetime.date(2024, 1, 1)
     t_combine = datetime.time(12, 30, 45)
     dt_combined = datetime.combine(d_combine, t_combine)
-    expect(2024, dt_combined.year())
-    expect(12, dt_combined.hour())
-    expect(30, dt_combined.minute())
+    expect(dt_combined.year()).to_be(2024)
+    expect(dt_combined.hour()).to_be(12)
+    expect(dt_combined.minute()).to_be(30)
 
 test("datetime_constants", test_datetime_constants)
 test("datetime_constructor", test_datetime_constructor)

@@ -207,101 +207,101 @@ class MyClass:
 
 def test_basic_closure():
     c = make_counter()
-    expect(0, c())
+    expect(c()).to_be(0)
 
 def test_closure_captures_param():
     f = outer_with_val(21)
-    expect(42, f())
+    expect(f()).to_be(42)
 
 def test_nested_closure():
     fn = outer_nested(42)()()
-    expect(42, fn)
+    expect(fn).to_be(42)
 
 def test_basic_decorator():
-    expect(10, get_five())
+    expect(get_five()).to_be(10)
 
 def test_decorator_with_args():
-    expect(30, add(10, 20))
+    expect(add(10, 20)).to_be(30)
 
 def test_multiple_decorators():
     # (3 * 2) + 1 = 7
-    expect(7, get_three())
+    expect(get_three()).to_be(7)
 
 def test_decorator_factory():
-    expect(["hi", "hi", "hi"], say_hi())
+    expect(say_hi()).to_be(["hi", "hi", "hi"])
 
 def test_wrapper_modifies_result():
-    expect([42], get_value())
+    expect(get_value()).to_be([42])
 
 def test_closure_mutable_state():
     acc = make_accumulator()
     acc(5)
     acc(10)
-    expect(18, acc(3))
+    expect(acc(3)).to_be(18)
 
 def test_identity_decorator():
-    expect(49, square(7))
+    expect(square(7)).to_be(49)
 
 def test_property_basic_getter():
     c = Circle(5)
-    expect(5, c.radius)
+    expect(c.radius).to_be(5)
 
 def test_property_computed():
     r = Rectangle(3, 4)
-    expect(12, r.area)
+    expect(r.area).to_be(12)
 
 def test_property_after_setter():
     r = Rectangle(3, 4)
     r.width = 5
-    expect(20, r.area)
+    expect(r.area).to_be(20)
 
 def test_property_override():
     sq = Square()
-    expect("Square", sq.name)
+    expect(sq.name).to_be("Square")
 
 def test_property_inherited():
     tr = Triangle()
-    expect("Shape", tr.name)
+    expect(tr.name).to_be("Shape")
 
 def test_classmethod():
     Counter.reset()
-    expect(1, Counter.increment())
-    expect(2, Counter.increment())
-    expect(3, Counter().increment())
-    expect(3, Counter.count)
+    expect(Counter.increment()).to_be(1)
+    expect(Counter.increment()).to_be(2)
+    expect(Counter().increment()).to_be(3)
+    expect(Counter.count).to_be(3)
     Counter.reset()
-    expect(0, Counter.count)
+    expect(Counter.count).to_be(0)
 
 def test_classmethod_factory():
     p1 = Point.origin()
     p2 = Point.from_tuple((3, 4))
-    expect(0, p1.x)
-    expect(0, p1.y)
-    expect(3, p2.x)
-    expect(4, p2.y)
+    expect(p1.x).to_be(0)
+    expect(p1.y).to_be(0)
+    expect(p2.x).to_be(3)
+    expect(p2.y).to_be(4)
 
 def test_classmethod_inheritance():
-    expect("Animal", Animal.get_species())
-    expect("Dog", Dog.get_species())
-    expect("Animal", Cat.get_species())
+    expect(Animal.get_species()).to_be("Animal")
+    expect(Dog.get_species()).to_be("Dog")
+    expect(Cat.get_species()).to_be("Animal")
 
 def test_staticmethod():
-    expect(5, MathUtils.add(2, 3))
-    expect(20, MathUtils.multiply(4, 5))
+    expect(MathUtils.add(2, 3)).to_be(5)
+    expect(MathUtils.multiply(4, 5)).to_be(20)
 
 def test_staticmethod_on_instance():
     m = MathUtils()
-    expect(30, m.add(10, 20))
-    expect(True, MathUtils.is_positive(5))
-    expect(False, MathUtils.is_positive(-3))
+    expect(m.add(10, 20)).to_be(30)
+    expect(MathUtils.is_positive(5)).to_be(True)
+    expect(MathUtils.is_positive(-3)).to_be(False)
 
 def test_mixed_decorators():
     obj = MyClass(5)
-    expect(5, obj.x)
+    expect(obj.x).to_be(5)
     obj.x = 15
-    expect(15, obj.x)
-    expect(100, MyClass.get_class_value())
-    expect(30, MyClass.helper(10, 20))
+    expect(obj.x).to_be(15)
+    expect(MyClass.get_class_value()).to_be(100)
+    expect(MyClass.helper(10, 20)).to_be(30)
 
 test("basic_closure", test_basic_closure)
 test("closure_captures_param", test_closure_captures_param)

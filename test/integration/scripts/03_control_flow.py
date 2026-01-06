@@ -9,7 +9,7 @@ def test_if_statements():
     result = None
     if x > 5:
         result = "greater"
-    expect("greater", result)
+    expect(result).to_be("greater")
 
     # If-else
     x = 3
@@ -17,7 +17,7 @@ def test_if_statements():
         result = "greater"
     else:
         result = "not greater"
-    expect("not greater", result)
+    expect(result).to_be("not greater")
 
     # If-elif-else
     x = 5
@@ -27,7 +27,7 @@ def test_if_statements():
         result = "equal"
     else:
         result = "less"
-    expect("equal", result)
+    expect(result).to_be("equal")
 
     # Nested if
     x = 10
@@ -36,40 +36,40 @@ def test_if_statements():
     if x > 5:
         if y > 15:
             result = "both"
-    expect("both", result)
+    expect(result).to_be("both")
 
 def test_for_loops():
     # For loop with range
     total = 0
     for i in range(5):
         total = total + i
-    expect(10, total)
+    expect(total).to_be(10)
 
     # For loop with list
     items = [1, 2, 3, 4, 5]
     total = 0
     for item in items:
         total = total + item
-    expect(15, total)
+    expect(total).to_be(15)
 
     # For loop with string
     chars = ""
     for c in "hello":
         chars = chars + c
-    expect("hello", chars)
+    expect(chars).to_be("hello")
 
     # Nested for loops
     total = 0
     for i in range(3):
         for j in range(3):
             total = total + 1
-    expect(9, total)
+    expect(total).to_be(9)
 
 def test_while_loops():
     count = 0
     while count < 5:
         count = count + 1
-    expect(5, count)
+    expect(count).to_be(5)
 
 def test_break():
     # Break in for loop
@@ -78,7 +78,7 @@ def test_break():
         if i == 7:
             found = i
             break
-    expect(7, found)
+    expect(found).to_be(7)
 
     # Break in while loop
     count = 0
@@ -86,7 +86,7 @@ def test_break():
         count = count + 1
         if count >= 5:
             break
-    expect(5, count)
+    expect(count).to_be(5)
 
 def test_continue():
     evens = []
@@ -94,7 +94,7 @@ def test_continue():
         if i % 2 != 0:
             continue
         evens.append(i)
-    expect([0, 2, 4, 6, 8], evens)
+    expect(evens).to_be([0, 2, 4, 6, 8])
 
 def test_complex_control_flow():
     # Find primes
@@ -107,7 +107,7 @@ def test_complex_control_flow():
                 break
         if is_prime:
             primes.append(num)
-    expect([2, 3, 5, 7, 11, 13, 17, 19], primes)
+    expect(primes).to_be([2, 3, 5, 7, 11, 13, 17, 19])
 
 test("if_statements", test_if_statements)
 test("for_loops", test_for_loops)

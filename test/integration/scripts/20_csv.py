@@ -6,42 +6,42 @@ from test_framework import test, expect
 import csv
 
 def test_parse_row_basic():
-    expect(["a", "b", "c"], csv.parse_row("a,b,c"))
-    expect(["1", "2", "3"], csv.parse_row("1,2,3"))
-    expect(["name", "30", "city"], csv.parse_row("name,30,city"))
-    expect(["a", "", "c"], csv.parse_row("a,,c"))
-    expect(["only"], csv.parse_row("only"))
+    expect(csv.parse_row("a,b,c")).to_be(["a", "b", "c"])
+    expect(csv.parse_row("1,2,3")).to_be(["1", "2", "3"])
+    expect(csv.parse_row("name,30,city")).to_be(["name", "30", "city"])
+    expect(csv.parse_row("a,,c")).to_be(["a", "", "c"])
+    expect(csv.parse_row("only")).to_be(["only"])
 
 def test_parse_row_quoted():
-    expect(["a", "b", "c"], csv.parse_row('a,"b",c'))
-    expect(["a", "b,c", "d"], csv.parse_row('a,"b,c",d'))
-    expect(["a", "", "c"], csv.parse_row('a,"",c'))
-    expect(["a", 'say "hello"', "c"], csv.parse_row('a,"say ""hello""",c'))
+    expect(csv.parse_row('a,"b",c')).to_be(["a", "b", "c"])
+    expect(csv.parse_row('a,"b,c",d')).to_be(["a", "b,c", "d"])
+    expect(csv.parse_row('a,"",c')).to_be(["a", "", "c"])
+    expect(csv.parse_row('a,"say ""hello""",c')).to_be(["a", 'say "hello"', "c"])
 
 def test_parse_row_delimiters():
-    expect(["a", "b", "c"], csv.parse_row("a;b;c", ";"))
-    expect(["a", "b", "c"], csv.parse_row("a\tb\tc", "\t"))
-    expect(["a", "b", "c"], csv.parse_row("a|b|c", "|"))
+    expect(csv.parse_row("a;b;c", ";")).to_be(["a", "b", "c"])
+    expect(csv.parse_row("a\tb\tc", "\t")).to_be(["a", "b", "c"])
+    expect(csv.parse_row("a|b|c", "|")).to_be(["a", "b", "c"])
 
 def test_format_row_basic():
-    expect("a,b,c", csv.format_row(["a", "b", "c"]))
-    expect("1,2,3", csv.format_row([1, 2, 3]))
-    expect("name,30,city", csv.format_row(["name", 30, "city"]))
-    expect("", csv.format_row([]))
-    expect("only", csv.format_row(["only"]))
+    expect(csv.format_row(["a", "b", "c"])).to_be("a,b,c")
+    expect(csv.format_row([1, 2, 3])).to_be("1,2,3")
+    expect(csv.format_row(["name", 30, "city"])).to_be("name,30,city")
+    expect(csv.format_row([])).to_be("")
+    expect(csv.format_row(["only"])).to_be("only")
 
 def test_format_row_quoting():
-    expect('a,"b,c",d', csv.format_row(["a", "b,c", "d"]))
-    expect('a,"b\nc",d', csv.format_row(["a", "b\nc", "d"]))
-    expect('a,"say ""hi""",c', csv.format_row(["a", 'say "hi"', "c"]))
+    expect(csv.format_row(["a", "b,c", "d"])).to_be('a,"b,c",d')
+    expect(csv.format_row(["a", "b\nc", "d"])).to_be('a,"b\nc",d')
+    expect(csv.format_row(["a", 'say "hi"', "c"])).to_be('a,"say ""hi""",c')
 
 def test_format_row_modes():
-    expect('"a","b"', csv.format_row(["a", "b"], ",", '"', csv.QUOTE_ALL))
-    expect("a,b", csv.format_row(["a", "b"], ",", '"', csv.QUOTE_NONE))
+    expect(csv.format_row(["a", "b"], ",", '"', csv.QUOTE_ALL)).to_be('"a","b"')
+    expect(csv.format_row(["a", "b"], ",", '"', csv.QUOTE_NONE)).to_be("a,b")
 
 def test_format_row_delimiters():
-    expect("a;b;c", csv.format_row(["a", "b", "c"], ";"))
-    expect("a\tb\tc", csv.format_row(["a", "b", "c"], "\t"))
+    expect(csv.format_row(["a", "b", "c"], ";")).to_be("a;b;c")
+    expect(csv.format_row(["a", "b", "c"], "\t")).to_be("a\tb\tc")
 
 def test_reader_basic():
     lines = ["a,b,c", "1,2,3", "x,y,z"]
@@ -49,10 +49,10 @@ def test_reader_basic():
     rows = []
     for row in reader:
         rows.append(row)
-    expect(3, len(rows))
-    expect(["a", "b", "c"], rows[0])
-    expect(["1", "2", "3"], rows[1])
-    expect(["x", "y", "z"], rows[2])
+    expect(len(rows)).to_be(3)
+    expect(rows[0]).to_be(["a", "b", "c"])
+    expect(rows[1]).to_be(["1", "2", "3"])
+    expect(rows[2]).to_be(["x", "y", "z"])
 
 def test_reader_with_header():
     csv_data = ["name,age,city", "Alice,30,NYC", "Bob,25,LA"]
@@ -60,9 +60,9 @@ def test_reader_with_header():
     all_rows = []
     for row in reader:
         all_rows.append(row)
-    expect(["name", "age", "city"], all_rows[0])
-    expect(["Alice", "30", "NYC"], all_rows[1])
-    expect(["Bob", "25", "LA"], all_rows[2])
+    expect(all_rows[0]).to_be(["name", "age", "city"])
+    expect(all_rows[1]).to_be(["Alice", "30", "NYC"])
+    expect(all_rows[2]).to_be(["Bob", "25", "LA"])
 
 def test_reader_quoted():
     quoted_lines = ['name,description', 'item1,"A simple item"', 'item2,"An item, with comma"']
@@ -70,9 +70,9 @@ def test_reader_quoted():
     quoted_rows = []
     for row in reader:
         quoted_rows.append(row)
-    expect(["name", "description"], quoted_rows[0])
-    expect(["item1", "A simple item"], quoted_rows[1])
-    expect(["item2", "An item, with comma"], quoted_rows[2])
+    expect(quoted_rows[0]).to_be(["name", "description"])
+    expect(quoted_rows[1]).to_be(["item1", "A simple item"])
+    expect(quoted_rows[2]).to_be(["item2", "An item, with comma"])
 
 def test_reader_delimiter():
     semicolon_lines = ["a;b;c", "1;2;3"]
@@ -80,8 +80,8 @@ def test_reader_delimiter():
     semicolon_rows = []
     for row in reader:
         semicolon_rows.append(row)
-    expect(["a", "b", "c"], semicolon_rows[0])
-    expect(["1", "2", "3"], semicolon_rows[1])
+    expect(semicolon_rows[0]).to_be(["a", "b", "c"])
+    expect(semicolon_rows[1]).to_be(["1", "2", "3"])
 
 def test_dictreader_basic():
     csv_data = ["name,age,city", "Alice,30,NYC", "Bob,25,LA"]
@@ -89,13 +89,13 @@ def test_dictreader_basic():
     dict_rows = []
     for row in dreader:
         dict_rows.append(row)
-    expect(2, len(dict_rows))
-    expect("Alice", dict_rows[0]["name"])
-    expect("30", dict_rows[0]["age"])
-    expect("NYC", dict_rows[0]["city"])
-    expect("Bob", dict_rows[1]["name"])
-    expect("25", dict_rows[1]["age"])
-    expect("LA", dict_rows[1]["city"])
+    expect(len(dict_rows)).to_be(2)
+    expect(dict_rows[0]["name"]).to_be("Alice")
+    expect(dict_rows[0]["age"]).to_be("30")
+    expect(dict_rows[0]["city"]).to_be("NYC")
+    expect(dict_rows[1]["name"]).to_be("Bob")
+    expect(dict_rows[1]["age"]).to_be("25")
+    expect(dict_rows[1]["city"]).to_be("LA")
 
 def test_dictreader_fieldnames():
     data_no_header = ["Alice,30,NYC", "Bob,25,LA"]
@@ -103,9 +103,9 @@ def test_dictreader_fieldnames():
     rows_with_fieldnames = []
     for row in dreader:
         rows_with_fieldnames.append(row)
-    expect(2, len(rows_with_fieldnames))
-    expect("Alice", rows_with_fieldnames[0]["name"])
-    expect("LA", rows_with_fieldnames[1]["city"])
+    expect(len(rows_with_fieldnames)).to_be(2)
+    expect(rows_with_fieldnames[0]["name"]).to_be("Alice")
+    expect(rows_with_fieldnames[1]["city"]).to_be("LA")
 
 def test_writer_basic():
     w = csv.writer()
@@ -113,30 +113,30 @@ def test_writer_basic():
     w.writerow(["Alice", 30, "NYC"])
     w.writerow(["Bob", 25, "LA"])
     output = w.getvalue()
-    expect(True, "name,age,city" in output)
-    expect(True, "Alice,30,NYC" in output)
-    expect(True, "Bob,25,LA" in output)
-    expect(3, len(output.split("\n")) - 1)
+    expect("name,age,city" in output).to_be(True)
+    expect("Alice,30,NYC" in output).to_be(True)
+    expect("Bob,25,LA" in output).to_be(True)
+    expect(len(output.split("\n")) - 1).to_be(3)
 
 def test_writer_writerows():
     w2 = csv.writer()
     w2.writerows([["a", "b"], ["c", "d"], ["e", "f"]])
     output2 = w2.getvalue()
-    expect(True, "a,b" in output2)
-    expect(True, "c,d" in output2)
-    expect(True, "e,f" in output2)
+    expect("a,b" in output2).to_be(True)
+    expect("c,d" in output2).to_be(True)
+    expect("e,f" in output2).to_be(True)
 
 def test_writer_delimiter():
     w3 = csv.writer(";")
     w3.writerow(["a", "b", "c"])
     output3 = w3.getvalue()
-    expect(True, "a;b;c" in output3)
+    expect("a;b;c" in output3).to_be(True)
 
 def test_writer_quote_all():
     w4 = csv.writer(",", '"', csv.QUOTE_ALL)
     w4.writerow(["a", "b"])
     output4 = w4.getvalue()
-    expect(True, '"a","b"' in output4)
+    expect('"a","b"' in output4).to_be(True)
 
 def test_dictwriter_basic():
     dw = csv.DictWriter(["name", "age", "city"])
@@ -144,24 +144,24 @@ def test_dictwriter_basic():
     dw.writerow({"name": "Alice", "age": "30", "city": "NYC"})
     dw.writerow({"name": "Bob", "age": "25", "city": "LA"})
     dw_output = dw.getvalue()
-    expect(True, "name,age,city" in dw_output)
-    expect(True, "Alice,30,NYC" in dw_output)
-    expect(True, "Bob,25,LA" in dw_output)
+    expect("name,age,city" in dw_output).to_be(True)
+    expect("Alice,30,NYC" in dw_output).to_be(True)
+    expect("Bob,25,LA" in dw_output).to_be(True)
 
 def test_dictwriter_writerows():
     dw2 = csv.DictWriter(["x", "y"])
     dw2.writeheader()
     dw2.writerows([{"x": "1", "y": "2"}, {"x": "3", "y": "4"}])
     dw2_output = dw2.getvalue()
-    expect(True, "x,y" in dw2_output)
-    expect(True, "1,2" in dw2_output)
-    expect(True, "3,4" in dw2_output)
+    expect("x,y" in dw2_output).to_be(True)
+    expect("1,2" in dw2_output).to_be(True)
+    expect("3,4" in dw2_output).to_be(True)
 
 def test_dictwriter_restval():
     dw3 = csv.DictWriter(["a", "b", "c"], ",", '"', csv.QUOTE_MINIMAL, "\n", "N/A")
     dw3.writerow({"a": "1", "c": "3"})
     dw3_output = dw3.getvalue()
-    expect(True, "1,N/A,3" in dw3_output)
+    expect("1,N/A,3" in dw3_output).to_be(True)
 
 def test_roundtrip():
     w_rt = csv.writer()
@@ -176,15 +176,15 @@ def test_roundtrip():
     for row in reader_rt:
         roundtrip_rows.append(row)
 
-    expect(["name", "score"], roundtrip_rows[0])
-    expect(["Alice", "100"], roundtrip_rows[1])
-    expect(["Bob", "95"], roundtrip_rows[2])
+    expect(roundtrip_rows[0]).to_be(["name", "score"])
+    expect(roundtrip_rows[1]).to_be(["Alice", "100"])
+    expect(roundtrip_rows[2]).to_be(["Bob", "95"])
 
 def test_constants():
-    expect(0, csv.QUOTE_MINIMAL)
-    expect(1, csv.QUOTE_ALL)
-    expect(2, csv.QUOTE_NONNUMERIC)
-    expect(3, csv.QUOTE_NONE)
+    expect(csv.QUOTE_MINIMAL).to_be(0)
+    expect(csv.QUOTE_ALL).to_be(1)
+    expect(csv.QUOTE_NONNUMERIC).to_be(2)
+    expect(csv.QUOTE_NONE).to_be(3)
 
 test("parse_row_basic", test_parse_row_basic)
 test("parse_row_quoted", test_parse_row_quoted)

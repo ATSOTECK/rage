@@ -5,56 +5,56 @@ from test_framework import test, expect
 
 def test_str_basic():
     s = "Hello, World!"
-    expect(13, len(s))
-    expect("H", s[0])
-    expect("!", s[-1])
+    expect(len(s)).to_be(13)
+    expect(s[0]).to_be("H")
+    expect(s[-1]).to_be("!")
 
 def test_str_concat():
-    expect("Hello World", "Hello" + " " + "World")
-    expect("abababab", "ab" * 4)
+    expect("Hello" + " " + "World").to_be("Hello World")
+    expect("ab" * 4).to_be("abababab")
 
 def test_str_case():
-    expect("HELLO", "hello".upper())
-    expect("hello", "HELLO".lower())
+    expect("hello".upper()).to_be("HELLO")
+    expect("HELLO".lower()).to_be("hello")
 
 def test_str_strip():
-    expect("hello", "  hello  ".strip())
+    expect("  hello  ".strip()).to_be("hello")
 
 def test_str_split_join():
-    expect(["hello", "world", "python"], "hello world python".split())
-    expect(["a", "b", "c", "d"], "a,b,c,d".split(","))
-    expect("a,b,c", ",".join(["a", "b", "c"]))
+    expect("hello world python".split()).to_be(["hello", "world", "python"])
+    expect("a,b,c,d".split(",")).to_be(["a", "b", "c", "d"])
+    expect(",".join(["a", "b", "c"])).to_be("a,b,c")
 
 def test_str_replace():
-    expect("hi hi hi", "hello hello hello".replace("hello", "hi"))
+    expect("hello hello hello".replace("hello", "hi")).to_be("hi hi hi")
 
 def test_str_membership():
-    expect(True, "ell" in "hello")
-    expect(True, "xyz" not in "hello")
+    expect("ell" in "hello").to_be(True)
+    expect("xyz" not in "hello").to_be(True)
 
 def test_str_comparison():
-    expect(True, "hello" == "hello")
-    expect(True, "hello" != "world")
-    expect(True, "apple" < "banana")
-    expect(True, "banana" > "apple")
+    expect("hello" == "hello").to_be(True)
+    expect("hello" != "world").to_be(True)
+    expect("apple" < "banana").to_be(True)
+    expect("banana" > "apple").to_be(True)
 
 def test_str_word_count():
     text = "The quick brown fox"
     words = text.split()
-    expect(4, len(words))
+    expect(len(words)).to_be(4)
 
 def test_str_empty():
-    expect(0, len(""))
-    expect(False, bool(""))
+    expect(len("")).to_be(0)
+    expect(bool("")).to_be(False)
 
 def test_str_mult_edge():
-    expect("", "hello" * 0)
-    expect("hello", "hello" * 1)
+    expect("hello" * 0).to_be("")
+    expect("hello" * 1).to_be("hello")
 
 def test_str_case_insensitive():
     s1 = "Hello"
     s2 = "hello"
-    expect(True, s1.lower() == s2.lower())
+    expect(s1.lower() == s2.lower()).to_be(True)
 
 test("str_basic", test_str_basic)
 test("str_concat", test_str_concat)

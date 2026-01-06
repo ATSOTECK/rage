@@ -81,63 +81,63 @@ class Duck(Flyable, Swimmable):
 
 def test_basic_class():
     p = Point(3, 4)
-    expect(3, p.x)
-    expect(4, p.y)
-    expect(7, p.sum())
+    expect(p.x).to_be(3)
+    expect(p.y).to_be(4)
+    expect(p.sum()).to_be(7)
     p2 = p.scale(2)
-    expect(6, p2.x)
-    expect(8, p2.y)
+    expect(p2.x).to_be(6)
+    expect(p2.y).to_be(8)
 
 def test_multiple_instances():
     p3 = Point(10, 20)
     p4 = Point(100, 200)
-    expect(10, p3.x)
-    expect(100, p4.x)
-    expect(30, p3.sum())
-    expect(300, p4.sum())
+    expect(p3.x).to_be(10)
+    expect(p4.x).to_be(100)
+    expect(p3.sum()).to_be(30)
+    expect(p4.sum()).to_be(300)
 
 def test_empty_class():
     e = Empty()
-    expect(True, True)  # Just verify no error
+    expect(True).to_be(True)  # Just verify no error
 
 def test_counter():
     c1 = Counter("first")
     c2 = Counter("second")
-    expect("first", c1.name)
-    expect("second", c2.name)
+    expect(c1.name).to_be("first")
+    expect(c2.name).to_be("second")
 
 def test_inheritance():
     dog = Dog("Buddy")
     cat = Cat("Whiskers")
-    expect("Buddy", dog.name)
-    expect("Woof!", dog.speak())
-    expect("Buddy fetches the ball", dog.fetch())
-    expect("Whiskers", cat.name)
-    expect("Meow!", cat.speak())
+    expect(dog.name).to_be("Buddy")
+    expect(dog.speak()).to_be("Woof!")
+    expect(dog.fetch()).to_be("Buddy fetches the ball")
+    expect(cat.name).to_be("Whiskers")
+    expect(cat.speak()).to_be("Meow!")
 
 def test_calculator():
     calc = Calculator(10)
-    expect(15, calc.add(5))
-    expect(30, calc.multiply(3))
+    expect(calc.add(5)).to_be(15)
+    expect(calc.multiply(3)).to_be(30)
 
 def test_method_chaining():
     builder = Builder()
     builder.add("a").add("b").add("c")
-    expect(["a", "b", "c"], builder.get_parts())
+    expect(builder.get_parts()).to_be(["a", "b", "c"])
 
 def test_state_modification():
     acc = Account(100)
-    expect(100, acc.get_balance())
+    expect(acc.get_balance()).to_be(100)
     acc.deposit(50)
-    expect(150, acc.get_balance())
+    expect(acc.get_balance()).to_be(150)
     acc.withdraw(30)
-    expect(120, acc.get_balance())
+    expect(acc.get_balance()).to_be(120)
 
 def test_multiple_inheritance():
     duck = Duck()
-    expect("Flying", duck.fly())
-    expect("Swimming", duck.swim())
-    expect("Quack!", duck.quack())
+    expect(duck.fly()).to_be("Flying")
+    expect(duck.swim()).to_be("Swimming")
+    expect(duck.quack()).to_be("Quack!")
 
 test("basic_class", test_basic_class)
 test("multiple_instances", test_multiple_instances)

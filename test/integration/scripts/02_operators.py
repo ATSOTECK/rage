@@ -4,135 +4,135 @@
 from test_framework import test, expect
 
 def test_arithmetic():
-    expect(15, 10 + 5)
-    expect(5, 10 - 5)
-    expect(50, 10 * 5)
-    expect(2.5, 10 / 4)
-    expect(3, 10 // 3)
-    expect(1, 10 % 3)
-    expect(1024, 2 ** 10)
-    expect(5, +5)
-    expect(-5, -5)
+    expect(10 + 5).to_be(15)
+    expect(10 - 5).to_be(5)
+    expect(10 * 5).to_be(50)
+    expect(10 / 4).to_be(2.5)
+    expect(10 // 3).to_be(3)
+    expect(10 % 3).to_be(1)
+    expect(2 ** 10).to_be(1024)
+    expect(+5).to_be(5)
+    expect(-5).to_be(-5)
 
 def test_float_arithmetic():
-    expect(4.0, 1.5 + 2.5)
-    expect(10.0, 2.5 * 4.0)
-    expect(3.5, 7.0 / 2.0)
-    expect(7.5, 5 + 2.5)
-    expect(7.5, 3 * 2.5)
+    expect(1.5 + 2.5).to_be(4.0)
+    expect(2.5 * 4.0).to_be(10.0)
+    expect(7.0 / 2.0).to_be(3.5)
+    expect(5 + 2.5).to_be(7.5)
+    expect(3 * 2.5).to_be(7.5)
 
 def test_comparison():
-    expect(True, 5 == 5)
-    expect(False, 5 == 6)
-    expect(True, 5 != 6)
-    expect(False, 5 != 5)
-    expect(True, 5 < 10)
-    expect(False, 10 < 5)
-    expect(True, 5 <= 5)
-    expect(False, 6 <= 5)
-    expect(True, 10 > 5)
-    expect(False, 5 > 10)
-    expect(True, 5 >= 5)
-    expect(False, 4 >= 5)
+    expect(5 == 5).to_be(True)
+    expect(5 == 6).to_be(False)
+    expect(5 != 6).to_be(True)
+    expect(5 != 5).to_be(False)
+    expect(5 < 10).to_be(True)
+    expect(10 < 5).to_be(False)
+    expect(5 <= 5).to_be(True)
+    expect(6 <= 5).to_be(False)
+    expect(10 > 5).to_be(True)
+    expect(5 > 10).to_be(False)
+    expect(5 >= 5).to_be(True)
+    expect(4 >= 5).to_be(False)
 
 def test_chained_comparison():
-    expect(True, 1 < 5 < 10)
-    expect(False, 1 < 10 < 5)
-    expect(True, 1 <= 2 <= 3 <= 4)
+    expect(1 < 5 < 10).to_be(True)
+    expect(1 < 10 < 5).to_be(False)
+    expect(1 <= 2 <= 3 <= 4).to_be(True)
 
 def test_string_comparison():
-    expect(True, "hello" == "hello")
-    expect(True, "hello" != "world")
-    expect(True, "apple" < "banana")
+    expect("hello" == "hello").to_be(True)
+    expect("hello" != "world").to_be(True)
+    expect("apple" < "banana").to_be(True)
 
 def test_identity():
     a = [1, 2, 3]
     b = a
     c = [1, 2, 3]
-    expect(True, a is b)
-    expect(False, a is c)
-    expect(True, a is not c)
-    expect(False, a is not b)
-    expect(True, None is None)
+    expect(a is b).to_be(True)
+    expect(a is c).to_be(False)
+    expect(a is not c).to_be(True)
+    expect(a is not b).to_be(False)
+    expect(None is None).to_be(True)
 
 def test_membership():
-    expect(True, 2 in [1, 2, 3])
-    expect(True, 5 not in [1, 2, 3])
-    expect(True, "ell" in "hello")
-    expect(True, "xyz" not in "hello")
-    expect(True, "a" in {"a": 1, "b": 2})
-    expect(True, 2 in {1, 2, 3})
-    expect(True, 2 in (1, 2, 3))
+    expect(2 in [1, 2, 3]).to_be(True)
+    expect(5 not in [1, 2, 3]).to_be(True)
+    expect("ell" in "hello").to_be(True)
+    expect("xyz" not in "hello").to_be(True)
+    expect("a" in {"a": 1, "b": 2}).to_be(True)
+    expect(2 in {1, 2, 3}).to_be(True)
+    expect(2 in (1, 2, 3)).to_be(True)
 
 def test_logical():
-    expect(True, True and True)
-    expect(False, True and False)
-    expect(True, False or True)
-    expect(False, False or False)
-    expect(True, not False)
-    expect(False, not True)
+    expect(True and True).to_be(True)
+    expect(True and False).to_be(False)
+    expect(False or True).to_be(True)
+    expect(False or False).to_be(False)
+    expect(not False).to_be(True)
+    expect(not True).to_be(False)
 
 def test_short_circuit():
-    expect(False, False and (1 / 0))
-    expect(True, True or (1 / 0))
+    expect(False and (1 / 0)).to_be(False)
+    expect(True or (1 / 0)).to_be(True)
 
 def test_logical_values():
-    expect(10, 5 and 10)
-    expect(10, 0 or 10)
-    expect(0, 5 and 0)
-    expect(5, 0 or 5)
+    expect(5 and 10).to_be(10)
+    expect(0 or 10).to_be(10)
+    expect(5 and 0).to_be(0)
+    expect(0 or 5).to_be(5)
 
 def test_bitwise():
-    expect(8, 0b1100 & 0b1010)
-    expect(14, 0b1100 | 0b1010)
-    expect(6, 0b1100 ^ 0b1010)
-    expect(-1, ~0)
-    expect(16, 1 << 4)
-    expect(4, 16 >> 2)
+    expect(0b1100 & 0b1010).to_be(8)
+    expect(0b1100 | 0b1010).to_be(14)
+    expect(0b1100 ^ 0b1010).to_be(6)
+    expect(~0).to_be(-1)
+    expect(1 << 4).to_be(16)
+    expect(16 >> 2).to_be(4)
 
 def test_augmented_assignment():
     x = 10
     x += 5
-    expect(15, x)
+    expect(x).to_be(15)
 
     x = 10
     x -= 3
-    expect(7, x)
+    expect(x).to_be(7)
 
     x = 10
     x *= 2
-    expect(20, x)
+    expect(x).to_be(20)
 
     x = 10
     x //= 3
-    expect(3, x)
+    expect(x).to_be(3)
 
     x = 10
     x %= 3
-    expect(1, x)
+    expect(x).to_be(1)
 
     x = 2
     x **= 4
-    expect(16, x)
+    expect(x).to_be(16)
 
     x = 0b1111
     x &= 0b1010
-    expect(10, x)
+    expect(x).to_be(10)
 
     x = 0b1100
     x |= 0b0011
-    expect(15, x)
+    expect(x).to_be(15)
 
 def test_ternary():
-    expect("yes", "yes" if True else "no")
-    expect("no", "yes" if False else "no")
-    expect("even", "even" if 10 % 2 == 0 else "odd")
+    expect("yes" if True else "no").to_be("yes")
+    expect("yes" if False else "no").to_be("no")
+    expect("even" if 10 % 2 == 0 else "odd").to_be("even")
 
 def test_sequence_operators():
-    expect("hello world", "hello" + " " + "world")
-    expect("abababab", "ab" * 4)
-    expect([1, 2, 3, 4], [1, 2] + [3, 4])
-    expect([1, 2, 1, 2, 1, 2], [1, 2] * 3)
+    expect("hello" + " " + "world").to_be("hello world")
+    expect("ab" * 4).to_be("abababab")
+    expect([1, 2] + [3, 4]).to_be([1, 2, 3, 4])
+    expect([1, 2] * 3).to_be([1, 2, 1, 2, 1, 2])
 
 test("arithmetic", test_arithmetic)
 test("float_arithmetic", test_float_arithmetic)

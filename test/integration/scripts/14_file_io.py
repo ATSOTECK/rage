@@ -14,12 +14,12 @@ def test_write_and_read():
     bytes_written = f.write("Hello, World!\n")
     f.write("Second line\n")
     f.close()
-    expect(14, bytes_written)
+    expect(bytes_written).to_be(14)
 
     f = open(test_file, "r")
     content = f.read()
     f.close()
-    expect("Hello, World!\nSecond line\n", content)
+    expect(content).to_be("Hello, World!\nSecond line\n")
 
 def test_readline():
     lines_file = tmp_dir + "/lines.txt"
@@ -33,8 +33,8 @@ def test_readline():
     line1 = f.readline()
     line2 = f.readline()
     f.close()
-    expect("Line 1\n", line1)
-    expect("Line 2\n", line2)
+    expect(line1).to_be("Line 1\n")
+    expect(line2).to_be("Line 2\n")
 
 def test_readlines():
     lines_file = tmp_dir + "/lines2.txt"
@@ -47,7 +47,7 @@ def test_readlines():
     f = open(lines_file, "r")
     all_lines = f.readlines()
     f.close()
-    expect(3, len(all_lines))
+    expect(len(all_lines)).to_be(3)
 
 def test_context_manager():
     with_file = tmp_dir + "/with_test.txt"
@@ -57,8 +57,8 @@ def test_context_manager():
     with open(with_file, "r") as f:
         with_content = f.read()
 
-    expect("Context manager test\n", with_content)
-    expect(True, f.closed)
+    expect(with_content).to_be("Context manager test\n")
+    expect(f.closed).to_be(True)
 
 def test_seek_tell():
     seek_file = tmp_dir + "/seek.txt"
@@ -71,8 +71,8 @@ def test_seek_tell():
     pos = f.tell()
     rest = f.read()
     f.close()
-    expect(5, pos)
-    expect("56789", rest)
+    expect(pos).to_be(5)
+    expect(rest).to_be("56789")
 
 def test_append_mode():
     append_file = tmp_dir + "/append.txt"
@@ -87,7 +87,7 @@ def test_append_mode():
     f = open(append_file, "r")
     append_content = f.read()
     f.close()
-    expect("Original\nAppended\n", append_content)
+    expect(append_content).to_be("Original\nAppended\n")
 
 def test_partial_read():
     partial_file = tmp_dir + "/partial.txt"
@@ -99,8 +99,8 @@ def test_partial_read():
     part1 = f.read(5)
     part2 = f.read(2)
     f.close()
-    expect("Hello", part1)
-    expect(", ", part2)
+    expect(part1).to_be("Hello")
+    expect(part2).to_be(", ")
 
 def test_writelines():
     writelines_file = tmp_dir + "/writelines.txt"
@@ -112,34 +112,34 @@ def test_writelines():
     f = open(writelines_file, "r")
     wl_content = f.read()
     f.close()
-    expect("Line A\nLine B\nLine C\n", wl_content)
+    expect(wl_content).to_be("Line A\nLine B\nLine C\n")
 
 def test_file_properties():
     prop_file = tmp_dir + "/props.txt"
     f = open(prop_file, "w")
-    expect(True, "props.txt" in f.name)
-    expect("w", f.mode)
-    expect(False, f.closed)
+    expect("props.txt" in f.name).to_be(True)
+    expect(f.mode).to_be("w")
+    expect(f.closed).to_be(False)
     f.close()
-    expect(True, f.closed)
+    expect(f.closed).to_be(True)
 
 def test_io_constants():
-    expect(0, io.SEEK_SET)
-    expect(1, io.SEEK_CUR)
-    expect(2, io.SEEK_END)
+    expect(io.SEEK_SET).to_be(0)
+    expect(io.SEEK_CUR).to_be(1)
+    expect(io.SEEK_END).to_be(2)
 
 def test_readable_writable():
     rws_file = tmp_dir + "/rws.txt"
     f = open(rws_file, "w")
-    expect(False, f.readable())
-    expect(True, f.writable())
-    expect(True, f.seekable())
+    expect(f.readable()).to_be(False)
+    expect(f.writable()).to_be(True)
+    expect(f.seekable()).to_be(True)
     f.close()
 
     f = open(rws_file, "r")
-    expect(True, f.readable())
-    expect(False, f.writable())
-    expect(True, f.seekable())
+    expect(f.readable()).to_be(True)
+    expect(f.writable()).to_be(False)
+    expect(f.seekable()).to_be(True)
     f.close()
 
 test("write_and_read", test_write_and_read)

@@ -85,42 +85,42 @@ async def process(x):
     return result
 
 def test_basic_async():
-    expect(42, asyncio.run(simple_async()))
+    expect(asyncio.run(simple_async())).to_be(42)
 
 def test_async_with_args():
-    expect(42, asyncio.run(async_add(10, 32)))
+    expect(asyncio.run(async_add(10, 32))).to_be(42)
 
 def test_nested_await():
-    expect(20, asyncio.run(outer_async()))
+    expect(asyncio.run(outer_async())).to_be(20)
 
 def test_chained_async():
-    expect(16, asyncio.run(step3()))
+    expect(asyncio.run(step3())).to_be(16)
 
 def test_async_locals():
-    expect(30, asyncio.run(async_locals()))
+    expect(asyncio.run(async_locals())).to_be(30)
 
 def test_async_conditional():
-    expect("yes", asyncio.run(async_conditional(True)))
-    expect("no", asyncio.run(async_conditional(False)))
+    expect(asyncio.run(async_conditional(True))).to_be("yes")
+    expect(asyncio.run(async_conditional(False))).to_be("no")
 
 def test_async_loop():
-    expect(10, asyncio.run(async_sum_range(5)))
+    expect(asyncio.run(async_sum_range(5))).to_be(10)
 
 def test_gather():
     result = asyncio.gather(get_one(), get_two(), get_three())
-    expect([1, 2, 3], result)
+    expect(result).to_be([1, 2, 3])
 
 def test_async_returns_list():
-    expect([1, 2, 3], asyncio.run(async_list()))
+    expect(asyncio.run(async_list())).to_be([1, 2, 3])
 
 def test_async_returns_dict():
-    expect({"a": 1, "b": 2}, asyncio.run(async_dict()))
+    expect(asyncio.run(async_dict())).to_be({"a": 1, "b": 2})
 
 def test_multiple_awaits():
-    expect(15, asyncio.run(combine()))
+    expect(asyncio.run(combine())).to_be(15)
 
 def test_async_pipeline():
-    expect(11, asyncio.run(process(5)))
+    expect(asyncio.run(process(5))).to_be(11)
 
 test("basic_async", test_basic_async)
 test("async_with_args", test_async_with_args)
