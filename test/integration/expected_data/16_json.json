@@ -1,0 +1,82 @@
+{
+  "dumps_backslash": "\"path\\\\to\\\\file\"",
+  "dumps_dict": "{\"b\": 2,\"a\": 1}",
+  "dumps_empty_dict": "{}",
+  "dumps_empty_list": "[]",
+  "dumps_empty_string": "\"\"",
+  "dumps_false": "false",
+  "dumps_float": "3.14159",
+  "dumps_indent_has_newlines": true,
+  "dumps_indent_has_spaces": true,
+  "dumps_int": "42",
+  "dumps_list": "[1,2,3]",
+  "dumps_mixed_list": "[1,\"two\",true,null]",
+  "dumps_negative_int": "-17",
+  "dumps_nested_dict": "{\"outer\": {\"inner\": \"value\"}}",
+  "dumps_nested_list": "[[1,2],[3,4]]",
+  "dumps_newline": "\"line1\\nline2\"",
+  "dumps_none": "null",
+  "dumps_quote": "\"say \\\"hello\\\"\"",
+  "dumps_sort_keys_valid": false,
+  "dumps_string": "\"hello\"",
+  "dumps_tab": "\"col1\\tcol2\"",
+  "dumps_true": "true",
+  "dumps_tuple": "[1,2,3]",
+  "loads_backslash": "path\\to\\file",
+  "loads_dict": {
+    "a": 1,
+    "b": 2
+  },
+  "loads_empty_dict": {},
+  "loads_empty_list": [],
+  "loads_empty_string": "",
+  "loads_false": false,
+  "loads_float": 3.14159,
+  "loads_int": 42,
+  "loads_list": [
+    1,
+    2,
+    3
+  ],
+  "loads_mixed_list": [
+    1,
+    "two",
+    true,
+    null
+  ],
+  "loads_negative_int": -17,
+  "loads_nested_dict": {
+    "outer": {
+      "inner": "value"
+    }
+  },
+  "loads_nested_list": [
+    [
+      1,
+      2
+    ],
+    [
+      3,
+      4
+    ]
+  ],
+  "loads_newline": "line1\nline2",
+  "loads_null": null,
+  "loads_quote": "say \"hello\"",
+  "loads_string": "hello",
+  "loads_tab": "col1\tcol2",
+  "loads_true": true,
+  "loads_unicode": "Hi",
+  "loads_with_newlines": {
+    "x": 1
+  },
+  "loads_with_spaces": {
+    "x": 1
+  },
+  "roundtrip_complex": false,
+  "roundtrip_dict": false,
+  "roundtrip_list": true,
+  "type_float_preserved": true,
+  "type_int_preserved": true,
+  "type_list_is_list": true
+}

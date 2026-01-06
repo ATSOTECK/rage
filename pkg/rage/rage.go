@@ -38,6 +38,7 @@ const (
 	ModuleCollections
 	ModuleAsyncio
 	ModuleIO // File I/O - intentionally excluded from AllModules for security
+	ModuleJSON
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -51,6 +52,7 @@ var AllModules = []Module{
 	ModuleCollections,
 	ModuleAsyncio,
 	ModuleIO,
+	ModuleJSON,
 }
 
 // StateOption is a functional option for configuring State creation.
@@ -165,6 +167,8 @@ func initModule(m Module) {
 		stdlib.InitAsyncioModule()
 	case ModuleIO:
 		stdlib.InitIOModule()
+	case ModuleJSON:
+		stdlib.InitJSONModule()
 	}
 }
 
