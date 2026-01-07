@@ -252,11 +252,16 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int) {
 		for _, r := range failingTests {
 			status := color(colorRed+colorBold, "✗ FAIL")
 			duration := color(colorDim, fmt.Sprintf("%.2fs", r.Duration.Seconds()))
-			fmt.Printf("\n%s %s %s (%d passed, %d failed)\n", status, r.Script, duration, r.Passed, r.Failed)
 
+			// Show different info depending on whether script crashed or tests failed
 			if r.Error != "" {
+				// Script crashed - don't show test counts
+				fmt.Printf("\n%s %s %s %s\n", status, r.Script, duration, color(colorRed, "(script error)"))
 				fmt.Println()
-				fmt.Println(color(colorRed, "  Error: ")+formatErrorMessage(r.Error))
+				fmt.Println(color(colorRed, "  Error: ") + formatErrorMessage(r.Error))
+			} else {
+				// Tests ran but some failed
+				fmt.Printf("\n%s %s %s (%d passed, %d failed)\n", status, r.Script, duration, r.Passed, r.Failed)
 			}
 
 			if r.Failures != "" {

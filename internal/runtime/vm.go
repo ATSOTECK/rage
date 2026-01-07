@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Value represents a Python value
@@ -571,8 +572,97 @@ func (e *PyException) Type() string {
 	}
 	return e.TypeName
 }
-func (e *PyException) String() string { return e.Message }
-func (e *PyException) Error() string  { return e.Message }
+
+func (e *PyException) String() string {
+	return e.formatError()
+}
+
+func (e *PyException) Error() string {
+	return e.formatError()
+}
+
+// formatError creates a properly formatted error message for the exception
+func (e *PyException) formatError() string {
+	typeName := e.Type()
+	var msg string
+
+	// If we have args, format with them
+	if e.Args != nil && len(e.Args.Items) > 0 {
+		if len(e.Args.Items) == 1 {
+			if s, ok := e.Args.Items[0].(*PyString); ok {
+				msg = fmt.Sprintf("%s: %s", typeName, s.Value)
+			} else {
+				msg = fmt.Sprintf("%s: %v", typeName, e.Args.Items[0])
+			}
+		} else {
+			// Multiple args
+			parts := make([]string, len(e.Args.Items))
+			for i, item := range e.Args.Items {
+				if s, ok := item.(*PyString); ok {
+					parts[i] = s.Value
+				} else {
+					parts[i] = fmt.Sprintf("%v", item)
+				}
+			}
+			msg = fmt.Sprintf("%s: (%s)", typeName, strings.Join(parts, ", "))
+		}
+	} else if e.Message != "" && e.Message != typeName {
+		// If we have a message that's different from just the type name
+		// Avoid duplicating the type name if message already contains it
+		if strings.HasPrefix(e.Message, typeName+":") {
+			msg = e.Message
+		} else {
+			msg = fmt.Sprintf("%s: %s", typeName, e.Message)
+		}
+	} else {
+		msg = typeName
+	}
+
+	// Add location info from traceback if available
+	if len(e.Traceback) > 0 {
+		// Try to find the most relevant frame:
+		// - Skip frames in test_framework.py (they're not useful for debugging)
+		// - Prefer frames with actual filenames over <string>
+		var bestFrame *TracebackEntry
+		for i := range e.Traceback {
+			tb := &e.Traceback[i]
+			if tb.Line <= 0 {
+				continue
+			}
+			// Skip test framework internal frames
+			if strings.HasSuffix(tb.Filename, "test_framework.py") {
+				continue
+			}
+			bestFrame = tb
+			break
+		}
+
+		// If no good frame found, use the first one with a line number
+		if bestFrame == nil {
+			for i := range e.Traceback {
+				if e.Traceback[i].Line > 0 {
+					bestFrame = &e.Traceback[i]
+					break
+				}
+			}
+		}
+
+		if bestFrame != nil {
+			location := fmt.Sprintf(" (line %d", bestFrame.Line)
+			if bestFrame.Filename != "" && bestFrame.Filename != "<string>" {
+				location = fmt.Sprintf(" (%s:%d", bestFrame.Filename, bestFrame.Line)
+			}
+			if bestFrame.Function != "" && bestFrame.Function != "<module>" {
+				location += fmt.Sprintf(" in %s)", bestFrame.Function)
+			} else {
+				location += ")"
+			}
+			msg += location
+		}
+	}
+
+	return msg
+}
 
 // TracebackEntry represents a single frame in a traceback
 type TracebackEntry struct {
@@ -709,7 +799,7 @@ func (vm *VM) initBuiltins() {
 			}
 			switch v := args[0].(type) {
 			case *PyString:
-				return MakeInt(int64(len(v.Value))), nil
+				return MakeInt(int64(utf8.RuneCountInString(v.Value))), nil
 			case *PyList:
 				return MakeInt(int64(len(v.Items))), nil
 			case *PyTuple:
@@ -744,6 +834,27 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("range expected 1 to 3 arguments, got %d", len(args))
 			}
 			return &PyRange{Start: start, Stop: stop, Step: step}, nil
+		},
+	}
+
+	vm.builtins["slice"] = &PyBuiltinFunc{
+		Name: "slice",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			var start, stop, step Value = None, None, None
+			switch len(args) {
+			case 1:
+				stop = args[0]
+			case 2:
+				start = args[0]
+				stop = args[1]
+			case 3:
+				start = args[0]
+				stop = args[1]
+				step = args[2]
+			default:
+				return nil, fmt.Errorf("slice expected 1 to 3 arguments, got %d", len(args))
+			}
+			return &PySlice{Start: start, Stop: stop, Step: step}, nil
 		},
 	}
 
@@ -2021,6 +2132,28 @@ type PyRange struct {
 func (r *PyRange) Type() string   { return "range" }
 func (r *PyRange) String() string { return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step) }
 
+// PySlice represents a slice object for slicing sequences
+type PySlice struct {
+	Start Value // Can be nil (None) or int
+	Stop  Value // Can be nil (None) or int
+	Step  Value // Can be nil (None) or int
+}
+
+func (s *PySlice) Type() string { return "slice" }
+func (s *PySlice) String() string {
+	start, stop, step := "None", "None", "None"
+	if s.Start != nil && s.Start != None {
+		start = fmt.Sprintf("%v", s.Start.(*PyInt).Value)
+	}
+	if s.Stop != nil && s.Stop != None {
+		stop = fmt.Sprintf("%v", s.Stop.(*PyInt).Value)
+	}
+	if s.Step != nil && s.Step != None {
+		step = fmt.Sprintf("%v", s.Step.(*PyInt).Value)
+	}
+	return fmt.Sprintf("slice(%s, %s, %s)", start, stop, step)
+}
+
 // PyIterator wraps an iterator
 type PyIterator struct {
 	Items []Value
@@ -2891,7 +3024,7 @@ func (vm *VM) run() (Value, error) {
 			var length int64
 			switch v := obj.(type) {
 			case *PyString:
-				length = int64(len(v.Value))
+				length = int64(utf8.RuneCountInString(v.Value))
 			case *PyList:
 				length = int64(len(v.Items))
 			case *PyTuple:
@@ -3799,7 +3932,7 @@ func (vm *VM) run() (Value, error) {
 			case *PyTuple:
 				length = int64(len(s.Items))
 			case *PyString:
-				length = int64(len(s.Value))
+				length = int64(utf8.RuneCountInString(s.Value))
 			case *PyDict:
 				length = int64(len(s.Items))
 			default:
@@ -4402,8 +4535,9 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 	case *PyTuple:
 		return val.Items, nil
 	case *PyString:
-		items := make([]Value, len(val.Value))
-		for i, ch := range val.Value {
+		runes := []rune(val.Value)
+		items := make([]Value, len(runes))
+		for i, ch := range runes {
 			items[i] = &PyString{Value: string(ch)}
 		}
 		return items, nil
@@ -4492,9 +4626,87 @@ func (vm *VM) str(v Value) string {
 		return fmt.Sprintf("<userdata %T>", val.Value)
 	case *PyModule:
 		return fmt.Sprintf("<module '%s'>", val.Name)
+	case *PyInstance:
+		// Check if this is an exception instance
+		if vm.isExceptionClass(val.Class) {
+			return vm.formatExceptionInstance(val)
+		}
+		// Check for __str__ method in class dict
+		if strMethod, ok := val.Class.Dict["__str__"]; ok {
+			if fn, ok := strMethod.(*PyFunction); ok {
+				result, err := vm.callFunction(fn, []Value{val}, nil)
+				if err == nil {
+					if s, ok := result.(*PyString); ok {
+						return s.Value
+					}
+				}
+			}
+		}
+		// Check for __repr__ method in class dict
+		if reprMethod, ok := val.Class.Dict["__repr__"]; ok {
+			if fn, ok := reprMethod.(*PyFunction); ok {
+				result, err := vm.callFunction(fn, []Value{val}, nil)
+				if err == nil {
+					if s, ok := result.(*PyString); ok {
+						return s.Value
+					}
+				}
+			}
+		}
+		return fmt.Sprintf("<%s object>", val.Class.Name)
+	case *PyClass:
+		return fmt.Sprintf("<class '%s'>", val.Name)
+	case *PyException:
+		return vm.formatException(val)
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// formatExceptionInstance formats an exception instance for display
+func (vm *VM) formatExceptionInstance(inst *PyInstance) string {
+	className := inst.Class.Name
+
+	// Get args from the instance
+	if args, ok := inst.Dict["args"]; ok {
+		if t, ok := args.(*PyTuple); ok && len(t.Items) > 0 {
+			if len(t.Items) == 1 {
+				// Single argument - just show the message
+				return fmt.Sprintf("%s: %s", className, vm.str(t.Items[0]))
+			}
+			// Multiple arguments - show as tuple
+			parts := make([]string, len(t.Items))
+			for i, item := range t.Items {
+				parts[i] = vm.str(item)
+			}
+			return fmt.Sprintf("%s: (%s)", className, strings.Join(parts, ", "))
+		}
+	}
+
+	// No args, just show the class name
+	return className
+}
+
+// formatException formats a PyException for display
+func (vm *VM) formatException(exc *PyException) string {
+	typeName := exc.Type()
+
+	if exc.Args != nil && len(exc.Args.Items) > 0 {
+		if len(exc.Args.Items) == 1 {
+			return fmt.Sprintf("%s: %s", typeName, vm.str(exc.Args.Items[0]))
+		}
+		parts := make([]string, len(exc.Args.Items))
+		for i, item := range exc.Args.Items {
+			parts[i] = vm.str(item)
+		}
+		return fmt.Sprintf("%s: (%s)", typeName, strings.Join(parts, ", "))
+	}
+
+	if exc.Message != "" && exc.Message != typeName {
+		return fmt.Sprintf("%s: %s", typeName, exc.Message)
+	}
+
+	return typeName
 }
 
 func (vm *VM) typeName(v Value) string {
@@ -5551,50 +5763,28 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 	case *PyString:
 		if name == "upper" {
 			return &PyBuiltinFunc{Name: "str.upper", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				result := ""
-				for _, ch := range o.Value {
-					if ch >= 'a' && ch <= 'z' {
-						result += string(ch - 32)
-					} else {
-						result += string(ch)
-					}
-				}
-				return &PyString{Value: result}, nil
+				return &PyString{Value: strings.ToUpper(o.Value)}, nil
 			}}, nil
 		}
 		if name == "lower" {
 			return &PyBuiltinFunc{Name: "str.lower", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				result := ""
-				for _, ch := range o.Value {
-					if ch >= 'A' && ch <= 'Z' {
-						result += string(ch + 32)
-					} else {
-						result += string(ch)
-					}
-				}
-				return &PyString{Value: result}, nil
+				return &PyString{Value: strings.ToLower(o.Value)}, nil
 			}}, nil
 		}
 		if name == "split" {
 			return &PyBuiltinFunc{Name: "str.split", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				sep := " "
-				if len(args) > 0 {
-					sep = vm.str(args[0])
+				var strParts []string
+				if len(args) == 0 {
+					// No separator: split on whitespace and remove empty strings
+					strParts = strings.Fields(o.Value)
+				} else {
+					sep := vm.str(args[0])
+					strParts = strings.Split(o.Value, sep)
 				}
-				var parts []Value
-				current := ""
-				// Manually manage loop index to avoid confusion with separator length
-				for i := 0; i < len(o.Value); {
-					if i+len(sep) <= len(o.Value) && o.Value[i:i+len(sep)] == sep {
-						parts = append(parts, &PyString{Value: current})
-						current = ""
-						i += len(sep)
-					} else {
-						current += string(o.Value[i])
-						i++
-					}
+				parts := make([]Value, len(strParts))
+				for i, s := range strParts {
+					parts[i] = &PyString{Value: s}
 				}
-				parts = append(parts, &PyString{Value: current})
 				return &PyList{Items: parts}, nil
 			}}, nil
 		}
@@ -5689,6 +5879,11 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 // Item access
 
 func (vm *VM) getItem(obj Value, index Value) (Value, error) {
+	// Handle slice objects
+	if slice, ok := index.(*PySlice); ok {
+		return vm.sliceSequence(obj, slice)
+	}
+
 	switch o := obj.(type) {
 	case *PyList:
 		idx := int(vm.toInt(index))
@@ -5760,6 +5955,179 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 	}
+	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
+}
+
+// sliceSequence handles slicing for lists, tuples, and strings
+func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
+	// Helper to get int from slice component (None means use default)
+	getInt := func(v Value, def int) int {
+		if v == nil || v == None {
+			return def
+		}
+		return int(vm.toInt(v))
+	}
+
+	switch o := obj.(type) {
+	case *PyList:
+		length := len(o.Items)
+		start := getInt(slice.Start, 0)
+		stop := getInt(slice.Stop, length)
+		step := getInt(slice.Step, 1)
+
+		if step == 0 {
+			return nil, fmt.Errorf("slice step cannot be zero")
+		}
+
+		// Handle negative indices
+		if start < 0 {
+			start = length + start
+		}
+		if stop < 0 {
+			stop = length + stop
+		}
+
+		// Clamp to bounds
+		if start < 0 {
+			start = 0
+		}
+		if stop < 0 {
+			stop = 0
+		}
+		if start > length {
+			start = length
+		}
+		if stop > length {
+			stop = length
+		}
+
+		var result []Value
+		if step > 0 {
+			for i := start; i < stop; i += step {
+				result = append(result, o.Items[i])
+			}
+		} else {
+			// Handle negative step (start defaults to end, stop defaults to beginning)
+			if slice.Start == nil || slice.Start == None {
+				start = length - 1
+			}
+			if slice.Stop == nil || slice.Stop == None {
+				stop = -1
+			}
+			for i := start; i > stop; i += step {
+				if i >= 0 && i < length {
+					result = append(result, o.Items[i])
+				}
+			}
+		}
+		return &PyList{Items: result}, nil
+
+	case *PyTuple:
+		length := len(o.Items)
+		start := getInt(slice.Start, 0)
+		stop := getInt(slice.Stop, length)
+		step := getInt(slice.Step, 1)
+
+		if step == 0 {
+			return nil, fmt.Errorf("slice step cannot be zero")
+		}
+
+		// Handle negative indices
+		if start < 0 {
+			start = length + start
+		}
+		if stop < 0 {
+			stop = length + stop
+		}
+
+		// Clamp to bounds
+		if start < 0 {
+			start = 0
+		}
+		if stop < 0 {
+			stop = 0
+		}
+		if start > length {
+			start = length
+		}
+		if stop > length {
+			stop = length
+		}
+
+		var result []Value
+		if step > 0 {
+			for i := start; i < stop; i += step {
+				result = append(result, o.Items[i])
+			}
+		} else {
+			if slice.Start == nil || slice.Start == None {
+				start = length - 1
+			}
+			if slice.Stop == nil || slice.Stop == None {
+				stop = -1
+			}
+			for i := start; i > stop; i += step {
+				if i >= 0 && i < length {
+					result = append(result, o.Items[i])
+				}
+			}
+		}
+		return &PyTuple{Items: result}, nil
+
+	case *PyString:
+		runes := []rune(o.Value)
+		length := len(runes)
+		start := getInt(slice.Start, 0)
+		stop := getInt(slice.Stop, length)
+		step := getInt(slice.Step, 1)
+
+		if step == 0 {
+			return nil, fmt.Errorf("slice step cannot be zero")
+		}
+
+		// Handle negative indices
+		if start < 0 {
+			start = length + start
+		}
+		if stop < 0 {
+			stop = length + stop
+		}
+
+		// Clamp to bounds
+		if start < 0 {
+			start = 0
+		}
+		if stop < 0 {
+			stop = 0
+		}
+		if start > length {
+			start = length
+		}
+		if stop > length {
+			stop = length
+		}
+
+		var result []rune
+		if step > 0 {
+			for i := start; i < stop; i += step {
+				result = append(result, runes[i])
+			}
+		} else {
+			if slice.Start == nil || slice.Start == None {
+				start = length - 1
+			}
+			if slice.Stop == nil || slice.Stop == None {
+				stop = -1
+			}
+			for i := start; i > stop; i += step {
+				if i >= 0 && i < length {
+					result = append(result, runes[i])
+				}
+			}
+		}
+		return &PyString{Value: string(result)}, nil
+	}
+
 	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 }
 
@@ -5915,6 +6283,15 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 			Class: fn,
 			Dict:  make(map[string]Value),
 		}
+
+		// Special handling for exception classes - set args attribute
+		if vm.isExceptionClass(fn) {
+			// Convert args to PyTuple for the args attribute
+			tupleItems := make([]Value, len(args))
+			copy(tupleItems, args)
+			instance.Dict["args"] = &PyTuple{Items: tupleItems}
+		}
+
 		// Look for __init__ in class MRO
 		for _, cls := range fn.Mro {
 			if init, ok := cls.Dict["__init__"]; ok {

@@ -144,7 +144,7 @@ def test_utf8_mixed():
     message = "Price: €100 (¥15000)"
     expect("€" in message).to_be(True)
     expect("¥" in message).to_be(True)
-    expect(len(message)).to_be(21)
+    expect(len(message)).to_be(20)
 
 test("str_basic", test_str_basic)
 test("str_concat", test_str_concat)

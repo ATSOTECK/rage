@@ -226,12 +226,14 @@ func (st *SymbolTable) MarkAsCell(name string) {
 
 // Compiler compiles AST to bytecode
 type Compiler struct {
-	code        *runtime.CodeObject
-	symbolTable *SymbolTable
-	errors      []CompileError
-	loopStack   []loopInfo
-	filename    string
-	optimizer   *Optimizer
+	code           *runtime.CodeObject
+	symbolTable    *SymbolTable
+	errors         []CompileError
+	loopStack      []loopInfo
+	filename       string
+	optimizer      *Optimizer
+	currentLine    int // Current source line being compiled
+	lineStartOffset int // Bytecode offset where current line started
 }
 
 type loopInfo struct {
@@ -267,6 +269,9 @@ func (c *Compiler) Compile(module *model.Module) (*runtime.CodeObject, []Compile
 	// Add implicit return None at end of module
 	c.emit(runtime.OpLoadNone) // Use optimized opcode
 	c.emit(runtime.OpReturn)
+
+	// Finalize line number table
+	c.finishLineTable()
 
 	// Build names and varnames lists
 	c.finalizeCode()
@@ -342,9 +347,51 @@ func (c *Compiler) emitLoadConst(value any) {
 	c.emitArg(runtime.OpLoadConst, idx)
 }
 
+// setLine updates the current line number being compiled.
+// When the line changes, it records the previous line's bytecode range.
+func (c *Compiler) setLine(line int) {
+	if line <= 0 {
+		return
+	}
+	if line != c.currentLine {
+		// Finish the previous line's entry if there was one
+		if c.currentLine > 0 {
+			currentOffset := len(c.code.Code)
+			if currentOffset > c.lineStartOffset {
+				c.code.LineNoTab = append(c.code.LineNoTab, runtime.LineEntry{
+					StartOffset: c.lineStartOffset,
+					EndOffset:   currentOffset,
+					Line:        c.currentLine,
+				})
+			}
+		}
+		c.currentLine = line
+		c.lineStartOffset = len(c.code.Code)
+	}
+}
+
+// finishLineTable finalizes the line number table with the last entry
+func (c *Compiler) finishLineTable() {
+	if c.currentLine > 0 {
+		currentOffset := len(c.code.Code)
+		if currentOffset > c.lineStartOffset {
+			c.code.LineNoTab = append(c.code.LineNoTab, runtime.LineEntry{
+				StartOffset: c.lineStartOffset,
+				EndOffset:   currentOffset,
+				Line:        c.currentLine,
+			})
+		}
+	}
+}
+
 // Statement compilation
 
 func (c *Compiler) compileStmt(stmt model.Stmt) {
+	// Track line number for this statement
+	if stmt != nil {
+		c.setLine(stmt.Pos().Line)
+	}
+
 	switch s := stmt.(type) {
 	case *model.ExprStmt:
 		c.compileExpr(s.Value)
@@ -600,6 +647,9 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		c.emit(runtime.OpBinarySubscr)
 
 	case *model.Slice:
+		// Load slice function first, then arguments
+		nameIdx := c.addName("slice")
+		c.emitArg(runtime.OpLoadGlobal, nameIdx)
 		if e.Lower != nil {
 			c.compileExpr(e.Lower)
 		} else {
@@ -615,12 +665,6 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		} else {
 			c.emitLoadConst(nil)
 		}
-		// Build slice object
-		nameIdx := c.addName("slice")
-		c.emitArg(runtime.OpLoadGlobal, nameIdx)
-		c.emit(runtime.OpRot2) // Swap slice function with first arg
-		// Need to rotate all 4 items to get: slice, lower, upper, step
-		// This is simplified; actual implementation needs BUILD_SLICE opcode
 		c.emitArg(runtime.OpCall, 3)
 
 	case *model.List:
@@ -1511,6 +1555,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	// Add implicit return None
 	funcCompiler.emitLoadConst(nil)
 	funcCompiler.emit(runtime.OpReturn)
+	funcCompiler.finishLineTable()
 	funcCompiler.finalizeCode()
 
 	// Apply peephole optimizations to function body
@@ -1596,6 +1641,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 	}
 	classCompiler.emit(runtime.OpLoadLocals)
 	classCompiler.emit(runtime.OpReturn)
+	classCompiler.finishLineTable()
 	classCompiler.finalizeCode()
 
 	// Apply peephole optimizations to class body
@@ -1660,8 +1706,10 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 	}
 
 	// Compile body expression and return it
+	lambdaCompiler.setLine(e.Body.Pos().Line)
 	lambdaCompiler.compileExpr(e.Body)
 	lambdaCompiler.emit(runtime.OpReturn)
+	lambdaCompiler.finishLineTable()
 	lambdaCompiler.finalizeCode()
 
 	// Apply peephole optimizations to lambda body
@@ -1724,6 +1772,7 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)
+	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
 
 	// Apply peephole optimizations to comprehension body
@@ -1763,6 +1812,7 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)
+	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
 
 	// Apply peephole optimizations to comprehension body
@@ -1802,6 +1852,7 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 	}, 0)
 
 	compCompiler.emit(runtime.OpReturn)
+	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
 
 	// Apply peephole optimizations to comprehension body
@@ -1840,6 +1891,7 @@ func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 
 	compCompiler.emitLoadConst(nil)
 	compCompiler.emit(runtime.OpReturn)
+	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
 
 	// Apply peephole optimizations to comprehension body
