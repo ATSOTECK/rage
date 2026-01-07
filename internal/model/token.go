@@ -20,6 +20,7 @@ const (
 	TK_ImaginaryLit
 	TK_StringLit
 	TK_BytesLit
+	TK_FStringLit
 	TK_FStringStart
 	TK_FStringMiddle
 	TK_FStringEnd
@@ -134,6 +135,7 @@ var tokenNames = map[TokenKind]string{
 	TK_ImaginaryLit:  "IMAGINARY",
 	TK_StringLit:     "STRING",
 	TK_BytesLit:      "BYTES",
+	TK_FStringLit:    "FSTRING",
 	TK_FStringStart:  "FSTRING_START",
 	TK_FStringMiddle: "FSTRING_MIDDLE",
 	TK_FStringEnd:    "FSTRING_END",

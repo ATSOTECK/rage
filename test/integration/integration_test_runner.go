@@ -9,7 +9,35 @@ import (
 	"time"
 
 	"github.com/ATSOTECK/rage/pkg/rage"
+	"golang.org/x/term"
 )
+
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorBold   = "\033[1m"
+	colorDim    = "\033[2m"
+)
+
+// colorEnabled tracks whether to use colored output
+var colorEnabled bool
+
+func init() {
+	// Enable colors if stdout is a terminal
+	colorEnabled = term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// color wraps text in ANSI color codes if colors are enabled
+func color(c, text string) string {
+	if !colorEnabled {
+		return text
+	}
+	return c + text + colorReset
+}
 
 // ScriptResult holds the results of running a single test script
 type ScriptResult struct {
@@ -105,8 +133,15 @@ func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (pas
 	state := rage.NewState()
 	defer state.Close()
 
+	// Inject color setting into the test framework source
+	colorValue := "False"
+	if colorEnabled {
+		colorValue = "True"
+	}
+	modifiedFramework := strings.Replace(string(frameworkSource), "__test_use_color__ = False", "__test_use_color__ = "+colorValue, 1)
+
 	// Register the test framework as an importable module
-	if err := state.RegisterPythonModule("test_framework", string(frameworkSource)); err != nil {
+	if err := state.RegisterPythonModule("test_framework", modifiedFramework); err != nil {
 		return 0, 0, "", fmt.Errorf("failed to register test framework module: %w", err)
 	}
 
@@ -183,36 +218,122 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 }
 
 func printResults(results []ScriptResult, totalPassed, totalFailed int) {
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Println("TEST RESULTS")
-	fmt.Println(strings.Repeat("=", 70))
+	fmt.Println("\n" + color(colorDim, strings.Repeat("═", 70)))
+	fmt.Println(color(colorBold, "TEST RESULTS"))
+	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
+
+	// Separate passing and failing tests for better organization
+	var failingTests []ScriptResult
+	var passingTests []ScriptResult
 
 	for _, r := range results {
-		// Script header
-		status := "PASS"
 		if r.Error != "" || r.Failed > 0 {
-			status = "FAIL"
+			failingTests = append(failingTests, r)
+		} else {
+			passingTests = append(passingTests, r)
 		}
+	}
 
-		fmt.Printf("\n[%s] %s (%d passed, %d failed) %.2fs\n", status, r.Script, r.Passed, r.Failed, r.Duration.Seconds())
-
-		if r.Error != "" {
-			fmt.Printf("  Script Error: %s\n", r.Error)
+	// Print passing tests first (collapsed)
+	if len(passingTests) > 0 {
+		fmt.Println()
+		for _, r := range passingTests {
+			status := color(colorGreen+colorBold, "✓ PASS")
+			duration := color(colorDim, fmt.Sprintf("%.2fs", r.Duration.Seconds()))
+			fmt.Printf("%s %s %s (%d tests)\n", status, r.Script, duration, r.Passed)
 		}
+	}
 
-		if r.Failures != "" {
-			fmt.Printf("  Failures:\n")
-			for _, line := range strings.Split(strings.TrimSpace(r.Failures), "\n") {
-				if line != "" {
-					fmt.Printf("    %s\n", line)
+	// Print failing tests with details
+	if len(failingTests) > 0 {
+		fmt.Println()
+		fmt.Println(color(colorRed+colorBold, "─── FAILURES ───"))
+
+		for _, r := range failingTests {
+			status := color(colorRed+colorBold, "✗ FAIL")
+			duration := color(colorDim, fmt.Sprintf("%.2fs", r.Duration.Seconds()))
+			fmt.Printf("\n%s %s %s (%d passed, %d failed)\n", status, r.Script, duration, r.Passed, r.Failed)
+
+			if r.Error != "" {
+				fmt.Println()
+				fmt.Println(color(colorRed, "  Error: ")+formatErrorMessage(r.Error))
+			}
+
+			if r.Failures != "" {
+				fmt.Println()
+				fmt.Println(color(colorYellow, "  Failed assertions:"))
+				for _, line := range strings.Split(strings.TrimSpace(r.Failures), "\n") {
+					if line != "" {
+						fmt.Printf("    %s %s\n", color(colorRed, "•"), line)
+					}
 				}
 			}
 		}
 	}
 
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Printf("TOTAL: %d passed, %d failed\n", totalPassed, totalFailed)
-	fmt.Println(strings.Repeat("=", 70))
+	// Summary
+	fmt.Println("\n" + color(colorDim, strings.Repeat("═", 70)))
+
+	var summaryColor string
+	var summaryIcon string
+	if totalFailed > 0 {
+		summaryColor = colorRed + colorBold
+		summaryIcon = "✗"
+	} else {
+		summaryColor = colorGreen + colorBold
+		summaryIcon = "✓"
+	}
+
+	passed := color(colorGreen, fmt.Sprintf("%d passed", totalPassed))
+	failed := color(colorRed, fmt.Sprintf("%d failed", totalFailed))
+	scripts := fmt.Sprintf("%d scripts", len(results))
+
+	fmt.Printf("%s %s  %s, %s  %s\n",
+		color(summaryColor, summaryIcon),
+		color(summaryColor, "TOTAL:"),
+		passed,
+		failed,
+		color(colorDim, "("+scripts+")"))
+	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
+}
+
+// formatErrorMessage improves error message readability
+func formatErrorMessage(err string) string {
+	// Extract the core error from wrapped errors
+	if strings.Contains(err, "execution error:") {
+		parts := strings.SplitN(err, "execution error:", 2)
+		if len(parts) == 2 {
+			coreError := strings.TrimSpace(parts[1])
+			return formatPythonError(coreError)
+		}
+	}
+	return err
+}
+
+// formatPythonError formats Python-style errors for better readability
+func formatPythonError(err string) string {
+	// Handle common error patterns
+	if strings.Contains(err, "line ") {
+		// Try to extract line number and highlight it
+		return err
+	}
+
+	// Handle name errors
+	if strings.Contains(err, "NameError") {
+		return color(colorRed, "NameError: ") + strings.TrimPrefix(err, "NameError: ")
+	}
+
+	// Handle type errors
+	if strings.Contains(err, "TypeError") {
+		return color(colorRed, "TypeError: ") + strings.TrimPrefix(err, "TypeError: ")
+	}
+
+	// Handle syntax errors
+	if strings.Contains(err, "SyntaxError") {
+		return color(colorRed, "SyntaxError: ") + strings.TrimPrefix(err, "SyntaxError: ")
+	}
+
+	return err
 }
 
 func main() {
@@ -224,17 +345,21 @@ func main() {
 
 	// Parse command line
 	for _, arg := range os.Args[1:] {
-		if arg == "--help" || arg == "-h" {
+		switch arg {
+		case "--help", "-h":
 			fmt.Println("Usage: integration_test_runner [options]")
 			fmt.Println("\nOptions:")
 			fmt.Println("  -h, --help      Show this help message")
+			fmt.Println("  --no-color      Disable colored output")
 			fmt.Println("\nRun from test/integration directory or project root.")
 			return
+		case "--no-color":
+			colorEnabled = false
 		}
 	}
 
 	// Run tests
-	fmt.Println("Running Python integration tests...")
+	fmt.Printf("%s Running Python integration tests...\n", color(colorBlue+colorBold, "▶"))
 	results, totalPassed, totalFailed := runAllTests(scriptsDir)
 	printResults(results, totalPassed, totalFailed)
 

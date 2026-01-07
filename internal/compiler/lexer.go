@@ -277,7 +277,7 @@ func (l *Lexer) scanString(quote rune, isRaw, isBytes bool) model.Token {
 				break
 			}
 			escaped := l.advance()
-			builder.WriteByte(l.processEscape(escaped))
+			builder.WriteString(l.processEscapeSequence(escaped))
 		} else {
 			builder.WriteByte(ch)
 		}
@@ -392,7 +392,7 @@ func (l *Lexer) scanFString(quote rune, isRaw bool) model.Token {
 				break
 			}
 			escaped := l.advance()
-			builder.WriteByte(l.processEscape(escaped))
+			builder.WriteString(l.processEscapeSequence(escaped))
 		} else {
 			builder.WriteByte(ch)
 		}
@@ -403,37 +403,97 @@ func (l *Lexer) scanFString(quote rune, isRaw bool) model.Token {
 		l.fStringStack = l.fStringStack[:len(l.fStringStack)-1]
 	}
 
-	return l.makeTokenWithLiteral(model.TK_StringLit, builder.String())
+	return l.makeTokenWithLiteral(model.TK_FStringLit, builder.String())
 }
 
-func (l *Lexer) processEscape(ch byte) byte {
+// processEscapeSequence handles escape sequences and returns the resulting string.
+// It may consume additional characters from the lexer for multi-char escapes.
+func (l *Lexer) processEscapeSequence(ch byte) string {
 	switch ch {
 	case 'n':
-		return '\n'
+		return "\n"
 	case 't':
-		return '\t'
+		return "\t"
 	case 'r':
-		return '\r'
+		return "\r"
 	case '\\':
-		return '\\'
+		return "\\"
 	case '\'':
-		return '\''
+		return "'"
 	case '"':
-		return '"'
-	case '0':
-		return '\x00'
+		return "\""
 	case 'a':
-		return '\a'
+		return "\a"
 	case 'b':
-		return '\b'
+		return "\b"
 	case 'f':
-		return '\f'
+		return "\f"
 	case 'v':
-		return '\v'
+		return "\v"
+	case '0', '1', '2', '3', '4', '5', '6', '7':
+		// Octal escape: \0, \00, \000, \1, \12, \123, etc.
+		octal := string(ch)
+		// Consume up to 2 more octal digits
+		for i := 0; i < 2 && !l.isAtEnd(); i++ {
+			next := l.peek()
+			if next >= '0' && next <= '7' {
+				octal += string(l.advance())
+			} else {
+				break
+			}
+		}
+		// Parse octal value
+		var val int
+		for _, c := range octal {
+			val = val*8 + int(c-'0')
+		}
+		if val > 255 {
+			val = 255 // Clamp to byte range
+		}
+		return string(byte(val))
+	case 'x':
+		// Hex escape: \xNN
+		if l.isAtEnd() {
+			return "\\x"
+		}
+		hex := ""
+		for i := 0; i < 2 && !l.isAtEnd(); i++ {
+			next := l.peek()
+			if isHexDigit(next) {
+				hex += string(l.advance())
+			} else {
+				break
+			}
+		}
+		if len(hex) == 0 {
+			return "\\x"
+		}
+		val := 0
+		for _, c := range hex {
+			val *= 16
+			if c >= '0' && c <= '9' {
+				val += int(c - '0')
+			} else if c >= 'a' && c <= 'f' {
+				val += int(c-'a') + 10
+			} else if c >= 'A' && c <= 'F' {
+				val += int(c-'A') + 10
+			}
+		}
+		return string(byte(val))
 	default:
-		// For \x, \u, \U, \N we'd need more complex handling
-		return ch
+		// Unknown escape, return as-is (Python behavior)
+		return "\\" + string(ch)
 	}
+}
+
+// processEscape is kept for backward compatibility but delegates to processEscapeSequence
+func (l *Lexer) processEscape(ch byte) byte {
+	result := l.processEscapeSequence(ch)
+	if len(result) == 1 {
+		return result[0]
+	}
+	// For multi-byte results, return just the first byte (this shouldn't happen in normal use)
+	return result[0]
 }
 
 func (l *Lexer) scanNumber() model.Token {

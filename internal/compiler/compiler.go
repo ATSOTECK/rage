@@ -544,6 +544,9 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 	case *model.StringLit:
 		c.emitLoadConst(e.Value)
 
+	case *model.FStringLit:
+		c.compileFString(e)
+
 	case *model.BytesLit:
 		c.emitLoadConst([]byte(e.Value))
 
@@ -862,6 +865,37 @@ func (c *Compiler) compileCall(e *model.Call) {
 		c.emitArg(runtime.OpCallKw, len(e.Args)+len(e.Keywords))
 	} else {
 		c.emitArg(runtime.OpCall, len(e.Args))
+	}
+}
+
+func (c *Compiler) compileFString(e *model.FStringLit) {
+	if len(e.Parts) == 0 {
+		// Empty f-string
+		c.emitLoadConst("")
+		return
+	}
+
+	// Compile each part
+	for i, part := range e.Parts {
+		if part.IsExpr {
+			// Load str builtin
+			strIdx := c.addName("str")
+			c.emitArg(runtime.OpLoadGlobal, strIdx)
+
+			// Compile the expression
+			c.compileExpr(part.Expr)
+
+			// Call str(expr)
+			c.emitArg(runtime.OpCall, 1)
+		} else {
+			// Load literal string
+			c.emitLoadConst(part.Value)
+		}
+
+		// Concatenate with previous part
+		if i > 0 {
+			c.emit(runtime.OpBinaryAdd)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ATSOTECK/rage/internal/model"
 )
@@ -1812,6 +1813,8 @@ func (p *Parser) parsePrimaryExpr() model.Expr {
 		expr = p.parseImaginaryLit()
 	case model.TK_StringLit:
 		expr = p.parseStringLit()
+	case model.TK_FStringLit:
+		expr = p.parseFStringLit()
 	case model.TK_BytesLit:
 		expr = p.parseBytesLit()
 	case model.TK_True, model.TK_False:
@@ -1890,6 +1893,135 @@ func (p *Parser) parseStringLit() model.Expr {
 		StartPos: tok.Pos,
 		EndPos:   tok.EndPos,
 	}
+}
+
+func (p *Parser) parseFStringLit() model.Expr {
+	tok := p.advance()
+	content := tok.Literal
+
+	var parts []model.FStringPart
+	i := 0
+
+	for i < len(content) {
+		// Look for start of expression
+		braceIdx := -1
+		for j := i; j < len(content); j++ {
+			if content[j] == '{' {
+				if j+1 < len(content) && content[j+1] == '{' {
+					// Escaped brace, skip
+					j++
+					continue
+				}
+				braceIdx = j
+				break
+			}
+		}
+
+		if braceIdx == -1 {
+			// No more expressions, rest is literal
+			literal := p.unescapeFStringBraces(content[i:])
+			if literal != "" {
+				parts = append(parts, model.FStringPart{
+					IsExpr: false,
+					Value:  literal,
+				})
+			}
+			break
+		}
+
+		// Add literal part before the expression
+		if braceIdx > i {
+			literal := p.unescapeFStringBraces(content[i:braceIdx])
+			if literal != "" {
+				parts = append(parts, model.FStringPart{
+					IsExpr: false,
+					Value:  literal,
+				})
+			}
+		}
+
+		// Find matching closing brace
+		depth := 1
+		exprStart := braceIdx + 1
+		exprEnd := exprStart
+		for exprEnd < len(content) && depth > 0 {
+			ch := content[exprEnd]
+			if ch == '{' {
+				depth++
+			} else if ch == '}' {
+				depth--
+			}
+			if depth > 0 {
+				exprEnd++
+			}
+		}
+
+		if depth != 0 {
+			p.addError("unmatched '{' in f-string")
+			return &model.StringLit{Value: content, StartPos: tok.Pos, EndPos: tok.EndPos}
+		}
+
+		// Extract expression text and optional format spec
+		exprText := content[exprStart:exprEnd]
+		formatSpec := ""
+
+		// Check for format spec (: not inside nested braces/brackets/parens)
+		colonIdx := p.findFormatSpecColon(exprText)
+		if colonIdx != -1 {
+			formatSpec = exprText[colonIdx+1:]
+			exprText = exprText[:colonIdx]
+		}
+
+		// Parse the expression
+		exprText = strings.TrimSpace(exprText)
+		if exprText != "" {
+			// Create a new parser for the expression
+			exprParser := NewParser(exprText)
+			expr := exprParser.parseExpression()
+
+			if expr != nil {
+				parts = append(parts, model.FStringPart{
+					IsExpr:     true,
+					Expr:       expr,
+					FormatSpec: formatSpec,
+				})
+			}
+		}
+
+		i = exprEnd + 1 // Skip past the closing brace
+	}
+
+	return &model.FStringLit{
+		Parts:    parts,
+		StartPos: tok.Pos,
+		EndPos:   tok.EndPos,
+	}
+}
+
+// unescapeFStringBraces converts {{ to { and }} to } in f-string literals
+func (p *Parser) unescapeFStringBraces(s string) string {
+	s = strings.ReplaceAll(s, "{{", "{")
+	s = strings.ReplaceAll(s, "}}", "}")
+	return s
+}
+
+// findFormatSpecColon finds the colon that separates expression from format spec
+// It must not be inside nested brackets, parens, or braces
+func (p *Parser) findFormatSpecColon(s string) int {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ':':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (p *Parser) parseBytesLit() model.Expr {

@@ -87,6 +87,25 @@ func (s *StringLit) Pos() Position { return s.StartPos }
 func (s *StringLit) End() Position { return s.EndPos }
 func (s *StringLit) exprNode()     {}
 
+// FStringPart represents either a string literal or an expression in an f-string.
+type FStringPart struct {
+	IsExpr     bool   // true if this part is an expression, false if literal string
+	Value      string // the literal string value (if IsExpr is false)
+	Expr       Expr   // the expression (if IsExpr is true)
+	FormatSpec string // optional format spec after ':'
+}
+
+// FStringLit represents an f-string literal like f"hello {name}".
+type FStringLit struct {
+	Parts    []FStringPart
+	StartPos Position
+	EndPos   Position
+}
+
+func (f *FStringLit) Pos() Position { return f.StartPos }
+func (f *FStringLit) End() Position { return f.EndPos }
+func (f *FStringLit) exprNode()     {}
+
 // BytesLit represents a bytes literal.
 type BytesLit struct {
 	Value    string
