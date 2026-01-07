@@ -330,6 +330,13 @@ func (l *Lexer) scanFString(quote rune, isRaw bool) model.Token {
 		braceDepth: 0,
 	})
 
+	// Ensure fStringStack is popped on all exit paths
+	defer func() {
+		if len(l.fStringStack) > 0 {
+			l.fStringStack = l.fStringStack[:len(l.fStringStack)-1]
+		}
+	}()
+
 	// For now, we'll treat f-strings as regular strings
 	// A full implementation would need to tokenize the expressions inside {}
 	var builder strings.Builder
@@ -398,10 +405,7 @@ func (l *Lexer) scanFString(quote rune, isRaw bool) model.Token {
 		}
 	}
 
-	// Pop f-string state
-	if len(l.fStringStack) > 0 {
-		l.fStringStack = l.fStringStack[:len(l.fStringStack)-1]
-	}
+	// f-string state is popped by defer
 
 	return l.makeTokenWithLiteral(model.TK_FStringLit, builder.String())
 }
@@ -761,7 +765,9 @@ func (l *Lexer) scanOperator(ch byte) model.Token {
 		return l.makeToken(model.TK_LParen)
 
 	case ')':
-		l.bracketDepth--
+		if l.bracketDepth > 0 {
+			l.bracketDepth--
+		}
 		return l.makeToken(model.TK_RParen)
 
 	case '[':
@@ -769,7 +775,9 @@ func (l *Lexer) scanOperator(ch byte) model.Token {
 		return l.makeToken(model.TK_LBracket)
 
 	case ']':
-		l.bracketDepth--
+		if l.bracketDepth > 0 {
+			l.bracketDepth--
+		}
 		return l.makeToken(model.TK_RBracket)
 
 	case '{':
@@ -777,7 +785,9 @@ func (l *Lexer) scanOperator(ch byte) model.Token {
 		return l.makeToken(model.TK_LBrace)
 
 	case '}':
-		l.bracketDepth--
+		if l.bracketDepth > 0 {
+			l.bracketDepth--
+		}
 		return l.makeToken(model.TK_RBrace)
 
 	default:

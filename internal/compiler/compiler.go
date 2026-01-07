@@ -298,6 +298,22 @@ func (c *Compiler) emit(op runtime.Opcode) int {
 }
 
 func (c *Compiler) emitArg(op runtime.Opcode, arg int) int {
+	// Check if argument fits in 16 bits (signed or unsigned)
+	// Allow -32768 to 65535 range: negative values wrap to unsigned 16-bit
+	// (e.g., -1 becomes 65535/0xFFFF for special sentinel values)
+	if arg < -32768 || arg > 65535 {
+		// For very large arguments, extended arg support could be added here
+		// For now, report an error for overflow cases
+		c.errors = append(c.errors, CompileError{
+			Message: fmt.Sprintf("bytecode argument %d exceeds 16-bit limit", arg),
+		})
+		// Clamp to valid range to avoid corrupted bytecode
+		if arg < -32768 {
+			arg = -32768
+		} else {
+			arg = 65535
+		}
+	}
 	offset := len(c.code.Code)
 	c.code.Code = append(c.code.Code, byte(op), byte(arg), byte(arg>>8))
 	return offset

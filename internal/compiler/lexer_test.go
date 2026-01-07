@@ -269,7 +269,7 @@ func TestLexerFStrings(t *testing.T) {
 			require.Empty(t, errs, "unexpected lexer errors")
 			require.NotEmpty(t, tokens, "expected at least one token")
 
-			assert.Equal(t, model.TK_StringLit, tokens[0].Kind)
+			assert.Equal(t, model.TK_FStringLit, tokens[0].Kind)
 			assert.Equal(t, test.literal, tokens[0].Literal)
 		})
 	}
