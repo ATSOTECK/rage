@@ -117,6 +117,20 @@ func (l *Lexer) NextToken() model.Token {
 	l.startLine = l.line
 	l.startCol = l.column
 
+	// Check for non-ASCII (Unicode) identifier start before advancing
+	// This must be done before l.advance() to properly decode multi-byte UTF-8
+	if l.peek() >= utf8.RuneSelf {
+		r := l.peekRune()
+		if isIdentifierStartRune(r) {
+			l.advanceRune() // Advance past the first rune
+			return l.scanIdentifier()
+		}
+		// Not a valid identifier start; advance and report error
+		l.advanceRune()
+		l.addError(fmt.Sprintf("unexpected character '%c'", r))
+		return l.makeToken(model.TK_Illegal)
+	}
+
 	ch := l.advance()
 
 	// Comments
@@ -527,8 +541,22 @@ func (l *Lexer) scanBinaryNumber() model.Token {
 }
 
 func (l *Lexer) scanIdentifier() model.Token {
-	for isIdentifierChar(l.peek()) {
-		l.advance()
+	for !l.isAtEnd() {
+		ch := l.peek()
+		if ch < utf8.RuneSelf {
+			// ASCII: use fast byte-based check
+			if !isIdentifierChar(ch) {
+				break
+			}
+			l.advance()
+		} else {
+			// Non-ASCII: decode full rune and check
+			r := l.peekRune()
+			if r == utf8.RuneError || !isIdentifierCharRune(r) {
+				break
+			}
+			l.advanceRune()
+		}
 	}
 	literal := l.source[l.start:l.pos]
 	kind := model.LookupIdent(literal)
@@ -752,6 +780,31 @@ func (l *Lexer) retreat() {
 	}
 }
 
+// peekRune returns the next rune without advancing. Returns 0 if at end.
+func (l *Lexer) peekRune() rune {
+	if l.isAtEnd() {
+		return 0
+	}
+	r, _ := utf8.DecodeRuneInString(l.source[l.pos:])
+	return r
+}
+
+// advanceRune advances past one rune and returns it.
+func (l *Lexer) advanceRune() rune {
+	if l.isAtEnd() {
+		return 0
+	}
+	r, width := utf8.DecodeRuneInString(l.source[l.pos:])
+	l.pos += width
+	if r == '\n' {
+		l.line++
+		l.column = 1
+	} else {
+		l.column++
+	}
+	return r
+}
+
 func (l *Lexer) match(expected byte) bool {
 	if l.isAtEnd() || l.source[l.pos] != expected {
 		return false
@@ -869,19 +922,33 @@ func isBinaryDigit(ch byte) bool {
 }
 
 func isIdentifierStart(ch byte) bool {
+	// Only handles ASCII; non-ASCII requires rune-based checking
 	if ch < utf8.RuneSelf {
 		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
 	}
-	// For non-ASCII, we'd need to check unicode categories
-	r := rune(ch)
-	return unicode.IsLetter(r) || r == '_'
+	// Non-ASCII byte: return true only for UTF-8 leading bytes (0xC0-0xFF)
+	// Continuation bytes (0x80-0xBF) cannot start an identifier
+	return ch >= 0xC0
 }
 
 func isIdentifierChar(ch byte) bool {
+	// Only handles ASCII; non-ASCII requires rune-based checking
 	if ch < utf8.RuneSelf {
-		return isIdentifierStart(ch) || isDigit(ch)
+		return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '_'
 	}
-	r := rune(ch)
+	// Non-ASCII: allow any byte >= 0x80 (both leading and continuation bytes)
+	// as they may be part of a valid multi-byte Unicode character
+	return true
+}
+
+// isIdentifierStartRune checks if a rune can start a Python identifier
+func isIdentifierStartRune(r rune) bool {
+	return unicode.IsLetter(r) || r == '_'
+}
+
+// isIdentifierCharRune checks if a rune can be part of a Python identifier
+func isIdentifierCharRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
 

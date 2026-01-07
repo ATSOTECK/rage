@@ -784,11 +784,9 @@ func (c *Compiler) compileBoolOp(e *model.BoolOp) {
 	if e.Op == model.TK_And {
 		// Short-circuit and: if any is false, skip rest
 		var jumpOffsets []int
-		for i, val := range e.Values[:len(e.Values)-1] {
+		for _, val := range e.Values[:len(e.Values)-1] {
 			c.compileExpr(val)
-			if i < len(e.Values)-1 {
-				jumpOffsets = append(jumpOffsets, c.emitJump(runtime.OpJumpIfFalseOrPop))
-			}
+			jumpOffsets = append(jumpOffsets, c.emitJump(runtime.OpJumpIfFalseOrPop))
 		}
 		c.compileExpr(e.Values[len(e.Values)-1])
 		endOffset := c.currentOffset()
@@ -798,11 +796,9 @@ func (c *Compiler) compileBoolOp(e *model.BoolOp) {
 	} else {
 		// Short-circuit or: if any is true, skip rest
 		var jumpOffsets []int
-		for i, val := range e.Values[:len(e.Values)-1] {
+		for _, val := range e.Values[:len(e.Values)-1] {
 			c.compileExpr(val)
-			if i < len(e.Values)-1 {
-				jumpOffsets = append(jumpOffsets, c.emitJump(runtime.OpJumpIfTrueOrPop))
-			}
+			jumpOffsets = append(jumpOffsets, c.emitJump(runtime.OpJumpIfTrueOrPop))
 		}
 		c.compileExpr(e.Values[len(e.Values)-1])
 		endOffset := c.currentOffset()
@@ -971,6 +967,9 @@ func (c *Compiler) compileDelete(target model.Expr) {
 }
 
 func (c *Compiler) compileAugAssign(s *model.AugAssign) {
+	// Track if this is a subscript (needs special handling to avoid double evaluation)
+	_, isSubscript := s.Target.(*model.Subscript)
+
 	// Load target
 	switch t := s.Target.(type) {
 	case *model.Identifier:
@@ -981,11 +980,12 @@ func (c *Compiler) compileAugAssign(s *model.AugAssign) {
 		idx := c.addName(t.Attr.Name)
 		c.emitArg(runtime.OpLoadAttr, idx)
 	case *model.Subscript:
+		// For subscript: push object and index, duplicate both, then get value
+		// Stack sequence: [obj, idx] -> [obj, idx, obj, idx] -> [obj, idx, value]
 		c.compileExpr(t.Value)
 		c.compileExpr(t.Slice)
-		c.emit(runtime.OpDup)
-		c.emit(runtime.OpDup)
-		c.emit(runtime.OpBinarySubscr)
+		c.emit(runtime.OpDup2) // Duplicate top two: [obj, idx, obj, idx]
+		c.emit(runtime.OpBinarySubscr) // Get value: [obj, idx, value]
 	}
 
 	// Compile the value
@@ -1022,7 +1022,13 @@ func (c *Compiler) compileAugAssign(s *model.AugAssign) {
 	}
 
 	// Store result
-	c.compileStore(s.Target)
+	if isSubscript {
+		// For subscript: stack is [obj, idx, result], need [result, obj, idx] for StoreSubscr
+		c.emit(runtime.OpRot3)       // [obj, idx, result] -> [result, obj, idx]
+		c.emit(runtime.OpStoreSubscr) // Store and pop all three
+	} else {
+		c.compileStore(s.Target)
+	}
 }
 
 // Control flow compilation

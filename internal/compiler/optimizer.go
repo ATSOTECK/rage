@@ -290,6 +290,38 @@ func (o *Optimizer) getBoolValue(expr model.Expr) (bool, bool) {
 	return false, false
 }
 
+// isPureExpr checks if an expression is pure (has no side effects).
+// Pure expressions include: literals, identifiers, and operators with pure operands.
+// Impure expressions include: function calls, subscripts, attribute access (could have __getattr__).
+func (o *Optimizer) isPureExpr(expr model.Expr) bool {
+	switch e := expr.(type) {
+	case *model.IntLit, *model.FloatLit, *model.StringLit, *model.BytesLit,
+		*model.BoolLit, *model.NoneLit, *model.Identifier:
+		return true
+	case *model.BinaryOp:
+		return o.isPureExpr(e.Left) && o.isPureExpr(e.Right)
+	case *model.UnaryOp:
+		return o.isPureExpr(e.Operand)
+	case *model.Tuple:
+		for _, elt := range e.Elts {
+			if !o.isPureExpr(elt) {
+				return false
+			}
+		}
+		return true
+	case *model.List:
+		for _, elt := range e.Elts {
+			if !o.isPureExpr(elt) {
+				return false
+			}
+		}
+		return true
+	default:
+		// Function calls, subscripts, attribute access, etc. are not pure
+		return false
+	}
+}
+
 // isIntegerExpr checks if an expression is known to produce an integer
 func (o *Optimizer) isIntegerExpr(expr model.Expr) bool {
 	switch e := expr.(type) {
@@ -377,7 +409,7 @@ func (o *Optimizer) ReduceStrength(expr model.Expr) model.Expr {
 			}
 		}
 
-		// x ** 2 -> x * x
+		// x ** 2 -> x * x (only if x is pure, to avoid evaluating side effects twice)
 		if e.Op == model.TK_DoubleStar {
 			if rightInt, ok := o.getIntValue(right); ok {
 				switch rightInt {
@@ -386,7 +418,10 @@ func (o *Optimizer) ReduceStrength(expr model.Expr) model.Expr {
 				case 1:
 					return left
 				case 2:
-					return &model.BinaryOp{Op: model.TK_Star, Left: left, Right: left}
+					// Only optimize if left is a pure expression (no side effects)
+					if o.isPureExpr(left) {
+						return &model.BinaryOp{Op: model.TK_Star, Left: left, Right: left}
+					}
 				}
 			}
 		}
@@ -2023,7 +2058,7 @@ func (o *Optimizer) rebuildBytecode(code *runtime.CodeObject, instrs []*instruct
 
 	// Rebuild bytecode
 	newCode := make([]byte, 0, size)
-	for i, instr := range instrs {
+	for _, instr := range instrs {
 		if instr.removed {
 			continue
 		}
@@ -2031,18 +2066,22 @@ func (o *Optimizer) rebuildBytecode(code *runtime.CodeObject, instrs []*instruct
 		// Adjust jump targets
 		arg := instr.arg
 		if isJumpOp(instr.op) && arg >= 0 {
-			// Find which instruction the old offset points to
+			// Find which instruction index the old offset points to
+			targetIdx := -1
 			for j, oldOff := range oldOffsets {
 				if oldOff == arg {
-					arg = newOffsets[j]
+					targetIdx = j
 					break
 				}
 			}
-			// Handle jumps to removed instructions - find next valid
-			for j := i + 1; j < len(instrs); j++ {
-				if oldOffsets[j] == instr.arg && !instrs[j].removed {
-					arg = newOffsets[j]
-					break
+
+			if targetIdx >= 0 {
+				// If target instruction was removed, find next valid instruction
+				for targetIdx < len(instrs) && instrs[targetIdx].removed {
+					targetIdx++
+				}
+				if targetIdx < len(instrs) {
+					arg = newOffsets[targetIdx]
 				}
 			}
 		}

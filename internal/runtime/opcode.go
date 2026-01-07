@@ -9,6 +9,7 @@ const (
 	// Stack manipulation
 	OpPop  Opcode = iota // Pop top of stack
 	OpDup                // Duplicate top of stack
+	OpDup2               // Duplicate top two stack items (for augmented subscript)
 	OpRot2               // Swap top two stack items
 	OpRot3               // Rotate top three stack items
 
@@ -253,6 +254,7 @@ const (
 var OpcodeNames = map[Opcode]string{
 	OpPop:              "POP",
 	OpDup:              "DUP",
+	OpDup2:             "DUP_TOP_TWO",
 	OpRot2:             "ROT_TWO",
 	OpRot3:             "ROT_THREE",
 	OpLoadConst:        "LOAD_CONST",
@@ -445,7 +447,7 @@ func init() {
 	}
 	// Mark opcodes that don't have arguments
 	noArgOpcodes := []Opcode{
-		OpPop, OpDup, OpRot2, OpRot3,
+		OpPop, OpDup, OpDup2, OpRot2, OpRot3,
 		OpUnaryPositive, OpUnaryNegative, OpUnaryNot, OpUnaryInvert,
 		OpBinaryAdd, OpBinarySubtract, OpBinaryMultiply, OpBinaryDivide,
 		OpBinaryFloorDiv, OpBinaryModulo, OpBinaryPower, OpBinaryMatMul,

@@ -113,17 +113,12 @@ func InternString(s string) *PyString {
 	if len(s) > stringInternMaxLen {
 		return &PyString{Value: s}
 	}
-	stringInternPoolLock.RLock()
-	if interned, ok := stringInternPool[s]; ok {
-		stringInternPoolLock.RUnlock()
-		return interned
-	}
-	stringInternPoolLock.RUnlock()
 
-	// Not in pool, add it
+	// Use write lock directly to avoid race between read unlock and write lock.
+	// The slight performance cost is acceptable for correctness.
 	stringInternPoolLock.Lock()
 	defer stringInternPoolLock.Unlock()
-	// Double-check after acquiring write lock
+
 	if interned, ok := stringInternPool[s]; ok {
 		return interned
 	}
@@ -880,8 +875,88 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("isinstance() takes exactly 2 arguments")
 			}
-			// Simplified implementation
-			return True, nil
+			obj := args[0]
+			classInfo := args[1]
+
+			// Helper to check if obj is instance of a type by name
+			checkTypeName := func(typeName string) bool {
+				switch o := obj.(type) {
+				case *PyBool:
+					// bool is a subclass of int in Python
+					return typeName == "bool" || typeName == "int" || typeName == "object"
+				case *PyInt:
+					return typeName == "int" || typeName == "object"
+				case *PyFloat:
+					return typeName == "float" || typeName == "object"
+				case *PyString:
+					return typeName == "str" || typeName == "object"
+				case *PyList:
+					return typeName == "list" || typeName == "object"
+				case *PyTuple:
+					return typeName == "tuple" || typeName == "object"
+				case *PyDict:
+					return typeName == "dict" || typeName == "object"
+				case *PySet:
+					return typeName == "set" || typeName == "object"
+				case *PyBytes:
+					return typeName == "bytes" || typeName == "object"
+				case *PyNone:
+					return typeName == "NoneType" || typeName == "object"
+				case *PyInstance:
+					return typeName == o.Class.Name || typeName == "object"
+				case *PyException:
+					return typeName == o.Type() || typeName == "Exception" || typeName == "BaseException" || typeName == "object"
+				}
+				return false
+			}
+
+			// Helper to check if obj is instance of a single class
+			checkClass := func(cls *PyClass) bool {
+				switch o := obj.(type) {
+				case *PyInstance:
+					return vm.isInstanceOf(o, cls)
+				case *PyException:
+					if vm.isExceptionClass(cls) {
+						return vm.exceptionMatches(o, cls)
+					}
+				}
+				// For built-in types, check by name
+				return checkTypeName(cls.Name)
+			}
+
+			// Helper to check a single type specification
+			checkType := func(typeSpec Value) bool {
+				switch t := typeSpec.(type) {
+				case *PyClass:
+					return checkClass(t)
+				case *PyBuiltinFunc:
+					// Built-in type constructors (int, str, float, etc.)
+					return checkTypeName(t.Name)
+				}
+				return false
+			}
+
+			// classInfo can be a single class/type or a tuple of classes/types
+			switch ci := classInfo.(type) {
+			case *PyClass:
+				if checkClass(ci) {
+					return True, nil
+				}
+			case *PyBuiltinFunc:
+				// Built-in type constructor (int, str, float, etc.)
+				if checkTypeName(ci.Name) {
+					return True, nil
+				}
+			case *PyTuple:
+				for _, item := range ci.Items {
+					if checkType(item) {
+						return True, nil
+					}
+				}
+			default:
+				return nil, fmt.Errorf("isinstance() arg 2 must be a type or tuple of types")
+			}
+			return False, nil
 		},
 	}
 
@@ -2087,6 +2162,13 @@ func (vm *VM) run() (Value, error) {
 
 		case OpDup:
 			vm.push(vm.top())
+
+		case OpDup2:
+			// Duplicate top two stack items: [a, b] -> [a, b, a, b]
+			b := vm.top()
+			a := vm.peek(1)
+			vm.push(a)
+			vm.push(b)
 
 		case OpRot2:
 			a := vm.pop()
