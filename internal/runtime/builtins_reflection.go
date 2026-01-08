@@ -462,6 +462,9 @@ func BuiltinExec(vm *VM) int {
 
 	codeArg := vm.Get(1)
 
+	// Get the caller's frame for default globals/locals
+	callerFrame := vm.getCallerFrame()
+
 	// Track the original PyDicts so we can copy changes back
 	var originalGlobals *PyDict
 	var originalLocals *PyDict
@@ -481,15 +484,15 @@ func BuiltinExec(vm *VM) int {
 			}
 		}
 	}
-	if globalsDict == nil && vm.frame != nil {
-		// Use the caller's globals directly so changes persist
-		globalsDict = vm.frame.Globals
-	}
 	if globalsDict == nil {
-		globalsDict = vm.Globals
+		if callerFrame != nil && callerFrame.Globals != nil {
+			globalsDict = callerFrame.Globals
+		} else {
+			globalsDict = vm.Globals
+		}
 	}
 
-	// Get locals dict (arg 3) or use globals
+	// Get locals dict (arg 3) or use caller's locals
 	var localsDict map[string]Value
 	if nargs >= 3 {
 		arg3 := vm.Get(3)
@@ -504,7 +507,22 @@ func BuiltinExec(vm *VM) int {
 		}
 	}
 	if localsDict == nil {
-		localsDict = globalsDict
+		// Build locals from caller's frame if available
+		if callerFrame != nil && callerFrame.Code != nil {
+			localsDict = make(map[string]Value)
+			// Copy globals first
+			for k, v := range globalsDict {
+				localsDict[k] = v
+			}
+			// Then add/override with actual local variables
+			for i, name := range callerFrame.Code.VarNames {
+				if i < len(callerFrame.Locals) && callerFrame.Locals[i] != nil {
+					localsDict[name] = callerFrame.Locals[i]
+				}
+			}
+		} else {
+			localsDict = globalsDict
+		}
 		// If no explicit locals, changes go to globals (or original globals dict)
 		if originalGlobals != nil {
 			originalLocals = originalGlobals
@@ -673,6 +691,18 @@ func dictToStringMap(d *PyDict) map[string]Value {
 
 // ExecuteInNamespace executes code with custom globals/locals
 func (vm *VM) ExecuteInNamespace(code *CodeObject, globals, locals map[string]Value) error {
+	// For exec, we need to merge locals into the globals namespace because
+	// the compiled code uses OpLoadGlobal for all name lookups (since it doesn't
+	// know about the caller's local variables at compile time).
+	mergedGlobals := make(map[string]Value)
+	for k, v := range globals {
+		mergedGlobals[k] = v
+	}
+	// Locals override globals (Python's LEGB rule)
+	for k, v := range locals {
+		mergedGlobals[k] = v
+	}
+
 	// Create a new frame for execution
 	frame := &Frame{
 		Code:     code,
@@ -680,7 +710,7 @@ func (vm *VM) ExecuteInNamespace(code *CodeObject, globals, locals map[string]Va
 		Stack:    make([]Value, code.StackSize+16),
 		SP:       0,
 		Locals:   make([]Value, len(code.VarNames)),
-		Globals:  globals,
+		Globals:  mergedGlobals,
 		Builtins: vm.builtins,
 	}
 
@@ -702,11 +732,17 @@ func (vm *VM) ExecuteInNamespace(code *CodeObject, globals, locals map[string]Va
 	// Execute
 	_, err := vm.run()
 
-	// Update locals dict with any changes
+	// Update locals dict with any changes from frame.Locals
 	for i, name := range code.VarNames {
 		if i < len(frame.Locals) && frame.Locals[i] != nil {
 			locals[name] = frame.Locals[i]
 		}
+	}
+
+	// Copy new global assignments back to the original globals dict
+	// This handles cases like `exec("x = 100")` where x is stored via OpStoreGlobal
+	for k, v := range mergedGlobals {
+		globals[k] = v
 	}
 
 	// Restore state
