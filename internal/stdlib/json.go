@@ -113,16 +113,146 @@ func jsonLoads(vm *runtime.VM) int {
 	return 1
 }
 
-// jsonDump writes JSON to a file object (requires file I/O support)
+// jsonDump writes JSON to a file object.
+// dump(obj, fp, *, indent=None, separators=None, sort_keys=False) -> None
 func jsonDump(vm *runtime.VM) int {
-	vm.RaiseError("json.dump() is not yet implemented (requires file I/O)")
-	return 0
+	if vm.GetTop() < 2 {
+		vm.RaiseError("dump() missing required arguments: 'obj' and 'fp'")
+		return 0
+	}
+
+	obj := vm.Get(1)
+
+	// Get file object
+	f, ok := getFile(vm, 2)
+	if !ok {
+		return 0
+	}
+
+	if f.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	if !f.writable {
+		vm.RaiseError("io.UnsupportedOperation: not writable")
+		return 0
+	}
+
+	// Parse optional keyword arguments (same as dumps)
+	indent := ""
+	itemSep := ", "
+	keySep := ": "
+	sortKeys := false
+
+	// Check for indent argument (position 3)
+	if vm.GetTop() >= 3 {
+		indentVal := vm.Get(3)
+		if !runtime.IsNone(indentVal) {
+			switch v := indentVal.(type) {
+			case *runtime.PyInt:
+				if v.Value >= 0 {
+					indent = strings.Repeat(" ", int(v.Value))
+				}
+			case *runtime.PyString:
+				indent = v.Value
+			}
+		}
+	}
+
+	// Check for separators argument (position 4)
+	if vm.GetTop() >= 4 {
+		sepVal := vm.Get(4)
+		if !runtime.IsNone(sepVal) {
+			if tuple, ok := sepVal.(*runtime.PyTuple); ok && len(tuple.Items) == 2 {
+				if s, ok := tuple.Items[0].(*runtime.PyString); ok {
+					itemSep = s.Value
+				}
+				if s, ok := tuple.Items[1].(*runtime.PyString); ok {
+					keySep = s.Value
+				}
+			} else if list, ok := sepVal.(*runtime.PyList); ok && len(list.Items) == 2 {
+				if s, ok := list.Items[0].(*runtime.PyString); ok {
+					itemSep = s.Value
+				}
+				if s, ok := list.Items[1].(*runtime.PyString); ok {
+					keySep = s.Value
+				}
+			}
+		}
+	}
+
+	// Check for sort_keys argument (position 5)
+	if vm.GetTop() >= 5 {
+		sortKeysVal := vm.Get(5)
+		if !runtime.IsNone(sortKeysVal) {
+			sortKeys = vm.ToBool(5)
+		}
+	}
+
+	result, err := encodeJSON(obj, indent, itemSep, keySep, sortKeys, 0)
+	if err != nil {
+		vm.RaiseError("TypeError: Object of type '%s' is not JSON serializable", jsonTypeName(obj))
+		return 0
+	}
+
+	// Write to file
+	_, writeErr := f.writer.WriteString(result)
+	if writeErr != nil {
+		vm.RaiseError("IOError: %v", writeErr)
+		return 0
+	}
+
+	// Flush to ensure data is written
+	f.writer.Flush()
+
+	return 0 // dump() returns None
 }
 
-// jsonLoad reads JSON from a file object (requires file I/O support)
+// jsonLoad reads JSON from a file object.
+// load(fp) -> object
 func jsonLoad(vm *runtime.VM) int {
-	vm.RaiseError("json.load() is not yet implemented (requires file I/O)")
-	return 0
+	if vm.GetTop() < 1 {
+		vm.RaiseError("load() missing required argument: 'fp'")
+		return 0
+	}
+
+	// Get file object
+	f, ok := getFile(vm, 1)
+	if !ok {
+		return 0
+	}
+
+	if f.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	if !f.readable {
+		vm.RaiseError("io.UnsupportedOperation: not readable")
+		return 0
+	}
+
+	// Read entire file content
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(f.reader)
+	if err != nil {
+		vm.RaiseError("IOError: %v", err)
+		return 0
+	}
+
+	content := buf.String()
+	if len(strings.TrimSpace(content)) == 0 {
+		vm.RaiseError("json.JSONDecodeError: Expecting value: line 1 column 1 (char 0)")
+		return 0
+	}
+
+	result, err := decodeJSON(content)
+	if err != nil {
+		vm.RaiseError("json.JSONDecodeError: %s", err.Error())
+		return 0
+	}
+
+	vm.Push(result)
+	return 1
 }
 
 // encodeJSON converts a Python value to a JSON string
