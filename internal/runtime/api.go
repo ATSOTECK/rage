@@ -623,7 +623,7 @@ func (vm *VM) RaiseError(format string, args ...any) {
 		"TypeError", "ValueError", "KeyError", "IndexError", "AttributeError",
 		"RuntimeError", "StopIteration", "NotImplementedError", "OSError",
 		"FileNotFoundError", "PermissionError", "FileExistsError", "IOError",
-		"ZeroDivisionError", "OverflowError", "RecursionError",
+		"ZeroDivisionError", "OverflowError", "RecursionError", "SyntaxError",
 	} {
 		if len(msg) > len(prefix)+2 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
 			excType = prefix
@@ -641,3 +641,12 @@ func (vm *VM) RaiseError(format string, args ...any) {
 		Message: msg,
 	})
 }
+
+// =====================================
+// Compile Function Bridge
+// =====================================
+
+// CompileFunc is set by the rage package to provide compilation capability
+// for exec/eval/compile builtins. This avoids import cycles between
+// runtime and compiler packages.
+var CompileFunc func(source, filename, mode string) (*CodeObject, error)

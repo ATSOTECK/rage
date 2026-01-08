@@ -199,12 +199,22 @@ func (l *Lexer) handleIndentation() *model.Token {
 		}
 	}
 
-	// Skip blank lines and comment-only lines
+	currentIndent := l.indentStack[len(l.indentStack)-1]
+
+	// For blank lines and comment-only lines, we still need to track indentation
+	// changes before skipping the line content. This ensures INDENT tokens are
+	// generated even when a block starts with a comment.
 	if l.peek() == '\n' || l.peek() == '#' || l.isAtEnd() {
+		// Still generate INDENT if needed
+		if indent > currentIndent {
+			l.indentStack = append(l.indentStack, indent)
+			tok := l.makeToken(model.TK_Indent)
+			return &tok
+		}
+		// Note: We don't generate DEDENT here for comment lines because the
+		// actual dedent should happen on the next real statement
 		return nil
 	}
-
-	currentIndent := l.indentStack[len(l.indentStack)-1]
 
 	if indent > currentIndent {
 		l.indentStack = append(l.indentStack, indent)

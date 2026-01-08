@@ -65,11 +65,58 @@ var AllModules = []Module{
 	ModuleItertools,
 }
 
+// Builtin represents an opt-in builtin function that can be enabled.
+// These builtins provide reflection and code execution capabilities
+// that are not enabled by default for security reasons.
+type Builtin int
+
+const (
+	BuiltinRepr Builtin = iota
+	BuiltinDir
+	BuiltinGlobals
+	BuiltinLocals
+	BuiltinVars
+	BuiltinCompile
+	BuiltinExec
+	BuiltinEval
+)
+
+// ReflectionBuiltins contains all reflection-related builtins (repr, dir, globals, locals, vars).
+// These are relatively safe introspection functions.
+var ReflectionBuiltins = []Builtin{
+	BuiltinRepr,
+	BuiltinDir,
+	BuiltinGlobals,
+	BuiltinLocals,
+	BuiltinVars,
+}
+
+// ExecutionBuiltins contains all code execution builtins (compile, exec, eval).
+// These allow arbitrary code execution and should be enabled with caution.
+var ExecutionBuiltins = []Builtin{
+	BuiltinCompile,
+	BuiltinExec,
+	BuiltinEval,
+}
+
+// AllBuiltins contains all opt-in builtins.
+var AllBuiltins = []Builtin{
+	BuiltinRepr,
+	BuiltinDir,
+	BuiltinGlobals,
+	BuiltinLocals,
+	BuiltinVars,
+	BuiltinCompile,
+	BuiltinExec,
+	BuiltinEval,
+}
+
 // StateOption is a functional option for configuring State creation.
 type StateOption func(*stateConfig)
 
 type stateConfig struct {
-	modules map[Module]bool
+	modules  map[Module]bool
+	builtins map[Builtin]bool
 }
 
 // WithModule enables a specific stdlib module.
@@ -97,13 +144,57 @@ func WithAllModules() StateOption {
 	}
 }
 
+// WithBuiltin enables a specific opt-in builtin function.
+func WithBuiltin(b Builtin) StateOption {
+	return func(c *stateConfig) {
+		c.builtins[b] = true
+	}
+}
+
+// WithBuiltins enables multiple opt-in builtin functions.
+func WithBuiltins(builtins ...Builtin) StateOption {
+	return func(c *stateConfig) {
+		for _, b := range builtins {
+			c.builtins[b] = true
+		}
+	}
+}
+
+// WithReflectionBuiltins enables all reflection builtins (repr, dir, globals, locals, vars).
+func WithReflectionBuiltins() StateOption {
+	return func(c *stateConfig) {
+		for _, b := range ReflectionBuiltins {
+			c.builtins[b] = true
+		}
+	}
+}
+
+// WithExecutionBuiltins enables all execution builtins (compile, exec, eval).
+func WithExecutionBuiltins() StateOption {
+	return func(c *stateConfig) {
+		for _, b := range ExecutionBuiltins {
+			c.builtins[b] = true
+		}
+	}
+}
+
+// WithAllBuiltins enables all opt-in builtins.
+func WithAllBuiltins() StateOption {
+	return func(c *stateConfig) {
+		for _, b := range AllBuiltins {
+			c.builtins[b] = true
+		}
+	}
+}
+
 // State represents a Python execution state.
 // It wraps the VM and provides a clean API for running Python code.
 type State struct {
-	vm             *runtime.VM
-	compiled       map[string]*runtime.CodeObject
-	enabledModules map[Module]bool
-	closed         bool
+	vm              *runtime.VM
+	compiled        map[string]*runtime.CodeObject
+	enabledModules  map[Module]bool
+	enabledBuiltins map[Builtin]bool
+	closed          bool
 }
 
 // NewState creates a new Python execution state with all stdlib modules enabled.
@@ -137,7 +228,8 @@ func NewBareState() *State {
 //	state := rage.NewStateWithModules(rage.WithAllModules())
 func NewStateWithModules(opts ...StateOption) *State {
 	cfg := &stateConfig{
-		modules: make(map[Module]bool),
+		modules:  make(map[Module]bool),
+		builtins: make(map[Builtin]bool),
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -145,15 +237,64 @@ func NewStateWithModules(opts ...StateOption) *State {
 
 	runtime.ResetModules()
 
+	// Set up the compile function bridge for exec/eval/compile builtins
+	runtime.CompileFunc = compileForBuiltin
+
 	// Initialize only the requested modules
 	for m := range cfg.modules {
 		initModule(m)
 	}
 
+	vm := runtime.NewVM()
+
+	// Initialize opt-in builtins
+	for b := range cfg.builtins {
+		initBuiltin(vm, b)
+	}
+
 	return &State{
-		vm:             runtime.NewVM(),
-		compiled:       make(map[string]*runtime.CodeObject),
-		enabledModules: cfg.modules,
+		vm:              vm,
+		compiled:        make(map[string]*runtime.CodeObject),
+		enabledModules:  cfg.modules,
+		enabledBuiltins: cfg.builtins,
+	}
+}
+
+// compileForBuiltin wraps compiler.CompileSource for use by exec/eval/compile builtins
+func compileForBuiltin(source, filename, mode string) (*runtime.CodeObject, error) {
+	// For "eval" mode, wrap the expression to capture its result
+	// For "exec" mode, compile as normal statements
+	// For "single" mode, compile as a single interactive statement
+	if mode == "eval" {
+		// Wrap expression to capture result: __eval_result__ = (expression)
+		source = "__eval_result__ = (" + source + ")"
+	}
+	code, errs := compiler.CompileSource(source, filename)
+	if len(errs) > 0 {
+		return nil, errs[0]
+	}
+	return code, nil
+}
+
+// initBuiltin initializes a single opt-in builtin
+func initBuiltin(vm *runtime.VM, b Builtin) {
+	switch b {
+	case BuiltinRepr:
+		vm.RegisterBuiltin("repr", runtime.BuiltinRepr)
+	case BuiltinDir:
+		vm.RegisterBuiltin("dir", runtime.BuiltinDir)
+	case BuiltinGlobals:
+		vm.RegisterBuiltin("globals", runtime.BuiltinGlobals)
+	case BuiltinLocals:
+		vm.RegisterBuiltin("locals", runtime.BuiltinLocals)
+	case BuiltinVars:
+		vm.RegisterBuiltin("vars", runtime.BuiltinVars)
+	case BuiltinCompile:
+		vm.RegisterBuiltin("compile", runtime.BuiltinCompile)
+	case BuiltinExec:
+		vm.RegisterBuiltin("exec", runtime.BuiltinExec)
+	case BuiltinEval:
+		vm.RegisterBuiltin("eval", runtime.BuiltinEval)
 	}
 }
 
@@ -232,6 +373,63 @@ func (s *State) EnabledModules() []Module {
 	return result
 }
 
+// EnableBuiltin enables a specific opt-in builtin function.
+// This can be called after state creation to add builtins.
+func (s *State) EnableBuiltin(b Builtin) {
+	if s.enabledBuiltins == nil {
+		s.enabledBuiltins = make(map[Builtin]bool)
+	}
+	if !s.enabledBuiltins[b] {
+		initBuiltin(s.vm, b)
+		s.enabledBuiltins[b] = true
+	}
+}
+
+// EnableBuiltins enables multiple opt-in builtin functions.
+func (s *State) EnableBuiltins(builtins ...Builtin) {
+	for _, b := range builtins {
+		s.EnableBuiltin(b)
+	}
+}
+
+// EnableReflectionBuiltins enables all reflection builtins (repr, dir, globals, locals, vars).
+func (s *State) EnableReflectionBuiltins() {
+	for _, b := range ReflectionBuiltins {
+		s.EnableBuiltin(b)
+	}
+}
+
+// EnableExecutionBuiltins enables all execution builtins (compile, exec, eval).
+func (s *State) EnableExecutionBuiltins() {
+	for _, b := range ExecutionBuiltins {
+		s.EnableBuiltin(b)
+	}
+}
+
+// EnableAllBuiltins enables all opt-in builtins.
+func (s *State) EnableAllBuiltins() {
+	for _, b := range AllBuiltins {
+		s.EnableBuiltin(b)
+	}
+}
+
+// IsBuiltinEnabled returns true if the specified builtin is enabled.
+func (s *State) IsBuiltinEnabled(b Builtin) bool {
+	if s.enabledBuiltins == nil {
+		return false
+	}
+	return s.enabledBuiltins[b]
+}
+
+// EnabledBuiltins returns a slice of all enabled builtins.
+func (s *State) EnabledBuiltins() []Builtin {
+	var result []Builtin
+	for b := range s.enabledBuiltins {
+		result = append(result, b)
+	}
+	return result
+}
+
 // Close releases resources associated with the state.
 // Always call this when done with the state.
 // After Close is called, the state should not be used.
@@ -244,6 +442,7 @@ func (s *State) Close() {
 	s.vm = nil
 	s.compiled = nil
 	s.enabledModules = nil
+	s.enabledBuiltins = nil
 }
 
 // checkClosed returns an error if the state has been closed.

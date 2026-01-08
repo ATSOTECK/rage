@@ -130,7 +130,13 @@ func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (pas
 	}
 
 	// Create a new state with all modules enabled
-	state := rage.NewState()
+	// Enable reflection builtins for the reflection test
+	var state *rage.State
+	if strings.Contains(filepath.Base(scriptPath), "reflection") {
+		state = rage.NewStateWithModules(rage.WithAllModules(), rage.WithAllBuiltins())
+	} else {
+		state = rage.NewState()
+	}
 	defer state.Close()
 
 	// Inject color setting into the test framework source
