@@ -1399,6 +1399,34 @@ func (o *Optimizer) getLoadFastIndex(instr *instruction) int {
 	return -1
 }
 
+// computeJumpTargets returns a map of instruction indices that are jump targets.
+// This is used to prevent unsafe optimizations that would merge instructions
+// where control flow can jump into the middle of the merged instruction.
+func (o *Optimizer) computeJumpTargets(instrs []*instruction) map[int]bool {
+	// Map offsets to instruction indices
+	offsetToIndex := make(map[int]int)
+	offset := 0
+	for i, instr := range instrs {
+		offsetToIndex[offset] = i
+		if instr.originalHadArg {
+			offset += 3
+		} else {
+			offset++
+		}
+	}
+
+	// Mark jump targets
+	jumpTargets := make(map[int]bool)
+	for _, instr := range instrs {
+		if isJumpOp(instr.op) && instr.arg >= 0 {
+			if targetIdx, ok := offsetToIndex[instr.arg]; ok {
+				jumpTargets[targetIdx] = true
+			}
+		}
+	}
+	return jumpTargets
+}
+
 // Helper to get STORE_FAST index from instruction (handles specialized versions)
 func (o *Optimizer) getStoreFastIndex(instr *instruction) int {
 	if instr.removed {
@@ -1561,9 +1589,20 @@ func (o *Optimizer) detectLoadConstLoadFast(instrs []*instruction, code *runtime
 func (o *Optimizer) detectStoreFastLoadFast(instrs []*instruction) bool {
 	// Pattern: STORE_FAST x, LOAD_FAST y -> STORE_FAST_LOAD_FAST (packed)
 	// This is common for chained assignments and expression statements
+	// IMPORTANT: Don't merge if LOAD_FAST is a jump target (e.g., start of a while loop)
+
+	// Build map of instruction indices that are jump targets
+	jumpTargets := o.computeJumpTargets(instrs)
+
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+
+		// Don't merge if the LOAD_FAST is a jump target - control flow may
+		// jump directly to it, bypassing the STORE_FAST
+		if jumpTargets[i+1] {
 			continue
 		}
 

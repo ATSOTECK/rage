@@ -87,15 +87,12 @@ def test_walrus_if():
         result = walrus_n
     expect(result).to_be(7)
 
-# Note: walrus in while condition has RAGE VM bug (stack underflow), test simplified
 def test_walrus_while():
     walrus_count = 0
     walrus_sum = 0
-    walrus_val = walrus_count
-    while walrus_val < 3:
+    while (walrus_val := walrus_count) < 3:
         walrus_sum = walrus_sum + walrus_val
         walrus_count = walrus_count + 1
-        walrus_val = walrus_count
     expect(walrus_sum).to_be(3)
     expect(walrus_val).to_be(3)
 
