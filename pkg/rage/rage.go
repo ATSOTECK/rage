@@ -37,7 +37,7 @@ const (
 	ModuleRe
 	ModuleCollections
 	ModuleAsyncio
-	ModuleIO // File I/O - intentionally excluded from AllModules for security
+	ModuleIO // File I/O
 	ModuleJSON
 	ModuleOS
 	ModuleDatetime

@@ -11,7 +11,7 @@ applications without any external dependencies or CGO.
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -202,6 +202,9 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | typing | `rage.ModuleTyping` | Type hint support |
 | asyncio | `rage.ModuleAsyncio` | Basic async/await support |
 | csv | `rage.ModuleCSV` | CSV file reading and writing |
+| itertools | `rage.ModuleItertools` | Iterator building blocks (chain, combinations, permutations, etc.) |
+| functools | `rage.ModuleFunctools` | Higher-order functions (partial, reduce, lru_cache, wraps) |
+| io | `rage.ModuleIO` | File I/O operations |
 
 ## Working with Values
 
@@ -312,23 +315,35 @@ if err != nil {
 RAGE is under active development. Currently supported:
 
 ### Implemented
-- Basic data types: None, bool, int, float, str, list, tuple, dict, set, range
-- Operators: arithmetic, comparison, logical, bitwise
-- Control flow: if/elif/else, for, while, break, continue, match/case
-- Functions: def, lambda, recursion, closures, *args, **kwargs
-- Classes: class definitions, `__init__`, instance attributes, methods, single inheritance, properties
+- Data types: None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set, range, slice
+- Operators: arithmetic, comparison, logical, bitwise, in-place operations
+- Control flow: if/elif/else, for, while, break, continue, pass, match/case
+- Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments
+- Classes: class definitions, `__init__`, instance attributes, methods, inheritance, properties, classmethods, staticmethods
 - Exception handling: try/except/else/finally, raise, custom exception types
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
 - Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
-- Imports: import, from...import (for stdlib modules)
+- Imports: import, from...import, relative imports
 - Context managers: with statement support
-- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, type, isinstance, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super
+- F-strings: formatted string literals with format specs
+- Walrus operator: assignment expressions (`:=`)
+- Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
-- Multiple inheritance (MRO is simplified)
+- Full multiple inheritance (MRO is simplified)
 - Full async/await (basic support via asyncio module)
-- File I/O (open, read, write)
+
+### Security Notes
+Reflection builtins (`globals`, `locals`, `compile`, `exec`, `eval`) are opt-in and disabled by default. Enable them explicitly if needed:
+
+```go
+state := rage.NewStateWithModules(
+    rage.WithAllModules(),
+    rage.WithBuiltin(rage.BuiltinGlobals),
+    rage.WithBuiltin(rage.BuiltinExec),
+)
+```
 
 ## Thread Safety
 
