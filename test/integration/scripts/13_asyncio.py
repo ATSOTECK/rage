@@ -122,6 +122,53 @@ def test_multiple_awaits():
 def test_async_pipeline():
     expect(asyncio.run(process(5))).to_be(11)
 
+# Tests for coroutine.throw
+def test_coroutine_throw_into_closed():
+    # Test throwing into an already closed coroutine
+    coro = simple_async()
+    # Run it to completion
+    asyncio.run(coro)
+    # Now try to throw - should re-raise the exception
+    threw_error = False
+    try:
+        coro.throw(ValueError, "test error")
+    except ValueError:
+        threw_error = True
+    expect(threw_error).to_be(True)
+
+def test_coroutine_throw_into_new():
+    # Test throwing into a just-created coroutine (never started)
+    coro = simple_async()
+    threw_error = False
+    try:
+        coro.throw(RuntimeError, "early throw")
+    except RuntimeError:
+        threw_error = True
+    expect(threw_error).to_be(True)
+
+def test_coroutine_throw_method_exists():
+    # Verify coroutine has throw method
+    coro = simple_async()
+    has_throw = hasattr(coro, "throw")
+    # Clean up - run the coroutine to avoid warnings
+    try:
+        asyncio.run(coro)
+    except:
+        pass
+    expect(has_throw).to_be(True)
+
+def test_coroutine_throw_exception_type():
+    # Test that exception type is preserved when throwing
+    coro = simple_async()
+    exception_type = None
+    try:
+        coro.throw(KeyError, "test key error")
+    except KeyError:
+        exception_type = "KeyError"
+    except:
+        exception_type = "other"
+    expect(exception_type).to_be("KeyError")
+
 test("basic_async", test_basic_async)
 test("async_with_args", test_async_with_args)
 test("nested_await", test_nested_await)
@@ -134,5 +181,9 @@ test("async_returns_list", test_async_returns_list)
 test("async_returns_dict", test_async_returns_dict)
 test("multiple_awaits", test_multiple_awaits)
 test("async_pipeline", test_async_pipeline)
+test("coroutine_throw_into_closed", test_coroutine_throw_into_closed)
+test("coroutine_throw_into_new", test_coroutine_throw_into_new)
+test("coroutine_throw_method_exists", test_coroutine_throw_method_exists)
+test("coroutine_throw_exception_type", test_coroutine_throw_exception_type)
 
 print("Asyncio tests completed")

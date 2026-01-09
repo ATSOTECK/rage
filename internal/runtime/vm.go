@@ -5369,8 +5369,21 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}}, nil
 		case "throw":
 			return &PyBuiltinFunc{Name: "coroutine.throw", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				// Similar to generator.throw
-				return nil, &PyException{TypeName: "NotImplementedError", Message: "coroutine.throw not yet implemented"}
+				var excType, excValue Value = &PyString{Value: "Exception"}, None
+				if len(args) > 0 {
+					excType = args[0]
+				}
+				if len(args) > 1 {
+					excValue = args[1]
+				}
+				val, done, err := vm.CoroutineThrow(coro, excType, excValue)
+				if err != nil {
+					return nil, err
+				}
+				if done {
+					return nil, &PyException{TypeName: "StopIteration", Message: ""}
+				}
+				return val, nil
 			}}, nil
 		case "close":
 			return &PyBuiltinFunc{Name: "coroutine.close", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -6789,6 +6802,103 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 		return result, false, nil
 	}
 
+	coro.State = GenClosed
+	return nil, true, &PyException{
+		TypeName: "StopIteration",
+		Message:  "coroutine finished",
+		Args:     &PyTuple{Items: []Value{result}},
+	}
+}
+
+// CoroutineThrow throws an exception into a coroutine
+func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value, bool, error) {
+	if coro.State == GenClosed {
+		// Re-raise the exception
+		excMsg := "exception"
+		if str, ok := excValue.(*PyString); ok {
+			excMsg = str.Value
+		}
+		exc := &PyException{
+			TypeName: fmt.Sprintf("%v", excType),
+			Message:  excMsg,
+		}
+		if cls, ok := excType.(*PyClass); ok {
+			exc.ExcType = cls
+		}
+		return nil, true, exc
+	}
+
+	if coro.State == GenRunning {
+		return nil, false, &PyException{
+			TypeName: "ValueError",
+			Message:  "coroutine already executing",
+		}
+	}
+
+	if coro.State == GenCreated {
+		coro.State = GenClosed
+		excMsg := "exception"
+		if str, ok := excValue.(*PyString); ok {
+			excMsg = str.Value
+		}
+		exc := &PyException{
+			TypeName: fmt.Sprintf("%v", excType),
+			Message:  excMsg,
+		}
+		if cls, ok := excType.(*PyClass); ok {
+			exc.ExcType = cls
+		}
+		return nil, true, exc
+	}
+
+	// Coroutine is suspended at an await point - throw the exception there
+	// Create the exception to throw
+	excMsg := "exception"
+	if str, ok := excValue.(*PyString); ok {
+		excMsg = str.Value
+	} else if excValue != nil && excValue != None {
+		excMsg = fmt.Sprintf("%v", excValue)
+	}
+
+	exc := &PyException{
+		TypeName: fmt.Sprintf("%v", excType),
+		Message:  excMsg,
+	}
+
+	// Check if excType is a class and set ExcType appropriately
+	if cls, ok := excType.(*PyClass); ok {
+		exc.ExcType = cls
+	}
+
+	// Set the pending exception on the VM for the coroutine to handle
+	vm.generatorThrow = exc
+	coro.State = GenRunning
+
+	// Save current frame and switch to coroutine's frame
+	oldFrame := vm.frame
+	oldFrames := vm.frames
+
+	vm.frame = coro.Frame
+	vm.frames = []*Frame{coro.Frame}
+
+	// Run until yield or return (exception will be handled in runWithYieldSupport)
+	result, yielded, err := vm.runGenerator()
+
+	// Restore old frame
+	vm.frame = oldFrame
+	vm.frames = oldFrames
+
+	if err != nil {
+		coro.State = GenClosed
+		return nil, true, err
+	}
+
+	if yielded {
+		coro.State = GenSuspended
+		return result, false, nil
+	}
+
+	// Coroutine returned (finished)
 	coro.State = GenClosed
 	return nil, true, &PyException{
 		TypeName: "StopIteration",
