@@ -600,6 +600,9 @@ func (s *State) RegisterPythonModule(moduleName, source string) error {
 		return err
 	}
 
+	// Ensure parent packages exist before registering the module
+	s.ensureParentPackages(moduleName)
+
 	// Compile the source
 	code, errs := compiler.CompileSource(source, moduleName+".py")
 	if len(errs) > 0 {
@@ -609,6 +612,17 @@ func (s *State) RegisterPythonModule(moduleName, source string) error {
 	// Create a new module
 	mod := runtime.NewModule(moduleName)
 
+	// Set __package__ for relative imports
+	// For a module like "pkg.sub.module", the package is "pkg.sub" (parent)
+	// For a package like "pkg.sub" (typically __init__.py), the package is "pkg.sub" itself
+	packageName := moduleName
+	if lastDot := lastIndexByte(moduleName, '.'); lastDot >= 0 {
+		// This is a submodule, package is the parent
+		packageName = moduleName[:lastDot]
+	}
+	mod.Package = packageName
+	mod.Dict["__package__"] = runtime.NewString(packageName)
+
 	// Execute the code to populate the module's namespace
 	err := s.vm.ExecuteInModule(code, mod)
 	if err != nil {
@@ -617,7 +631,89 @@ func (s *State) RegisterPythonModule(moduleName, source string) error {
 
 	// Register the module so it can be imported
 	s.vm.RegisterModuleInstance(moduleName, mod)
+
+	// Link this module as an attribute of its parent package
+	if lastDot := lastIndexByte(moduleName, '.'); lastDot >= 0 {
+		parentName := moduleName[:lastDot]
+		childName := moduleName[lastDot+1:]
+		if parentMod, ok := s.vm.GetModule(parentName); ok {
+			parentMod.Dict[childName] = mod
+		}
+	}
+
 	return nil
+}
+
+// ensureParentPackages creates empty parent packages for a dotted module name.
+// For "a.b.c", it ensures "a" and "a.b" exist as packages.
+func (s *State) ensureParentPackages(moduleName string) {
+	parts := splitModuleName(moduleName)
+	if len(parts) <= 1 {
+		return // No parent packages needed
+	}
+
+	// Create each parent package if it doesn't exist
+	for i := 1; i < len(parts); i++ {
+		parentName := joinModuleName(parts[:i])
+		if _, ok := s.vm.GetModule(parentName); !ok {
+			// Create an empty package
+			pkg := runtime.NewModule(parentName)
+			pkg.Package = parentName
+			pkg.Dict["__package__"] = runtime.NewString(parentName)
+			pkg.Dict["__path__"] = runtime.NewList([]runtime.Value{}) // Mark as package
+			s.vm.RegisterModuleInstance(parentName, pkg)
+		}
+	}
+
+	// Link parent packages together
+	for i := 1; i < len(parts)-1; i++ {
+		parentName := joinModuleName(parts[:i])
+		childName := joinModuleName(parts[:i+1])
+		if parentMod, ok := s.vm.GetModule(parentName); ok {
+			if childMod, ok := s.vm.GetModule(childName); ok {
+				parentMod.Dict[parts[i]] = childMod
+			}
+		}
+	}
+}
+
+// splitModuleName splits a module name by dots
+func splitModuleName(name string) []string {
+	if name == "" {
+		return nil
+	}
+	var parts []string
+	start := 0
+	for i := 0; i < len(name); i++ {
+		if name[i] == '.' {
+			parts = append(parts, name[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, name[start:])
+	return parts
+}
+
+// joinModuleName joins module name parts with dots
+func joinModuleName(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += "." + parts[i]
+	}
+	return result
+}
+
+// lastIndexByte returns the index of the last occurrence of c in s, or -1 if not present.
+func lastIndexByte(s string, c byte) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 // Register registers a Go function that can be called from Python.

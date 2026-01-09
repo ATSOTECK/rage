@@ -153,6 +153,84 @@ func (vm *VM) GetModule(name string) (*PyModule, bool) {
 	return mod, ok
 }
 
+// ResolveRelativeImport resolves a relative import to an absolute module name.
+// Parameters:
+//   - name: the module name from the import statement (may be empty for "from . import x")
+//   - level: number of dots (1 for ".", 2 for "..", etc.)
+//   - packageName: the current package (__package__ or derived from __name__)
+//
+// Returns the resolved absolute module name or an error.
+func ResolveRelativeImport(name string, level int, packageName string) (string, error) {
+	if level == 0 {
+		// Not a relative import
+		return name, nil
+	}
+
+	if packageName == "" {
+		return "", fmt.Errorf("ImportError: attempted relative import with no known parent package")
+	}
+
+	// Split the package into parts
+	parts := splitModuleName(packageName)
+
+	// For level 1, we stay in the current package
+	// For level 2, we go up one level, etc.
+	// The number of parts we need to keep is len(parts) - (level - 1)
+	keep := len(parts) - (level - 1)
+
+	if keep < 0 {
+		return "", fmt.Errorf("ImportError: attempted relative import beyond top-level package")
+	}
+
+	// Build the base path
+	var base string
+	if keep > 0 {
+		base = joinModuleName(parts[:keep])
+	}
+
+	// Append the module name if provided
+	if name == "" {
+		if base == "" {
+			return "", fmt.Errorf("ImportError: attempted relative import with no known parent package")
+		}
+		return base, nil
+	}
+
+	if base == "" {
+		return name, nil
+	}
+	return base + "." + name, nil
+}
+
+// splitModuleName splits a module name by dots
+func splitModuleName(name string) []string {
+	if name == "" {
+		return nil
+	}
+	var parts []string
+	start := 0
+	for i := 0; i < len(name); i++ {
+		if name[i] == '.' {
+			parts = append(parts, name[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, name[start:])
+	return parts
+}
+
+// joinModuleName joins module name parts with dots
+func joinModuleName(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += "." + parts[i]
+	}
+	return result
+}
+
 // RegisterModule registers a module loader on the VM
 func (vm *VM) RegisterModule(name string, loader ModuleLoader) {
 	moduleRegistry[name] = loader

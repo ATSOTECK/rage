@@ -4086,18 +4086,78 @@ func (vm *VM) run() (Value, error) {
 		case OpImportName:
 			name := frame.Code.Names[arg]
 			fromlist := vm.pop() // fromlist (list of names to import, or nil)
-			_ = vm.pop()         // level (for relative imports, not yet used)
+			levelVal := vm.pop() // level (for relative imports)
 
-			// Try to import the module
-			mod, err := vm.ImportModule(name)
-			if err != nil {
-				return nil, err
+			// Get level as int
+			level := 0
+			if levelInt, ok := levelVal.(*PyInt); ok {
+				level = int(levelInt.Value)
 			}
-			vm.push(mod)
 
-			// If fromlist is provided and non-empty, we're doing "from X import Y"
-			// The actual attribute extraction is done by IMPORT_FROM
-			_ = fromlist
+			// Resolve relative imports
+			moduleName := name
+			if level > 0 {
+				// Get __package__ from globals for relative import resolution
+				packageName := ""
+				if pkgVal, ok := frame.Globals["__package__"]; ok {
+					if pkgStr, ok := pkgVal.(*PyString); ok {
+						packageName = pkgStr.Value
+					}
+				}
+				// If __package__ is not set, try to derive from __name__
+				if packageName == "" {
+					if nameVal, ok := frame.Globals["__name__"]; ok {
+						if nameStr, ok := nameVal.(*PyString); ok {
+							// For a module like "pkg.sub.module", the package is "pkg.sub"
+							// For a package like "pkg.sub", the package is "pkg.sub" itself
+							packageName = nameStr.Value
+						}
+					}
+				}
+
+				resolved, err := ResolveRelativeImport(name, level, packageName)
+				if err != nil {
+					return nil, err
+				}
+				moduleName = resolved
+			}
+
+			// Handle dotted imports (e.g., "import outer.inner")
+			// Need to import each part of the path and return the appropriate module
+			var rootMod, targetMod *PyModule
+			parts := splitModuleName(moduleName)
+
+			for i := range parts {
+				partialName := joinModuleName(parts[:i+1])
+				mod, err := vm.ImportModule(partialName)
+				if err != nil {
+					return nil, err
+				}
+				if i == 0 {
+					rootMod = mod
+				}
+				targetMod = mod
+			}
+
+			// Determine which module to push:
+			// - For "import X.Y.Z": push X (the root), stored as "X" in namespace
+			// - For "from X.Y import Z": push X.Y (the target), for IMPORT_FROM to use
+			hasFromlist := false
+			if fromlist != nil && fromlist != None {
+				if list, ok := fromlist.(*PyList); ok && len(list.Items) > 0 {
+					hasFromlist = true
+				} else if tuple, ok := fromlist.(*PyTuple); ok && len(tuple.Items) > 0 {
+					hasFromlist = true
+				} else if strList, ok := fromlist.([]string); ok && len(strList) > 0 {
+					hasFromlist = true
+				}
+			}
+
+			if hasFromlist {
+				vm.push(targetMod)
+			} else {
+				vm.push(rootMod)
+			}
 
 		case OpImportFrom:
 			name := frame.Code.Names[arg]

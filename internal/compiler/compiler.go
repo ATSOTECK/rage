@@ -499,9 +499,16 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.emitLoadConst(nil) // fromlist
 			c.emitArg(runtime.OpImportName, nameIdx)
 
+			// For "import outer.inner", store as "outer" (root module)
+			// For "import outer.inner as x", store as "x"
 			storeName := alias.Name.Name
 			if alias.AsName != nil {
 				storeName = alias.AsName.Name
+			} else {
+				// Extract just the first part of a dotted name
+				if dotIdx := indexByte(storeName, '.'); dotIdx >= 0 {
+					storeName = storeName[:dotIdx]
+				}
 			}
 			storeIdx := c.addName(storeName)
 			c.emitArg(runtime.OpStoreName, storeIdx)
@@ -2466,4 +2473,14 @@ func CompileSource(source, filename string) (*runtime.CodeObject, []error) {
 	}
 
 	return code, nil
+}
+
+// indexByte returns the index of the first occurrence of c in s, or -1 if not present.
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }

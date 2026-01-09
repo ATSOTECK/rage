@@ -5,9 +5,16 @@ import (
 
 	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/pkg/rage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// newRageState creates a new rage.State with all modules enabled for testing
+func newRageState(t *testing.T) *rage.State {
+	t.Helper()
+	return rage.NewStateWithModules(rage.WithAllModules(), rage.WithAllBuiltins())
+}
 
 // =============================================================================
 // Basic Import Tests
@@ -840,25 +847,247 @@ result = type(math).__name__
 }
 
 // =============================================================================
-// Relative Import Tests (likely not supported)
+// Relative Import Tests
 // =============================================================================
 
-func TestRelativeImport(t *testing.T) {
-	t.Skip("Relative imports not supported")
+func TestRelativeImportSamePackage(t *testing.T) {
+	// Test: from . import sibling
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register a package with two modules
+	err := state.RegisterPythonModule("mypackage.utils", `
+value = 42
+def helper():
+    return "helper called"
+`)
+	require.NoError(t, err)
+
+	err = state.RegisterPythonModule("mypackage.main", `
+from . import utils
+result = utils.value
+helper_result = utils.helper()
+`)
+	require.NoError(t, err)
+
+	// Import and verify
+	_, err = state.Run(`
+import mypackage.main
+result = mypackage.main.result
+helper_result = mypackage.main.helper_result
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	intVal, ok := rage.AsInt(result)
+	require.True(t, ok)
+	assert.Equal(t, int64(42), intVal)
+
+	helperResult := state.GetGlobal("helper_result")
+	require.NotNil(t, helperResult)
+	strVal, ok := rage.AsString(helperResult)
+	require.True(t, ok)
+	assert.Equal(t, "helper called", strVal)
 }
 
-func TestParentRelativeImport(t *testing.T) {
-	t.Skip("Relative imports not supported")
+func TestRelativeImportFromDot(t *testing.T) {
+	// Test: from .module import name
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register modules
+	err := state.RegisterPythonModule("pkg.helpers", `
+PI = 3.14159
+def double(x):
+    return x * 2
+`)
+	require.NoError(t, err)
+
+	err = state.RegisterPythonModule("pkg.consumer", `
+from .helpers import PI, double
+result = double(PI)
+`)
+	require.NoError(t, err)
+
+	// Import and verify
+	_, err = state.Run(`
+import pkg.consumer
+result = pkg.consumer.result
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	floatVal, ok := rage.AsFloat(result)
+	require.True(t, ok)
+	assert.InDelta(t, 6.28318, floatVal, 0.0001)
+}
+
+func TestRelativeImportParentPackage(t *testing.T) {
+	// Test: from .. import sibling
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register a three-level package structure
+	err := state.RegisterPythonModule("top.shared", `
+SHARED_VALUE = "shared"
+`)
+	require.NoError(t, err)
+
+	err = state.RegisterPythonModule("top.sub.module", `
+from .. import shared
+result = shared.SHARED_VALUE
+`)
+	require.NoError(t, err)
+
+	// Import and verify
+	_, err = state.Run(`
+import top.sub.module
+result = top.sub.module.result
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	strVal, ok := rage.AsString(result)
+	require.True(t, ok)
+	assert.Equal(t, "shared", strVal)
+}
+
+func TestRelativeImportParentModule(t *testing.T) {
+	// Test: from ..sibling import name
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register modules
+	err := state.RegisterPythonModule("app.utils.helpers", `
+def greet(name):
+    return "Hello, " + name
+`)
+	require.NoError(t, err)
+
+	err = state.RegisterPythonModule("app.core.main", `
+from ..utils import helpers
+result = helpers.greet("World")
+`)
+	require.NoError(t, err)
+
+	// Import and verify
+	_, err = state.Run(`
+import app.core.main
+result = app.core.main.result
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	strVal, ok := rage.AsString(result)
+	require.True(t, ok)
+	assert.Equal(t, "Hello, World", strVal)
+}
+
+func TestRelativeImportBeyondTopLevel(t *testing.T) {
+	// Test: from .. in a top-level module should fail
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register a module that tries to import beyond its package
+	// For a top-level module "shallow", __package__ is "shallow" (no parent)
+	// So "from .." would try to go above the top level
+	err := state.RegisterPythonModule("shallow", `
+from .. import something
+`)
+	// The error happens during registration because the module code is executed
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ImportError")
+}
+
+func TestRelativeImportNoPackage(t *testing.T) {
+	// Test: relative import in a module without a package should fail
+	state := newRageState(t)
+	defer state.Close()
+
+	// Try relative import in main script (no package context)
+	_, err := state.Run(`from . import something`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ImportError")
 }
 
 // =============================================================================
-// Package Import Tests (likely not supported)
+// Package Import Tests
 // =============================================================================
 
 func TestPackageImport(t *testing.T) {
-	t.Skip("Package imports not supported")
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register a package with an "init" style module
+	err := state.RegisterPythonModule("mypkg", `
+VERSION = "1.0.0"
+def init():
+    return "initialized"
+`)
+	require.NoError(t, err)
+
+	// Import and use
+	_, err = state.Run(`
+import mypkg
+version = mypkg.VERSION
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("version")
+	require.NotNil(t, result)
+	strVal, ok := rage.AsString(result)
+	require.True(t, ok)
+	assert.Equal(t, "1.0.0", strVal)
 }
 
 func TestSubmoduleImport(t *testing.T) {
-	t.Skip("Submodule imports not supported")
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register nested modules
+	err := state.RegisterPythonModule("outer.inner", `
+VALUE = 100
+`)
+	require.NoError(t, err)
+
+	// Import and use
+	_, err = state.Run(`
+import outer.inner
+result = outer.inner.VALUE
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	intVal, ok := rage.AsInt(result)
+	require.True(t, ok)
+	assert.Equal(t, int64(100), intVal)
+}
+
+func TestDeeplyNestedModuleImport(t *testing.T) {
+	state := newRageState(t)
+	defer state.Close()
+
+	// Register deeply nested module
+	err := state.RegisterPythonModule("a.b.c.d", `
+DEEP = "very deep"
+`)
+	require.NoError(t, err)
+
+	// Import and use
+	_, err = state.Run(`
+import a.b.c.d
+result = a.b.c.d.DEEP
+`)
+	require.NoError(t, err)
+
+	result := state.GetGlobal("result")
+	require.NotNil(t, result)
+	strVal, ok := rage.AsString(result)
+	require.True(t, ok)
+	assert.Equal(t, "very deep", strVal)
 }
