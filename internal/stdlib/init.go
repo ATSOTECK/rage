@@ -18,4 +18,5 @@ func InitAllModules() {
 	InitTypingModule()
 	InitCSVModule()
 	InitItertoolsModule()
+	InitFunctoolsModule()
 }

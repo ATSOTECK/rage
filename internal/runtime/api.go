@@ -466,9 +466,30 @@ func IsUserData(v Value) bool {
 
 // IsCallable checks if a value is callable
 func IsCallable(v Value) bool {
-	switch v.(type) {
+	switch val := v.(type) {
 	case *PyFunction, *PyBuiltinFunc, *PyGoFunc, *PyClass, *PyMethod:
 		return true
+	case *PyUserData:
+		// Check for __call__ method in metatable
+		if val.Metatable != nil {
+			var typeName string
+			for k, v := range val.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					if ts, ok := v.(*PyString); ok {
+						typeName = ts.Value
+					}
+					break
+				}
+			}
+			if typeName != "" {
+				if mt := GetRegisteredTypeMetatable(typeName); mt != nil {
+					if _, ok := mt.Methods["__call__"]; ok {
+						return true
+					}
+				}
+			}
+		}
+		return false
 	default:
 		return false
 	}

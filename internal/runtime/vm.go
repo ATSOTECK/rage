@@ -5918,6 +5918,24 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return &PyString{Value: result}, nil
 			}}, nil
 		}
+	case *PyFunction:
+		switch name {
+		case "__name__":
+			return &PyString{Value: o.Name}, nil
+		case "__doc__":
+			return None, nil
+		case "__wrapped__":
+			// Check if we have __wrapped__ stored in closure
+			if o.Closure != nil {
+				for _, cell := range o.Closure {
+					if cell != nil {
+						return cell, nil
+					}
+				}
+			}
+			return nil, fmt.Errorf("'function' object has no attribute '__wrapped__'")
+		}
+		return nil, fmt.Errorf("'function' object has no attribute '%s'", name)
 	}
 	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
 }
@@ -6423,6 +6441,28 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 			}
 		}
 		return instance, nil
+
+	case *PyUserData:
+		// Check for __call__ method in metatable
+		var typeName string
+		if fn.Metatable != nil {
+			for k, v := range fn.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					typeName = vm.str(v)
+					break
+				}
+			}
+		}
+		if typeName != "" {
+			if mt := typeMetatables[typeName]; mt != nil {
+				if callMethod, ok := mt.Methods["__call__"]; ok {
+					// Call the __call__ method with the userdata as first argument
+					allArgs := append([]Value{fn}, args...)
+					return vm.callGoFunction(&PyGoFunc{Name: "__call__", Fn: callMethod}, allArgs)
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
 	}
 	return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
 }

@@ -44,6 +44,7 @@ const (
 	ModuleTyping
 	ModuleCSV
 	ModuleItertools
+	ModuleFunctools
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -63,6 +64,7 @@ var AllModules = []Module{
 	ModuleTyping,
 	ModuleCSV,
 	ModuleItertools,
+	ModuleFunctools,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -331,6 +333,8 @@ func initModule(m Module) {
 		stdlib.InitCSVModule()
 	case ModuleItertools:
 		stdlib.InitItertoolsModule()
+	case ModuleFunctools:
+		stdlib.InitFunctoolsModule()
 	}
 }
 
