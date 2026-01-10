@@ -103,6 +103,19 @@ func (st *SymbolTable) GetEnclosingScopeType() ScopeType {
 	return enclosing.scopeType
 }
 
+// IsInsideClass returns true if this scope or any ancestor is a class scope.
+// Also returns the class scope's SymbolTable if found.
+func (st *SymbolTable) IsInsideClass() (*SymbolTable, bool) {
+	current := st.outer // Skip the current scope (which would be the function)
+	for current != nil {
+		if current.scopeType == ScopeClass {
+			return current, true
+		}
+		current = current.outer
+	}
+	return nil, false
+}
+
 // DefineInEnclosingScope defines a variable in the first non-comprehension outer scope.
 // This is used for walrus operator (:=) in comprehensions, where the variable should
 // be accessible in the enclosing scope per PEP 572.
@@ -222,6 +235,208 @@ func (st *SymbolTable) MarkAsCell(name string) {
 			// The VM will handle this case by looking in the closure
 		}
 	}
+}
+
+// classNeedsClassCell checks if any method in a class body uses 'super' or '__class__'.
+// This is used to determine if the class body needs a __class__ cell variable.
+func classNeedsClassCell(stmts []model.Stmt) bool {
+	for _, stmt := range stmts {
+		if funcDef, ok := stmt.(*model.FunctionDef); ok {
+			// Check if this method uses super() or __class__
+			if usesSuperOrClass(funcDef.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// usesSuperOrClass checks if an AST node uses 'super' or '__class__' references.
+// This is used to determine if a method needs the implicit __class__ closure variable.
+func usesSuperOrClass(stmts []model.Stmt) bool {
+	for _, stmt := range stmts {
+		if usesSuperOrClassStmt(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func usesSuperOrClassStmt(stmt model.Stmt) bool {
+	switch s := stmt.(type) {
+	case *model.ExprStmt:
+		return usesSuperOrClassExpr(s.Value)
+	case *model.Return:
+		if s.Value != nil {
+			return usesSuperOrClassExpr(s.Value)
+		}
+	case *model.Assign:
+		for _, target := range s.Targets {
+			if usesSuperOrClassExpr(target) {
+				return true
+			}
+		}
+		return usesSuperOrClassExpr(s.Value)
+	case *model.AugAssign:
+		return usesSuperOrClassExpr(s.Target) || usesSuperOrClassExpr(s.Value)
+	case *model.AnnAssign:
+		if s.Value != nil && usesSuperOrClassExpr(s.Value) {
+			return true
+		}
+	case *model.If:
+		if usesSuperOrClassExpr(s.Test) {
+			return true
+		}
+		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
+			return true
+		}
+	case *model.While:
+		if usesSuperOrClassExpr(s.Test) {
+			return true
+		}
+		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
+			return true
+		}
+	case *model.For:
+		if usesSuperOrClassExpr(s.Iter) {
+			return true
+		}
+		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
+			return true
+		}
+	case *model.Try:
+		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) || usesSuperOrClass(s.FinalBody) {
+			return true
+		}
+		for _, handler := range s.Handlers {
+			if usesSuperOrClass(handler.Body) {
+				return true
+			}
+		}
+	case *model.With:
+		for _, item := range s.Items {
+			if usesSuperOrClassExpr(item.ContextExpr) {
+				return true
+			}
+		}
+		return usesSuperOrClass(s.Body)
+	case *model.Raise:
+		if s.Exc != nil && usesSuperOrClassExpr(s.Exc) {
+			return true
+		}
+		if s.Cause != nil && usesSuperOrClassExpr(s.Cause) {
+			return true
+		}
+	case *model.Assert:
+		if usesSuperOrClassExpr(s.Test) {
+			return true
+		}
+		if s.Msg != nil && usesSuperOrClassExpr(s.Msg) {
+			return true
+		}
+	}
+	return false
+}
+
+func usesSuperOrClassExpr(expr model.Expr) bool {
+	switch e := expr.(type) {
+	case *model.Identifier:
+		return e.Name == "super" || e.Name == "__class__"
+	case *model.Call:
+		if usesSuperOrClassExpr(e.Func) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if usesSuperOrClassExpr(arg) {
+				return true
+			}
+		}
+		for _, kw := range e.Keywords {
+			if usesSuperOrClassExpr(kw.Value) {
+				return true
+			}
+		}
+	case *model.Attribute:
+		return usesSuperOrClassExpr(e.Value)
+	case *model.Subscript:
+		if usesSuperOrClassExpr(e.Value) {
+			return true
+		}
+		return usesSuperOrClassExpr(e.Slice)
+	case *model.BinaryOp:
+		return usesSuperOrClassExpr(e.Left) || usesSuperOrClassExpr(e.Right)
+	case *model.UnaryOp:
+		return usesSuperOrClassExpr(e.Operand)
+	case *model.BoolOp:
+		for _, v := range e.Values {
+			if usesSuperOrClassExpr(v) {
+				return true
+			}
+		}
+	case *model.Compare:
+		if usesSuperOrClassExpr(e.Left) {
+			return true
+		}
+		for _, comp := range e.Comparators {
+			if usesSuperOrClassExpr(comp) {
+				return true
+			}
+		}
+	case *model.IfExpr:
+		return usesSuperOrClassExpr(e.Test) || usesSuperOrClassExpr(e.Body) || usesSuperOrClassExpr(e.OrElse)
+	case *model.List:
+		for _, elt := range e.Elts {
+			if usesSuperOrClassExpr(elt) {
+				return true
+			}
+		}
+	case *model.Tuple:
+		for _, elt := range e.Elts {
+			if usesSuperOrClassExpr(elt) {
+				return true
+			}
+		}
+	case *model.Dict:
+		for _, k := range e.Keys {
+			if k != nil && usesSuperOrClassExpr(k) {
+				return true
+			}
+		}
+		for _, v := range e.Values {
+			if usesSuperOrClassExpr(v) {
+				return true
+			}
+		}
+	case *model.Set:
+		for _, elt := range e.Elts {
+			if usesSuperOrClassExpr(elt) {
+				return true
+			}
+		}
+	case *model.ListComp:
+		if usesSuperOrClassExpr(e.Elt) {
+			return true
+		}
+	case *model.DictComp:
+		if usesSuperOrClassExpr(e.Key) || usesSuperOrClassExpr(e.Value) {
+			return true
+		}
+	case *model.SetComp:
+		if usesSuperOrClassExpr(e.Elt) {
+			return true
+		}
+	case *model.GeneratorExpr:
+		if usesSuperOrClassExpr(e.Elt) {
+			return true
+		}
+	case *model.Starred:
+		return usesSuperOrClassExpr(e.Value)
+	case *model.Await:
+		return usesSuperOrClassExpr(e.Value)
+	case *model.NamedExpr:
+		return usesSuperOrClassExpr(e.Value)
+	}
+	return false
 }
 
 // Compiler compiles AST to bytecode
@@ -1551,6 +1766,17 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		optimizer:   c.optimizer,
 	}
 
+	// Check if we're inside a class and this method uses super() or __class__
+	// If so, we need to capture __class__ as a free variable
+	if classScope, isInClass := funcCompiler.symbolTable.IsInsideClass(); isInClass {
+		if usesSuperOrClass(s.Body) {
+			// Ensure __class__ is marked as a cell in the class scope
+			classScope.MarkAsCell("__class__")
+			// Resolve __class__ in the function's symbol table to create the free variable
+			funcCompiler.symbolTable.Resolve("__class__")
+		}
+	}
+
 	// Define parameters
 	if s.Args != nil {
 		for _, arg := range s.Args.Args {
@@ -1646,6 +1872,10 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 
 	c.emit(runtime.OpLoadBuildClass)
 
+	// Check if any method in the class uses super() or __class__
+	// If so, we need to set up __class__ as a cell variable
+	needsClassCell := classNeedsClassCell(s.Body)
+
 	// Create class body function
 	classCompiler := &Compiler{
 		code: &runtime.CodeObject{
@@ -1656,6 +1886,12 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 		symbolTable: NewSymbolTable(ScopeClass, c.symbolTable),
 		filename:    c.filename,
 		optimizer:   c.optimizer,
+	}
+
+	// If any method uses super(), define __class__ as a cell in the class scope
+	if needsClassCell {
+		classCompiler.symbolTable.Define("__class__")
+		classCompiler.symbolTable.MarkAsCell("__class__")
 	}
 
 	// Compile class body

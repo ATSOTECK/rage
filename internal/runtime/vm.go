@@ -1764,8 +1764,8 @@ func (vm *VM) initBuiltins() {
 				bases = []*PyClass{objectClass}
 			}
 
-			// Execute the class body to get the namespace
-			classDict, err := vm.callClassBody(bodyFunc)
+			// Execute the class body to get the namespace and cells
+			classDict, cells, err := vm.callClassBody(bodyFunc)
 			if err != nil {
 				return nil, fmt.Errorf("__build_class__: error executing class body: %w", err)
 			}
@@ -1783,6 +1783,15 @@ func (vm *VM) initBuiltins() {
 				return nil, err
 			}
 			class.Mro = mro
+
+			// Populate the __class__ cell if present (for zero-argument super() support)
+			// The __class__ cell is created by the compiler when methods use super()
+			for i, cellName := range bodyFunc.Code.CellVars {
+				if cellName == "__class__" && i < len(cells) && cells[i] != nil {
+					cells[i].Value = class
+					break
+				}
+			}
 
 			return class, nil
 		},
@@ -8103,8 +8112,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 }
 
 // callClassBody executes a class body function with a fresh namespace
-// and returns the namespace dict (not the function's return value)
-func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, error) {
+// and returns the namespace dict (not the function's return value) and any cells
+// (for populating __class__ after class creation)
+func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, error) {
 	code := fn.Code
 
 	// Create a fresh namespace for the class body
@@ -8123,6 +8133,20 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, error) {
 		Builtins:         vm.builtins,
 	}
 
+	// Set up cells for the class body (for __class__ cell and other captured variables)
+	numCells := len(code.CellVars) + len(code.FreeVars)
+	if numCells > 0 || len(fn.Closure) > 0 {
+		frame.Cells = make([]*PyCell, numCells)
+		// CellVars are new cells for our locals that will be captured
+		for i := 0; i < len(code.CellVars); i++ {
+			frame.Cells[i] = &PyCell{}
+		}
+		// FreeVars come from the function's closure (if any)
+		for i, cell := range fn.Closure {
+			frame.Cells[len(code.CellVars)+i] = cell
+		}
+	}
+
 	// Push frame
 	vm.frames = append(vm.frames, frame)
 	oldFrame := vm.frame
@@ -8135,10 +8159,10 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, error) {
 	vm.frame = oldFrame
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return classNamespace, nil
+	return classNamespace, frame.Cells, nil
 }
 
 // Run executes Python source code
