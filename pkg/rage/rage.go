@@ -45,6 +45,7 @@ const (
 	ModuleCSV
 	ModuleItertools
 	ModuleFunctools
+	ModuleBase64
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -65,6 +66,7 @@ var AllModules = []Module{
 	ModuleCSV,
 	ModuleItertools,
 	ModuleFunctools,
+	ModuleBase64,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -335,6 +337,8 @@ func initModule(m Module) {
 		stdlib.InitItertoolsModule()
 	case ModuleFunctools:
 		stdlib.InitFunctoolsModule()
+	case ModuleBase64:
+		stdlib.InitBase64Module()
 	}
 }
 

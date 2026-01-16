@@ -19,4 +19,5 @@ func InitAllModules() {
 	InitCSVModule()
 	InitItertoolsModule()
 	InitFunctoolsModule()
+	InitBase64Module()
 }
