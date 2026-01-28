@@ -222,6 +222,14 @@ func hashValue(v Value) uint64 {
 		return uint64(ptrValue(v))
 	case *PyBuiltinFunc:
 		return uint64(ptrValue(v))
+	case *PyFrozenSet:
+		// Hash frozenset by XORing element hashes (order-independent)
+		h := uint64(0xcbf29ce484222325)
+		for item := range val.Items {
+			itemHash := hashValue(item)
+			h ^= itemHash
+		}
+		return h
 	default:
 		// Default to pointer hash for other types
 		return uint64(ptrValue(v))
@@ -457,6 +465,72 @@ func (s *PySet) SetRemove(value Value, vm *VM) bool {
 
 // SetLen returns the number of items
 func (s *PySet) SetLen() int {
+	if s.buckets != nil {
+		return s.size
+	}
+	return len(s.Items)
+}
+
+// PyFrozenSet represents an immutable Python frozenset
+type PyFrozenSet struct {
+	Items   map[Value]struct{}    // Legacy field for compatibility
+	buckets map[uint64][]setEntry // Hash buckets for O(1) lookup
+	size    int
+}
+
+func (s *PyFrozenSet) Type() string { return "frozenset" }
+func (s *PyFrozenSet) String() string {
+	if len(s.Items) == 0 {
+		return "frozenset()"
+	}
+	return fmt.Sprintf("frozenset(%v)", s.Items)
+}
+
+// FrozenSetAdd adds a value to the frozenset (used during construction)
+func (s *PyFrozenSet) FrozenSetAdd(value Value, vm *VM) {
+	if s.buckets == nil {
+		s.buckets = make(map[uint64][]setEntry)
+	}
+	h := hashValue(value)
+	entries := s.buckets[h]
+	for _, e := range entries {
+		if vm.equal(e.value, value) {
+			return // Already exists
+		}
+	}
+	s.buckets[h] = append(entries, setEntry{value: value})
+	s.size++
+	if s.Items == nil {
+		s.Items = make(map[Value]struct{})
+	}
+	s.Items[value] = struct{}{}
+}
+
+// FrozenSetContains checks if a value exists using hash-based lookup
+func (s *PyFrozenSet) FrozenSetContains(value Value, vm *VM) bool {
+	if s.buckets == nil {
+		if _, ok := s.Items[value]; ok {
+			return true
+		}
+		for k := range s.Items {
+			if vm.equal(k, value) {
+				return true
+			}
+		}
+		return false
+	}
+	h := hashValue(value)
+	entries := s.buckets[h]
+	for _, e := range entries {
+		if vm.equal(e.value, value) {
+			return true
+		}
+	}
+	return false
+}
+
+// FrozenSetLen returns the number of items
+func (s *PyFrozenSet) FrozenSetLen() int {
 	if s.buckets != nil {
 		return s.size
 	}
@@ -808,6 +882,8 @@ func (vm *VM) initBuiltins() {
 				return MakeInt(int64(len(v.Items))), nil
 			case *PySet:
 				return MakeInt(int64(len(v.Items))), nil
+			case *PyFrozenSet:
+				return MakeInt(int64(len(v.Items))), nil
 			case *PyBytes:
 				return MakeInt(int64(len(v.Value))), nil
 			default:
@@ -970,6 +1046,26 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	vm.builtins["frozenset"] = &PyBuiltinFunc{
+		Name: "frozenset",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			fs := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+			if len(args) > 0 {
+				items, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for _, item := range items {
+					if !isHashable(item) {
+						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+					}
+					fs.FrozenSetAdd(item, vm)
+				}
+			}
+			return fs, nil
+		},
+	}
+
 	vm.builtins["type"] = &PyBuiltinFunc{
 		Name: "type",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -1009,6 +1105,8 @@ func (vm *VM) initBuiltins() {
 					return typeName == "dict" || typeName == "object"
 				case *PySet:
 					return typeName == "set" || typeName == "object"
+				case *PyFrozenSet:
+					return typeName == "frozenset" || typeName == "object"
 				case *PyBytes:
 					return typeName == "bytes" || typeName == "object"
 				case *PyNone:
@@ -3042,6 +3140,8 @@ func (vm *VM) run() (Value, error) {
 				length = int64(len(v.Items))
 			case *PySet:
 				length = int64(len(v.Items))
+			case *PyFrozenSet:
+				length = int64(len(v.Items))
 			case *PyBytes:
 				length = int64(len(v.Value))
 			default:
@@ -4622,6 +4722,12 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			items = append(items, k)
 		}
 		return items, nil
+	case *PyFrozenSet:
+		var items []Value
+		for k := range val.Items {
+			items = append(items, k)
+		}
+		return items, nil
 	case *PyDict:
 		var items []Value
 		for k := range val.Items {
@@ -4655,6 +4761,8 @@ func (vm *VM) truthy(v Value) bool {
 		return len(val.Items) > 0
 	case *PySet:
 		return len(val.Items) > 0
+	case *PyFrozenSet:
+		return len(val.Items) > 0
 	default:
 		return true
 	}
@@ -4685,6 +4793,11 @@ func (vm *VM) str(v Value) string {
 		return fmt.Sprintf("%v", val.Items)
 	case *PySet:
 		return fmt.Sprintf("%v", val.Items)
+	case *PyFrozenSet:
+		if len(val.Items) == 0 {
+			return "frozenset()"
+		}
+		return fmt.Sprintf("frozenset(%v)", val.Items)
 	case *PyFunction:
 		return fmt.Sprintf("<function %s>", val.Name)
 	case *PyBuiltinFunc:
@@ -4800,6 +4913,8 @@ func (vm *VM) typeName(v Value) string {
 		return "dict"
 	case *PySet:
 		return "set"
+	case *PyFrozenSet:
+		return "frozenset"
 	case *PyFunction:
 		return "function"
 	case *PyBuiltinFunc:
@@ -5015,6 +5130,166 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 					items = append(items, al.Items...)
 				}
 				return &PyList{Items: items}, nil
+			}
+		}
+	}
+
+	// Set/FrozenSet operations: |, &, -, ^
+	if op == OpBinaryOr || op == OpBinaryAnd || op == OpBinarySubtract || op == OpBinaryXor {
+		// Helper to get items from set or frozenset
+		getSetItems := func(v Value) (map[Value]struct{}, bool) {
+			switch s := v.(type) {
+			case *PySet:
+				return s.Items, true
+			case *PyFrozenSet:
+				return s.Items, true
+			}
+			return nil, false
+		}
+
+		aItems, aIsSet := getSetItems(a)
+		bItems, bIsSet := getSetItems(b)
+
+		if aIsSet && bIsSet {
+			// Determine return type: frozenset if both are frozenset, otherwise set
+			_, aIsFrozen := a.(*PyFrozenSet)
+			_, bIsFrozen := b.(*PyFrozenSet)
+			returnFrozen := aIsFrozen && bIsFrozen
+
+			switch op {
+			case OpBinaryOr: // Union
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						result.FrozenSetAdd(k, vm)
+					}
+					for k := range bItems {
+						result.FrozenSetAdd(k, vm)
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					result.SetAdd(k, vm)
+				}
+				for k := range bItems {
+					result.SetAdd(k, vm)
+				}
+				return result, nil
+
+			case OpBinaryAnd: // Intersection
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								result.FrozenSetAdd(k, vm)
+								break
+							}
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							result.SetAdd(k, vm)
+							break
+						}
+					}
+				}
+				return result, nil
+
+			case OpBinarySubtract: // Difference
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						found := false
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					found := false
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				return result, nil
+
+			case OpBinaryXor: // Symmetric difference
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					// Add items from a not in b
+					for k := range aItems {
+						found := false
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					// Add items from b not in a
+					for k := range bItems {
+						found := false
+						for k2 := range aItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					found := false
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				for k := range bItems {
+					found := false
+					for k2 := range aItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				return result, nil
 			}
 		}
 	}
@@ -5258,6 +5533,54 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			}
 			return true
 		}
+	case *PySet:
+		// Set can equal another set or frozenset
+		switch bv := b.(type) {
+		case *PySet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.SetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		case *PyFrozenSet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.FrozenSetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyFrozenSet:
+		// FrozenSet can equal another frozenset or set
+		switch bv := b.(type) {
+		case *PyFrozenSet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.FrozenSetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		case *PySet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.SetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		}
 	case *PyClass:
 		// Classes are compared by identity
 		return a == b
@@ -5341,6 +5664,9 @@ func (vm *VM) contains(container, item Value) bool {
 	case *PySet:
 		// Use hash-based lookup for O(1) average case
 		return c.SetContains(item, vm)
+	case *PyFrozenSet:
+		// Use hash-based lookup for O(1) average case
+		return c.FrozenSetContains(item, vm)
 	case *PyDict:
 		// Use hash-based lookup for O(1) average case
 		return c.DictContains(item, vm)
@@ -5803,6 +6129,203 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					items = append(items, &PyTuple{Items: []Value{k, v}})
 				}
 				return &PyList{Items: items}, nil
+			}}, nil
+		}
+	case *PyFrozenSet:
+		fs := o
+		if name == "copy" {
+			return &PyBuiltinFunc{Name: "frozenset.copy", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				newFS := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range fs.Items {
+					newFS.FrozenSetAdd(k, vm)
+				}
+				return newFS, nil
+			}}, nil
+		}
+		if name == "union" {
+			return &PyBuiltinFunc{Name: "frozenset.union", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range fs.Items {
+					result.FrozenSetAdd(k, vm)
+				}
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						if !isHashable(item) {
+							return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+						}
+						result.FrozenSetAdd(item, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		}
+		if name == "intersection" {
+			return &PyBuiltinFunc{Name: "frozenset.intersection", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				if len(args) == 0 {
+					for k := range fs.Items {
+						result.FrozenSetAdd(k, vm)
+					}
+					return result, nil
+				}
+				// Start with items from this frozenset that are in all other sets
+				for k := range fs.Items {
+					inAll := true
+					for _, arg := range args {
+						items, err := vm.toList(arg)
+						if err != nil {
+							return nil, err
+						}
+						found := false
+						for _, item := range items {
+							if vm.equal(k, item) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							inAll = false
+							break
+						}
+					}
+					if inAll {
+						result.FrozenSetAdd(k, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		}
+		if name == "difference" {
+			return &PyBuiltinFunc{Name: "frozenset.difference", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range fs.Items {
+					result.FrozenSetAdd(k, vm)
+				}
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						// Remove if present
+						for rk := range result.Items {
+							if vm.equal(rk, item) {
+								delete(result.Items, rk)
+								// Also remove from buckets
+								if result.buckets != nil {
+									h := hashValue(rk)
+									entries := result.buckets[h]
+									for i, e := range entries {
+										if vm.equal(e.value, rk) {
+											result.buckets[h] = append(entries[:i], entries[i+1:]...)
+											result.size--
+											break
+										}
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+				return result, nil
+			}}, nil
+		}
+		if name == "symmetric_difference" {
+			return &PyBuiltinFunc{Name: "frozenset.symmetric_difference", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("symmetric_difference() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				// Add items from fs that are not in other
+				for k := range fs.Items {
+					found := false
+					for _, item := range other {
+						if vm.equal(k, item) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.FrozenSetAdd(k, vm)
+					}
+				}
+				// Add items from other that are not in fs
+				for _, item := range other {
+					if !isHashable(item) {
+						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+					}
+					if !fs.FrozenSetContains(item, vm) {
+						result.FrozenSetAdd(item, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		}
+		if name == "issubset" {
+			return &PyBuiltinFunc{Name: "frozenset.issubset", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("issubset() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for k := range fs.Items {
+					found := false
+					for _, item := range other {
+						if vm.equal(k, item) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		}
+		if name == "issuperset" {
+			return &PyBuiltinFunc{Name: "frozenset.issuperset", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("issuperset() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for _, item := range other {
+					if !fs.FrozenSetContains(item, vm) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		}
+		if name == "isdisjoint" {
+			return &PyBuiltinFunc{Name: "frozenset.isdisjoint", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("isdisjoint() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for _, item := range other {
+					if fs.FrozenSetContains(item, vm) {
+						return False, nil
+					}
+				}
+				return True, nil
 			}}, nil
 		}
 	case *PyList:
