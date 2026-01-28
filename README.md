@@ -11,7 +11,7 @@ applications without any external dependencies or CGO.
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, base64
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -205,6 +205,7 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | itertools | `rage.ModuleItertools` | Iterator building blocks (chain, combinations, permutations, etc.) |
 | functools | `rage.ModuleFunctools` | Higher-order functions (partial, reduce, lru_cache, wraps) |
 | io | `rage.ModuleIO` | File I/O operations |
+| base64 | `rage.ModuleBase64` | Base16, Base32, Base64 data encodings |
 
 ## Working with Values
 
@@ -315,11 +316,11 @@ if err != nil {
 RAGE is under active development. Currently supported:
 
 ### Implemented
-- Data types: None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set, range, slice
+- Data types: None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set, frozenset, range, slice
 - Operators: arithmetic, comparison, logical, bitwise, in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments
-- Classes: class definitions, `__init__`, instance attributes, methods, inheritance, properties, classmethods, staticmethods
+- Classes: class definitions, `__init__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods
 - Exception handling: try/except/else/finally, raise, custom exception types
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
@@ -331,7 +332,6 @@ RAGE is under active development. Currently supported:
 - Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
-- Full multiple inheritance (MRO is simplified)
 - Full async/await (basic support via asyncio module)
 
 ### Security Notes
