@@ -1,0 +1,307 @@
+package runtime
+
+import "fmt"
+
+// Function calls
+
+func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value, error) {
+	switch fn := callable.(type) {
+	case *PyBuiltinFunc:
+		return fn.Fn(args, kwargs)
+
+	case *PyGoFunc:
+		// Call Go function with gopher-lua style stack-based API
+		return vm.callGoFunction(fn, args)
+
+	case *PyFunction:
+		return vm.callFunction(fn, args, kwargs)
+
+	case *PyMethod:
+		// Prepend instance to args
+		allArgs := append([]Value{fn.Instance}, args...)
+		return vm.callFunction(fn.Func, allArgs, kwargs)
+
+	case *PyClass:
+		// Create instance and call __init__
+		instance := &PyInstance{
+			Class: fn,
+			Dict:  make(map[string]Value),
+		}
+
+		// Special handling for exception classes - set args attribute
+		if vm.isExceptionClass(fn) {
+			// Convert args to PyTuple for the args attribute
+			tupleItems := make([]Value, len(args))
+			copy(tupleItems, args)
+			instance.Dict["args"] = &PyTuple{Items: tupleItems}
+		}
+
+		// Look for __init__ in class MRO
+		for _, cls := range fn.Mro {
+			if init, ok := cls.Dict["__init__"]; ok {
+				if initFn, ok := init.(*PyFunction); ok {
+					allArgs := append([]Value{instance}, args...)
+					_, err := vm.callFunction(initFn, allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
+				}
+				break
+			}
+		}
+		return instance, nil
+
+	case *PyUserData:
+		// Check for __call__ method in metatable
+		var typeName string
+		if fn.Metatable != nil {
+			for k, v := range fn.Metatable.Items {
+				if ks, ok := k.(*PyString); ok && ks.Value == "__type__" {
+					typeName = vm.str(v)
+					break
+				}
+			}
+		}
+		if typeName != "" {
+			if mt := typeMetatables[typeName]; mt != nil {
+				if callMethod, ok := mt.Methods["__call__"]; ok {
+					// Call the __call__ method with the userdata as first argument
+					allArgs := append([]Value{fn}, args...)
+					return vm.callGoFunction(&PyGoFunc{Name: "__call__", Fn: callMethod}, allArgs)
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+
+	case *PyInstance:
+		// Check for __call__ method
+		// We need to look up __call__ via MRO and call it with kwargs support
+		for _, cls := range fn.Class.Mro {
+			if method, ok := cls.Dict["__call__"]; ok {
+				if callFn, ok := method.(*PyFunction); ok {
+					// Prepend instance as self
+					allArgs := append([]Value{fn}, args...)
+					return vm.callFunction(callFn, allArgs, kwargs)
+				}
+				if callBuiltin, ok := method.(*PyBuiltinFunc); ok {
+					allArgs := append([]Value{fn}, args...)
+					return callBuiltin.Fn(allArgs, kwargs)
+				}
+			}
+		}
+		// Fallback: check class dict directly if MRO is empty
+		if len(fn.Class.Mro) == 0 {
+			if method, ok := fn.Class.Dict["__call__"]; ok {
+				if callFn, ok := method.(*PyFunction); ok {
+					allArgs := append([]Value{fn}, args...)
+					return vm.callFunction(callFn, allArgs, kwargs)
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+	}
+	return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+}
+
+// callGoFunction calls a Go function with stack-based argument passing
+func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
+	// Save current frame state
+	oldFrame := vm.frame
+
+	// Create a temporary frame for the Go function call
+	tempFrame := &Frame{
+		Stack:    make([]Value, len(args)+16),
+		SP:       0,
+		Globals:  vm.Globals,
+		Builtins: vm.builtins,
+	}
+
+	// Push arguments onto the temporary frame's stack
+	for _, arg := range args {
+		tempFrame.Stack[tempFrame.SP] = arg
+		tempFrame.SP++
+	}
+
+	vm.frame = tempFrame
+
+	// Call the Go function - it returns number of results
+	var nResults int
+	var panicErr *PyPanicError
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Check if it's a typed PyPanicError for better exception mapping
+				if pe, ok := r.(*PyPanicError); ok {
+					panicErr = pe
+				} else {
+					// Generic panic - convert to string
+					panicErr = &PyPanicError{
+						ExcType: "RuntimeError",
+						Message: fmt.Sprintf("%v", r),
+					}
+				}
+				nResults = -1 // Indicate error
+			}
+		}()
+		nResults = fn.Fn(vm)
+	}()
+
+	// Restore frame
+	vm.frame = oldFrame
+
+	// Handle error case
+	if nResults < 0 {
+		return nil, fmt.Errorf("%s: %s", panicErr.ExcType, panicErr.Message)
+	}
+
+	// Get results from stack
+	if nResults == 0 {
+		return None, nil
+	} else if nResults == 1 {
+		return tempFrame.Stack[tempFrame.SP-1], nil
+	} else {
+		// Multiple returns - return as tuple
+		results := make([]Value, nResults)
+		for i := 0; i < nResults; i++ {
+			results[i] = tempFrame.Stack[tempFrame.SP-nResults+i]
+		}
+		return &PyTuple{Items: results}, nil
+	}
+}
+
+func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value) (Value, error) {
+	code := fn.Code
+
+	// Check if this is a generator or coroutine - if so, create the appropriate object
+	// instead of executing immediately
+	if code.Flags&FlagGenerator != 0 {
+		return vm.createGenerator(fn, args, kwargs)
+	}
+	if code.Flags&FlagCoroutine != 0 {
+		return vm.createCoroutine(fn, args, kwargs)
+	}
+	if code.Flags&FlagAsyncGenerator != 0 {
+		// For now, treat async generators like coroutines
+		return vm.createCoroutine(fn, args, kwargs)
+	}
+
+	// Create new frame for regular function call
+	frame := vm.createFunctionFrame(fn, args, kwargs)
+
+	// Push frame
+	vm.frames = append(vm.frames, frame)
+	oldFrame := vm.frame
+	vm.frame = frame
+
+	// Execute
+	result, err := vm.run()
+
+	// Pop frame - but only if exception handling didn't already unwind past us
+	if err != errExceptionHandledInOuterFrame {
+		vm.frame = oldFrame
+	}
+
+	return result, err
+}
+
+// createFunctionFrame creates a new frame for a function call without executing it
+func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[string]Value) *Frame {
+	code := fn.Code
+
+	// Create new frame
+	frame := &Frame{
+		Code:     code,
+		IP:       0,
+		Stack:    make([]Value, code.StackSize+16), // Pre-allocate
+		SP:       0,
+		Locals:   make([]Value, len(code.VarNames)),
+		Globals:  fn.Globals,
+		Builtins: vm.builtins,
+	}
+
+	// Set up closure cells
+	// Cells include CellVars (our variables captured by inner functions) and FreeVars (from closure)
+	numCells := len(code.CellVars) + len(code.FreeVars)
+	if numCells > 0 || len(fn.Closure) > 0 {
+		frame.Cells = make([]*PyCell, numCells)
+		// CellVars are new cells for our locals that will be captured
+		for i := 0; i < len(code.CellVars); i++ {
+			frame.Cells[i] = &PyCell{}
+		}
+		// FreeVars come from the function's closure
+		for i, cell := range fn.Closure {
+			frame.Cells[len(code.CellVars)+i] = cell
+		}
+	}
+
+	// Bind arguments to locals
+	for i, arg := range args {
+		if i < len(frame.Locals) {
+			frame.Locals[i] = arg
+		}
+	}
+
+	// If any arguments are CellVars (captured by inner functions), initialize cells with args
+	// CellVars contain names of captured parameters - match by name against VarNames
+	for cellIdx, cellName := range code.CellVars {
+		// Find if this cell var corresponds to a parameter (in first ArgCount VarNames)
+		for argIdx := 0; argIdx < code.ArgCount && argIdx < len(code.VarNames); argIdx++ {
+			if code.VarNames[argIdx] == cellName && argIdx < len(args) {
+				// This parameter is captured, initialize its cell with the argument
+				if cellIdx < len(frame.Cells) && frame.Cells[cellIdx] != nil {
+					frame.Cells[cellIdx].Value = args[argIdx]
+				}
+				break
+			}
+		}
+	}
+
+	// Apply keyword arguments to the appropriate local slots
+	if kwargs != nil {
+		for name, val := range kwargs {
+			// Find the parameter index by name
+			for i, varName := range code.VarNames {
+				if varName == name && i < code.ArgCount {
+					frame.Locals[i] = val
+					break
+				}
+			}
+		}
+	}
+
+	// Apply defaults for missing arguments
+	if fn.Defaults != nil {
+		numDefaults := len(fn.Defaults.Items)
+		startDefault := code.ArgCount - numDefaults
+		for i := 0; i < numDefaults; i++ {
+			argIdx := startDefault + i
+			if argIdx < len(frame.Locals) && frame.Locals[argIdx] == nil {
+				frame.Locals[argIdx] = fn.Defaults.Items[i]
+			}
+		}
+	}
+
+	return frame
+}
+
+// createGenerator creates a new generator object from a generator function
+func (vm *VM) createGenerator(fn *PyFunction, args []Value, kwargs map[string]Value) (*PyGenerator, error) {
+	frame := vm.createFunctionFrame(fn, args, kwargs)
+	return &PyGenerator{
+		Frame: frame,
+		Code:  fn.Code,
+		Name:  fn.Name,
+		State: GenCreated,
+	}, nil
+}
+
+// createCoroutine creates a new coroutine object from an async function
+func (vm *VM) createCoroutine(fn *PyFunction, args []Value, kwargs map[string]Value) (*PyCoroutine, error) {
+	frame := vm.createFunctionFrame(fn, args, kwargs)
+	return &PyCoroutine{
+		Frame: frame,
+		Code:  fn.Code,
+		Name:  fn.Name,
+		State: GenCreated,
+	}, nil
+}

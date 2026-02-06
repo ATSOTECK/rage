@@ -1,0 +1,881 @@
+package runtime
+
+import (
+	"fmt"
+	"math"
+	"strings"
+)
+
+// isInstanceOf checks if an instance is an instance of a class (including subclasses)
+func (vm *VM) isInstanceOf(inst *PyInstance, cls *PyClass) bool {
+	// Direct class match
+	if inst.Class == cls {
+		return true
+	}
+	// Check base classes recursively
+	return vm.isSubclassOf(inst.Class, cls)
+}
+
+// isSubclassOf checks if cls is a subclass of target
+func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
+	if cls == target {
+		return true
+	}
+	for _, base := range cls.Bases {
+		if vm.isSubclassOf(base, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// Operations
+
+// callDunder looks up and calls a dunder method on an instance via MRO.
+// Returns (result, found, error) - found is true if the method exists.
+func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Value, bool, error) {
+	// Search MRO for the method
+	if len(instance.Class.Mro) > 0 {
+		for _, cls := range instance.Class.Mro {
+			if method, ok := cls.Dict[name]; ok {
+				// Prepend instance as self
+				allArgs := append([]Value{instance}, args...)
+				switch fn := method.(type) {
+				case *PyFunction:
+					result, err := vm.callFunction(fn, allArgs, nil)
+					return result, true, err
+				case *PyBuiltinFunc:
+					result, err := fn.Fn(allArgs, nil)
+					return result, true, err
+				}
+			}
+		}
+	} else {
+		// Fallback: check instance's class dict directly if MRO is empty
+		if method, ok := instance.Class.Dict[name]; ok {
+			allArgs := append([]Value{instance}, args...)
+			switch fn := method.(type) {
+			case *PyFunction:
+				result, err := vm.callFunction(fn, allArgs, nil)
+				return result, true, err
+			case *PyBuiltinFunc:
+				result, err := fn.Fn(allArgs, nil)
+				return result, true, err
+			}
+		}
+	}
+	return nil, false, nil
+}
+
+func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
+	// Check for dunder methods on instances
+	if inst, ok := a.(*PyInstance); ok {
+		var methodName string
+		switch op {
+		case OpUnaryNegative:
+			methodName = "__neg__"
+		case OpUnaryInvert:
+			methodName = "__invert__"
+		}
+		if methodName != "" {
+			if result, found, err := vm.callDunder(inst, methodName); found {
+				return result, err
+			}
+		}
+	}
+
+	switch op {
+	case OpUnaryNegative:
+		switch v := a.(type) {
+		case *PyInt:
+			return MakeInt(-v.Value), nil
+		case *PyFloat:
+			return &PyFloat{Value: -v.Value}, nil
+		}
+	case OpUnaryInvert:
+		if v, ok := a.(*PyInt); ok {
+			return MakeInt(^v.Value), nil
+		}
+	}
+	return nil, fmt.Errorf("bad operand type for unary %s: '%s'", op.String(), vm.typeName(a))
+}
+
+func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	// Check for dunder methods on instances first
+	dunders := map[Opcode]struct{ forward, reverse string }{
+		OpBinaryAdd:      {"__add__", "__radd__"},
+		OpBinarySubtract: {"__sub__", "__rsub__"},
+		OpBinaryMultiply: {"__mul__", "__rmul__"},
+		OpBinaryDivide:   {"__truediv__", "__rtruediv__"},
+		OpBinaryFloorDiv: {"__floordiv__", "__rfloordiv__"},
+		OpBinaryModulo:   {"__mod__", "__rmod__"},
+		OpBinaryPower:    {"__pow__", "__rpow__"},
+		OpBinaryAnd:      {"__and__", "__rand__"},
+		OpBinaryOr:       {"__or__", "__ror__"},
+		OpBinaryXor:      {"__xor__", "__rxor__"},
+		OpBinaryLShift:   {"__lshift__", "__rlshift__"},
+		OpBinaryRShift:   {"__rshift__", "__rrshift__"},
+	}
+
+	if dunder, ok := dunders[op]; ok {
+		// Try forward method on left operand
+		if inst, ok := a.(*PyInstance); ok {
+			if result, found, err := vm.callDunder(inst, dunder.forward, b); found {
+				// Check for NotImplemented sentinel (we return nil in that case)
+				if result != nil {
+					return result, err
+				}
+			}
+		}
+		// Try reverse method on right operand
+		if inst, ok := b.(*PyInstance); ok {
+			if result, found, err := vm.callDunder(inst, dunder.reverse, a); found {
+				if result != nil {
+					return result, err
+				}
+			}
+		}
+	}
+
+	// Fast path: int op int (most common case in numeric code)
+	if ai, ok := a.(*PyInt); ok {
+		if bi, ok := b.(*PyInt); ok {
+			switch op {
+			case OpBinaryAdd:
+				return MakeInt(ai.Value + bi.Value), nil
+			case OpBinarySubtract:
+				return MakeInt(ai.Value - bi.Value), nil
+			case OpBinaryMultiply:
+				return MakeInt(ai.Value * bi.Value), nil
+			case OpBinaryDivide:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("division by zero")
+				}
+				return &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}, nil
+			case OpBinaryFloorDiv:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("integer division by zero")
+				}
+				// Python floor division: always rounds toward negative infinity
+				result := ai.Value / bi.Value
+				// If signs differ and there's a remainder, adjust toward -inf
+				if (ai.Value < 0) != (bi.Value < 0) && ai.Value%bi.Value != 0 {
+					result--
+				}
+				return MakeInt(result), nil
+			case OpBinaryModulo:
+				if bi.Value == 0 {
+					return nil, fmt.Errorf("integer modulo by zero")
+				}
+				// Python modulo: result has same sign as divisor
+				result := ai.Value % bi.Value
+				if result != 0 && (result < 0) != (bi.Value < 0) {
+					result += bi.Value
+				}
+				return MakeInt(result), nil
+			case OpBinaryPower:
+				// Use integer exponentiation to avoid float precision loss
+				if bi.Value < 0 {
+					// Negative exponent returns float
+					return &PyFloat{Value: math.Pow(float64(ai.Value), float64(bi.Value))}, nil
+				}
+				return MakeInt(intPow(ai.Value, bi.Value)), nil
+			case OpBinaryLShift:
+				if bi.Value < 0 {
+					return nil, fmt.Errorf("ValueError: negative shift count")
+				}
+				if bi.Value > 63 {
+					// For very large shifts, result is 0 (or overflow behavior)
+					if ai.Value == 0 {
+						return MakeInt(0), nil
+					}
+					return MakeInt(0), nil // Simplified: large left shifts overflow to 0
+				}
+				return MakeInt(ai.Value << uint(bi.Value)), nil
+			case OpBinaryRShift:
+				if bi.Value < 0 {
+					return nil, fmt.Errorf("ValueError: negative shift count")
+				}
+				if bi.Value > 63 {
+					// Right shift by large amount gives 0 or -1 (for negative numbers)
+					if ai.Value < 0 {
+						return MakeInt(-1), nil
+					}
+					return MakeInt(0), nil
+				}
+				return MakeInt(ai.Value >> uint(bi.Value)), nil
+			case OpBinaryAnd:
+				return MakeInt(ai.Value & bi.Value), nil
+			case OpBinaryOr:
+				return MakeInt(ai.Value | bi.Value), nil
+			case OpBinaryXor:
+				return MakeInt(ai.Value ^ bi.Value), nil
+			}
+		}
+	}
+
+	// Handle string concatenation
+	if op == OpBinaryAdd {
+		if as, ok := a.(*PyString); ok {
+			if bs, ok := b.(*PyString); ok {
+				return &PyString{Value: as.Value + bs.Value}, nil
+			}
+		}
+		// List concatenation
+		if al, ok := a.(*PyList); ok {
+			if bl, ok := b.(*PyList); ok {
+				items := make([]Value, len(al.Items)+len(bl.Items))
+				copy(items, al.Items)
+				copy(items[len(al.Items):], bl.Items)
+				return &PyList{Items: items}, nil
+			}
+		}
+	}
+
+	// String repetition - use strings.Repeat for O(n) instead of O(n²)
+	// Limit maximum result size to 100MB to prevent memory exhaustion
+	const maxStringRepeatSize = 100 * 1024 * 1024
+	if op == OpBinaryMultiply {
+		if as, ok := a.(*PyString); ok {
+			if bi, ok := b.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyString{Value: ""}, nil
+				}
+				resultSize := int64(len(as.Value)) * bi.Value
+				if resultSize > maxStringRepeatSize {
+					return nil, fmt.Errorf("MemoryError: string repetition result too large")
+				}
+				return &PyString{Value: strings.Repeat(as.Value, int(bi.Value))}, nil
+			}
+		}
+		if as, ok := b.(*PyString); ok {
+			if ai, ok := a.(*PyInt); ok {
+				if ai.Value <= 0 {
+					return &PyString{Value: ""}, nil
+				}
+				resultSize := int64(len(as.Value)) * ai.Value
+				if resultSize > maxStringRepeatSize {
+					return nil, fmt.Errorf("MemoryError: string repetition result too large")
+				}
+				return &PyString{Value: strings.Repeat(as.Value, int(ai.Value))}, nil
+			}
+		}
+		// List repetition - pre-allocate for efficiency
+		// Limit maximum result size to 10M items to prevent memory exhaustion
+		const maxListRepeatItems = 10 * 1024 * 1024
+		if al, ok := a.(*PyList); ok {
+			if bi, ok := b.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyList{Items: []Value{}}, nil
+				}
+				resultItems := int64(len(al.Items)) * bi.Value
+				if resultItems > maxListRepeatItems {
+					return nil, fmt.Errorf("MemoryError: list repetition result too large")
+				}
+				count := int(bi.Value)
+				items := make([]Value, 0, len(al.Items)*count)
+				for i := 0; i < count; i++ {
+					items = append(items, al.Items...)
+				}
+				return &PyList{Items: items}, nil
+			}
+		}
+	}
+
+	// Set/FrozenSet operations: |, &, -, ^
+	if op == OpBinaryOr || op == OpBinaryAnd || op == OpBinarySubtract || op == OpBinaryXor {
+		// Helper to get items from set or frozenset
+		getSetItems := func(v Value) (map[Value]struct{}, bool) {
+			switch s := v.(type) {
+			case *PySet:
+				return s.Items, true
+			case *PyFrozenSet:
+				return s.Items, true
+			}
+			return nil, false
+		}
+
+		aItems, aIsSet := getSetItems(a)
+		bItems, bIsSet := getSetItems(b)
+
+		if aIsSet && bIsSet {
+			// Determine return type: frozenset if both are frozenset, otherwise set
+			_, aIsFrozen := a.(*PyFrozenSet)
+			_, bIsFrozen := b.(*PyFrozenSet)
+			returnFrozen := aIsFrozen && bIsFrozen
+
+			switch op {
+			case OpBinaryOr: // Union
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						result.FrozenSetAdd(k, vm)
+					}
+					for k := range bItems {
+						result.FrozenSetAdd(k, vm)
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					result.SetAdd(k, vm)
+				}
+				for k := range bItems {
+					result.SetAdd(k, vm)
+				}
+				return result, nil
+
+			case OpBinaryAnd: // Intersection
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								result.FrozenSetAdd(k, vm)
+								break
+							}
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							result.SetAdd(k, vm)
+							break
+						}
+					}
+				}
+				return result, nil
+
+			case OpBinarySubtract: // Difference
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					for k := range aItems {
+						found := false
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					found := false
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				return result, nil
+
+			case OpBinaryXor: // Symmetric difference
+				if returnFrozen {
+					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+					// Add items from a not in b
+					for k := range aItems {
+						found := false
+						for k2 := range bItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					// Add items from b not in a
+					for k := range bItems {
+						found := false
+						for k2 := range aItems {
+							if vm.equal(k, k2) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							result.FrozenSetAdd(k, vm)
+						}
+					}
+					return result, nil
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range aItems {
+					found := false
+					for k2 := range bItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				for k := range bItems {
+					found := false
+					for k2 := range aItems {
+						if vm.equal(k, k2) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				return result, nil
+			}
+		}
+	}
+
+	// Float operations (including int+float and float+int)
+	af, aIsFloat := a.(*PyFloat)
+	bf, bIsFloat := b.(*PyFloat)
+	ai, aIsInt := a.(*PyInt)
+	bi, bIsInt := b.(*PyInt)
+
+	// Convert to float if mixed types
+	if aIsInt && bIsFloat {
+		af = &PyFloat{Value: float64(ai.Value)}
+		aIsFloat = true
+	}
+	if aIsFloat && bIsInt {
+		bf = &PyFloat{Value: float64(bi.Value)}
+		bIsFloat = true
+	}
+
+	if aIsFloat && bIsFloat {
+		switch op {
+		case OpBinaryAdd:
+			return &PyFloat{Value: af.Value + bf.Value}, nil
+		case OpBinarySubtract:
+			return &PyFloat{Value: af.Value - bf.Value}, nil
+		case OpBinaryMultiply:
+			return &PyFloat{Value: af.Value * bf.Value}, nil
+		case OpBinaryDivide:
+			if bf.Value == 0 {
+				return nil, fmt.Errorf("division by zero")
+			}
+			return &PyFloat{Value: af.Value / bf.Value}, nil
+		case OpBinaryFloorDiv:
+			if bf.Value == 0 {
+				return nil, fmt.Errorf("float floor division by zero")
+			}
+			return &PyFloat{Value: math.Floor(af.Value / bf.Value)}, nil
+		case OpBinaryModulo:
+			if bf.Value == 0 {
+				return nil, fmt.Errorf("float modulo by zero")
+			}
+			return &PyFloat{Value: math.Mod(af.Value, bf.Value)}, nil
+		case OpBinaryPower:
+			return &PyFloat{Value: math.Pow(af.Value, bf.Value)}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unsupported operand type(s) for %s: '%s' and '%s'",
+		op.String(), vm.typeName(a), vm.typeName(b))
+}
+
+func (vm *VM) compareOp(op Opcode, a, b Value) Value {
+	// Fast path: int vs int comparisons (most common case)
+	if ai, ok := a.(*PyInt); ok {
+		if bi, ok := b.(*PyInt); ok {
+			switch op {
+			case OpCompareEq:
+				if ai.Value == bi.Value {
+					return True
+				}
+				return False
+			case OpCompareNe:
+				if ai.Value != bi.Value {
+					return True
+				}
+				return False
+			case OpCompareLt:
+				if ai.Value < bi.Value {
+					return True
+				}
+				return False
+			case OpCompareLe:
+				if ai.Value <= bi.Value {
+					return True
+				}
+				return False
+			case OpCompareGt:
+				if ai.Value > bi.Value {
+					return True
+				}
+				return False
+			case OpCompareGe:
+				if ai.Value >= bi.Value {
+					return True
+				}
+				return False
+			}
+		}
+	}
+
+	switch op {
+	case OpCompareEq:
+		if vm.equal(a, b) {
+			return True
+		}
+		return False
+	case OpCompareNe:
+		if !vm.equal(a, b) {
+			return True
+		}
+		return False
+	case OpCompareLt:
+		if vm.compare(a, b) < 0 {
+			return True
+		}
+		return False
+	case OpCompareLe:
+		if vm.compare(a, b) <= 0 {
+			return True
+		}
+		return False
+	case OpCompareGt:
+		if vm.compare(a, b) > 0 {
+			return True
+		}
+		return False
+	case OpCompareGe:
+		if vm.compare(a, b) >= 0 {
+			return True
+		}
+		return False
+	case OpCompareIs:
+		if a == b {
+			return True
+		}
+		return False
+	case OpCompareIsNot:
+		if a != b {
+			return True
+		}
+		return False
+	case OpCompareIn:
+		if vm.contains(b, a) {
+			return True
+		}
+		return False
+	case OpCompareNotIn:
+		if !vm.contains(b, a) {
+			return True
+		}
+		return False
+	}
+	return False
+}
+
+func (vm *VM) equal(a, b Value) bool {
+	return vm.equalWithCycleDetection(a, b, make(map[uintptr]map[uintptr]bool))
+}
+
+// equalWithCycleDetection compares values with cycle detection to prevent stack overflow
+func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]bool) bool {
+	switch av := a.(type) {
+	case *PyNone:
+		_, ok := b.(*PyNone)
+		return ok
+	case *PyBool:
+		if bv, ok := b.(*PyBool); ok {
+			return av.Value == bv.Value
+		}
+	case *PyInt:
+		switch bv := b.(type) {
+		case *PyInt:
+			return av.Value == bv.Value
+		case *PyFloat:
+			return float64(av.Value) == bv.Value
+		}
+	case *PyFloat:
+		switch bv := b.(type) {
+		case *PyFloat:
+			return av.Value == bv.Value
+		case *PyInt:
+			return av.Value == float64(bv.Value)
+		}
+	case *PyString:
+		if bv, ok := b.(*PyString); ok {
+			return av.Value == bv.Value
+		}
+	case *PyList:
+		if bv, ok := b.(*PyList); ok {
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			// Cycle detection: check if we've seen this pair
+			ptrA := ptrValue(a)
+			ptrB := ptrValue(b)
+			if seen[ptrA] != nil && seen[ptrA][ptrB] {
+				return true // Already comparing these, assume equal to break cycle
+			}
+			if seen[ptrA] == nil {
+				seen[ptrA] = make(map[uintptr]bool)
+			}
+			seen[ptrA][ptrB] = true
+			for i := range av.Items {
+				if !vm.equalWithCycleDetection(av.Items[i], bv.Items[i], seen) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyTuple:
+		if bv, ok := b.(*PyTuple); ok {
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for i := range av.Items {
+				if !vm.equalWithCycleDetection(av.Items[i], bv.Items[i], seen) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyDict:
+		if bv, ok := b.(*PyDict); ok {
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			// Cycle detection for dicts
+			ptrA := ptrValue(a)
+			ptrB := ptrValue(b)
+			if seen[ptrA] != nil && seen[ptrA][ptrB] {
+				return true
+			}
+			if seen[ptrA] == nil {
+				seen[ptrA] = make(map[uintptr]bool)
+			}
+			seen[ptrA][ptrB] = true
+			for k, v := range av.Items {
+				found := false
+				for k2, v2 := range bv.Items {
+					if vm.equalWithCycleDetection(k, k2, seen) {
+						if vm.equalWithCycleDetection(v, v2, seen) {
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					return false
+				}
+			}
+			return true
+		}
+	case *PySet:
+		// Set can equal another set or frozenset
+		switch bv := b.(type) {
+		case *PySet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.SetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		case *PyFrozenSet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.FrozenSetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyFrozenSet:
+		// FrozenSet can equal another frozenset or set
+		switch bv := b.(type) {
+		case *PyFrozenSet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.FrozenSetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		case *PySet:
+			if len(av.Items) != len(bv.Items) {
+				return false
+			}
+			for k := range av.Items {
+				if !bv.SetContains(k, vm) {
+					return false
+				}
+			}
+			return true
+		}
+	case *PyClass:
+		// Classes are compared by identity
+		return a == b
+	case *PyInstance:
+		// Check for __eq__ method
+		if result, found, err := vm.callDunder(av, "__eq__", b); found && err == nil {
+			if bv, ok := result.(*PyBool); ok {
+				return bv.Value
+			}
+		}
+		// Fall back to identity comparison
+		return a == b
+	}
+	// Check if b is a PyInstance with __eq__
+	if bv, ok := b.(*PyInstance); ok {
+		if result, found, err := vm.callDunder(bv, "__eq__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok {
+				return boolVal.Value
+			}
+		}
+	}
+	return false
+}
+
+func (vm *VM) compare(a, b Value) int {
+	switch av := a.(type) {
+	case *PyInt:
+		switch bv := b.(type) {
+		case *PyInt:
+			if av.Value < bv.Value {
+				return -1
+			} else if av.Value > bv.Value {
+				return 1
+			}
+			return 0
+		case *PyFloat:
+			af := float64(av.Value)
+			if af < bv.Value {
+				return -1
+			} else if af > bv.Value {
+				return 1
+			}
+			return 0
+		}
+	case *PyFloat:
+		switch bv := b.(type) {
+		case *PyFloat:
+			if av.Value < bv.Value {
+				return -1
+			} else if av.Value > bv.Value {
+				return 1
+			}
+			return 0
+		case *PyInt:
+			bf := float64(bv.Value)
+			if av.Value < bf {
+				return -1
+			} else if av.Value > bf {
+				return 1
+			}
+			return 0
+		}
+	case *PyString:
+		if bv, ok := b.(*PyString); ok {
+			if av.Value < bv.Value {
+				return -1
+			} else if av.Value > bv.Value {
+				return 1
+			}
+			return 0
+		}
+	case *PyInstance:
+		// Try __lt__ first
+		if result, found, err := vm.callDunder(av, "__lt__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return -1
+			}
+		}
+		// Try __gt__
+		if result, found, err := vm.callDunder(av, "__gt__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 1
+			}
+		}
+		// Try __eq__ for equality
+		if result, found, err := vm.callDunder(av, "__eq__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 0
+			}
+		}
+		return 0
+	}
+	// Check if b is a PyInstance
+	if bv, ok := b.(*PyInstance); ok {
+		// Try __gt__ on b (means a < b)
+		if result, found, err := vm.callDunder(bv, "__gt__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return -1
+			}
+		}
+		// Try __lt__ on b (means a > b)
+		if result, found, err := vm.callDunder(bv, "__lt__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 1
+			}
+		}
+	}
+	return 0
+}
+
+func (vm *VM) contains(container, item Value) bool {
+	switch c := container.(type) {
+	case *PyString:
+		if i, ok := item.(*PyString); ok {
+			// Use strings.Contains for optimized O(n+m) substring search
+			return strings.Contains(c.Value, i.Value)
+		}
+	case *PyList:
+		for _, v := range c.Items {
+			if vm.equal(v, item) {
+				return true
+			}
+		}
+	case *PyTuple:
+		for _, v := range c.Items {
+			if vm.equal(v, item) {
+				return true
+			}
+		}
+	case *PySet:
+		// Use hash-based lookup for O(1) average case
+		return c.SetContains(item, vm)
+	case *PyFrozenSet:
+		// Use hash-based lookup for O(1) average case
+		return c.FrozenSetContains(item, vm)
+	case *PyDict:
+		// Use hash-based lookup for O(1) average case
+		return c.DictContains(item, vm)
+	case *PyInstance:
+		// Check for __contains__ method
+		if result, found, err := vm.callDunder(c, "__contains__", item); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok {
+				return boolVal.Value
+			}
+			// Python's __contains__ can return truthy values
+			return vm.truthy(result)
+		}
+	}
+	return false
+}
