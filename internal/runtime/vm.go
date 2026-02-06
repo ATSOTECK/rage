@@ -217,6 +217,7 @@ func hashValue(v Value) uint64 {
 		return uint64(ptrValue(v))
 	case *PyInstance:
 		// Instances hash by identity by default
+		// Note: __hash__ support is handled in hashValueVM method
 		return uint64(ptrValue(v))
 	case *PyFunction:
 		return uint64(ptrValue(v))
@@ -234,6 +235,19 @@ func hashValue(v Value) uint64 {
 		// Default to pointer hash for other types
 		return uint64(ptrValue(v))
 	}
+}
+
+// hashValueVM computes a hash with VM context, supporting __hash__ dunder method
+func (vm *VM) hashValueVM(v Value) uint64 {
+	if inst, ok := v.(*PyInstance); ok {
+		// Check for __hash__ method
+		if result, found, err := vm.callDunder(inst, "__hash__"); found && err == nil {
+			if i, ok := result.(*PyInt); ok {
+				return uint64(i.Value)
+			}
+		}
+	}
+	return hashValue(v)
 }
 
 // PyFloat represents a Python float
@@ -312,7 +326,7 @@ func (d *PyDict) DictGet(key Value, vm *VM) (Value, bool) {
 		}
 		return nil, false
 	}
-	h := hashValue(key)
+	h := vm.hashValueVM(key)
 	entries := d.buckets[h]
 	for _, e := range entries {
 		if vm.equal(e.key, key) {
@@ -327,7 +341,7 @@ func (d *PyDict) DictSet(key, value Value, vm *VM) {
 	if d.buckets == nil {
 		d.buckets = make(map[uint64][]dictEntry)
 	}
-	h := hashValue(key)
+	h := vm.hashValueVM(key)
 	entries := d.buckets[h]
 	for i, e := range entries {
 		if vm.equal(e.key, key) {
@@ -354,7 +368,7 @@ func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 		delete(d.Items, key)
 		return true
 	}
-	h := hashValue(key)
+	h := vm.hashValueVM(key)
 	entries := d.buckets[h]
 	for i, e := range entries {
 		if vm.equal(e.key, key) {
@@ -404,7 +418,7 @@ func (s *PySet) SetAdd(value Value, vm *VM) {
 	if s.buckets == nil {
 		s.buckets = make(map[uint64][]setEntry)
 	}
-	h := hashValue(value)
+	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
 	for _, e := range entries {
 		if vm.equal(e.value, value) {
@@ -434,7 +448,7 @@ func (s *PySet) SetContains(value Value, vm *VM) bool {
 		}
 		return false
 	}
-	h := hashValue(value)
+	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
 	for _, e := range entries {
 		if vm.equal(e.value, value) {
@@ -450,7 +464,7 @@ func (s *PySet) SetRemove(value Value, vm *VM) bool {
 		delete(s.Items, value)
 		return true
 	}
-	h := hashValue(value)
+	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
 	for i, e := range entries {
 		if vm.equal(e.value, value) {
@@ -491,7 +505,7 @@ func (s *PyFrozenSet) FrozenSetAdd(value Value, vm *VM) {
 	if s.buckets == nil {
 		s.buckets = make(map[uint64][]setEntry)
 	}
-	h := hashValue(value)
+	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
 	for _, e := range entries {
 		if vm.equal(e.value, value) {
@@ -519,7 +533,7 @@ func (s *PyFrozenSet) FrozenSetContains(value Value, vm *VM) bool {
 		}
 		return false
 	}
-	h := hashValue(value)
+	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
 	for _, e := range entries {
 		if vm.equal(e.value, value) {
@@ -886,6 +900,18 @@ func (vm *VM) initBuiltins() {
 				return MakeInt(int64(len(v.Items))), nil
 			case *PyBytes:
 				return MakeInt(int64(len(v.Value))), nil
+			case *PyInstance:
+				// Check for __len__ method
+				if result, found, err := vm.callDunder(v, "__len__"); found {
+					if err != nil {
+						return nil, err
+					}
+					if i, ok := result.(*PyInt); ok {
+						return i, nil
+					}
+					return nil, fmt.Errorf("__len__() should return an integer")
+				}
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(v))
 			default:
 				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(v))
 			}
@@ -1183,9 +1209,28 @@ func (vm *VM) initBuiltins() {
 				return v, nil
 			case *PyFloat:
 				return &PyFloat{Value: math.Abs(v.Value)}, nil
+			case *PyInstance:
+				// Check for __abs__ method
+				if result, found, err := vm.callDunder(v, "__abs__"); found {
+					return result, err
+				}
+				return nil, fmt.Errorf("bad operand type for abs(): '%s'", vm.typeName(v))
 			default:
 				return nil, fmt.Errorf("bad operand type for abs()")
 			}
+		},
+	}
+
+	vm.builtins["hash"] = &PyBuiltinFunc{
+		Name: "hash",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("hash() takes exactly one argument (%d given)", len(args))
+			}
+			if !isHashable(args[0]) {
+				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(args[0]))
+			}
+			return MakeInt(int64(vm.hashValueVM(args[0]))), nil
 		},
 	}
 
@@ -3144,6 +3189,20 @@ func (vm *VM) run() (Value, error) {
 				length = int64(len(v.Items))
 			case *PyBytes:
 				length = int64(len(v.Value))
+			case *PyInstance:
+				// Check for __len__ method
+				if result, found, err := vm.callDunder(v, "__len__"); found {
+					if err != nil {
+						return nil, err
+					}
+					if i, ok := result.(*PyInt); ok {
+						length = i.Value
+					} else {
+						return nil, fmt.Errorf("__len__() should return an integer")
+					}
+				} else {
+					return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				}
 			default:
 				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
 			}
@@ -3240,6 +3299,16 @@ func (vm *VM) run() (Value, error) {
 
 		case OpUnaryPositive:
 			a := vm.pop()
+			// Check for __pos__ on instances
+			if inst, ok := a.(*PyInstance); ok {
+				if result, found, err := vm.callDunder(inst, "__pos__"); found {
+					if err != nil {
+						return nil, err
+					}
+					vm.push(result)
+					break
+				}
+			}
 			vm.push(a) // Usually a no-op for numbers
 
 		case OpUnaryNegative:
@@ -4763,6 +4832,21 @@ func (vm *VM) truthy(v Value) bool {
 		return len(val.Items) > 0
 	case *PyFrozenSet:
 		return len(val.Items) > 0
+	case *PyInstance:
+		// Check __bool__ first
+		if result, found, err := vm.callDunder(val, "__bool__"); found && err == nil {
+			if b, ok := result.(*PyBool); ok {
+				return b.Value
+			}
+		}
+		// Fall back to __len__ (truthy if non-zero)
+		if result, found, err := vm.callDunder(val, "__len__"); found && err == nil {
+			if i, ok := result.(*PyInt); ok {
+				return i.Value != 0
+			}
+		}
+		// Default to true for instances
+		return true
 	default:
 		return true
 	}
@@ -4813,26 +4897,16 @@ func (vm *VM) str(v Value) string {
 		if vm.isExceptionClass(val.Class) {
 			return vm.formatExceptionInstance(val)
 		}
-		// Check for __str__ method in class dict
-		if strMethod, ok := val.Class.Dict["__str__"]; ok {
-			if fn, ok := strMethod.(*PyFunction); ok {
-				result, err := vm.callFunction(fn, []Value{val}, nil)
-				if err == nil {
-					if s, ok := result.(*PyString); ok {
-						return s.Value
-					}
-				}
+		// Check for __str__ method via MRO
+		if result, found, err := vm.callDunder(val, "__str__"); found && err == nil {
+			if s, ok := result.(*PyString); ok {
+				return s.Value
 			}
 		}
-		// Check for __repr__ method in class dict
-		if reprMethod, ok := val.Class.Dict["__repr__"]; ok {
-			if fn, ok := reprMethod.(*PyFunction); ok {
-				result, err := vm.callFunction(fn, []Value{val}, nil)
-				if err == nil {
-					if s, ok := result.(*PyString); ok {
-						return s.Value
-					}
-				}
+		// Check for __repr__ method via MRO
+		if result, found, err := vm.callDunder(val, "__repr__"); found && err == nil {
+			if s, ok := result.(*PyString); ok {
+				return s.Value
 			}
 		}
 		return fmt.Sprintf("<%s object>", val.Class.Name)
@@ -4971,7 +5045,59 @@ func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
 
 // Operations
 
+// callDunder looks up and calls a dunder method on an instance via MRO.
+// Returns (result, found, error) - found is true if the method exists.
+func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Value, bool, error) {
+	// Search MRO for the method
+	if len(instance.Class.Mro) > 0 {
+		for _, cls := range instance.Class.Mro {
+			if method, ok := cls.Dict[name]; ok {
+				// Prepend instance as self
+				allArgs := append([]Value{instance}, args...)
+				switch fn := method.(type) {
+				case *PyFunction:
+					result, err := vm.callFunction(fn, allArgs, nil)
+					return result, true, err
+				case *PyBuiltinFunc:
+					result, err := fn.Fn(allArgs, nil)
+					return result, true, err
+				}
+			}
+		}
+	} else {
+		// Fallback: check instance's class dict directly if MRO is empty
+		if method, ok := instance.Class.Dict[name]; ok {
+			allArgs := append([]Value{instance}, args...)
+			switch fn := method.(type) {
+			case *PyFunction:
+				result, err := vm.callFunction(fn, allArgs, nil)
+				return result, true, err
+			case *PyBuiltinFunc:
+				result, err := fn.Fn(allArgs, nil)
+				return result, true, err
+			}
+		}
+	}
+	return nil, false, nil
+}
+
 func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
+	// Check for dunder methods on instances
+	if inst, ok := a.(*PyInstance); ok {
+		var methodName string
+		switch op {
+		case OpUnaryNegative:
+			methodName = "__neg__"
+		case OpUnaryInvert:
+			methodName = "__invert__"
+		}
+		if methodName != "" {
+			if result, found, err := vm.callDunder(inst, methodName); found {
+				return result, err
+			}
+		}
+	}
+
 	switch op {
 	case OpUnaryNegative:
 		switch v := a.(type) {
@@ -4989,6 +5115,42 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	// Check for dunder methods on instances first
+	dunders := map[Opcode]struct{ forward, reverse string }{
+		OpBinaryAdd:      {"__add__", "__radd__"},
+		OpBinarySubtract: {"__sub__", "__rsub__"},
+		OpBinaryMultiply: {"__mul__", "__rmul__"},
+		OpBinaryDivide:   {"__truediv__", "__rtruediv__"},
+		OpBinaryFloorDiv: {"__floordiv__", "__rfloordiv__"},
+		OpBinaryModulo:   {"__mod__", "__rmod__"},
+		OpBinaryPower:    {"__pow__", "__rpow__"},
+		OpBinaryAnd:      {"__and__", "__rand__"},
+		OpBinaryOr:       {"__or__", "__ror__"},
+		OpBinaryXor:      {"__xor__", "__rxor__"},
+		OpBinaryLShift:   {"__lshift__", "__rlshift__"},
+		OpBinaryRShift:   {"__rshift__", "__rrshift__"},
+	}
+
+	if dunder, ok := dunders[op]; ok {
+		// Try forward method on left operand
+		if inst, ok := a.(*PyInstance); ok {
+			if result, found, err := vm.callDunder(inst, dunder.forward, b); found {
+				// Check for NotImplemented sentinel (we return nil in that case)
+				if result != nil {
+					return result, err
+				}
+			}
+		}
+		// Try reverse method on right operand
+		if inst, ok := b.(*PyInstance); ok {
+			if result, found, err := vm.callDunder(inst, dunder.reverse, a); found {
+				if result != nil {
+					return result, err
+				}
+			}
+		}
+	}
+
 	// Fast path: int op int (most common case in numeric code)
 	if ai, ok := a.(*PyInt); ok {
 		if bi, ok := b.(*PyInt); ok {
@@ -5585,8 +5747,22 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 		// Classes are compared by identity
 		return a == b
 	case *PyInstance:
-		// Instances are compared by identity by default
+		// Check for __eq__ method
+		if result, found, err := vm.callDunder(av, "__eq__", b); found && err == nil {
+			if bv, ok := result.(*PyBool); ok {
+				return bv.Value
+			}
+		}
+		// Fall back to identity comparison
 		return a == b
+	}
+	// Check if b is a PyInstance with __eq__
+	if bv, ok := b.(*PyInstance); ok {
+		if result, found, err := vm.callDunder(bv, "__eq__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok {
+				return boolVal.Value
+			}
+		}
 	}
 	return false
 }
@@ -5638,6 +5814,41 @@ func (vm *VM) compare(a, b Value) int {
 			}
 			return 0
 		}
+	case *PyInstance:
+		// Try __lt__ first
+		if result, found, err := vm.callDunder(av, "__lt__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return -1
+			}
+		}
+		// Try __gt__
+		if result, found, err := vm.callDunder(av, "__gt__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 1
+			}
+		}
+		// Try __eq__ for equality
+		if result, found, err := vm.callDunder(av, "__eq__", b); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 0
+			}
+		}
+		return 0
+	}
+	// Check if b is a PyInstance
+	if bv, ok := b.(*PyInstance); ok {
+		// Try __gt__ on b (means a < b)
+		if result, found, err := vm.callDunder(bv, "__gt__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return -1
+			}
+		}
+		// Try __lt__ on b (means a > b)
+		if result, found, err := vm.callDunder(bv, "__lt__", a); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok && boolVal.Value {
+				return 1
+			}
+		}
 	}
 	return 0
 }
@@ -5670,6 +5881,15 @@ func (vm *VM) contains(container, item Value) bool {
 	case *PyDict:
 		// Use hash-based lookup for O(1) average case
 		return c.DictContains(item, vm)
+	case *PyInstance:
+		// Check for __contains__ method
+		if result, found, err := vm.callDunder(c, "__contains__", item); found && err == nil {
+			if boolVal, ok := result.(*PyBool); ok {
+				return boolVal.Value
+			}
+			// Python's __contains__ can return truthy values
+			return vm.truthy(result)
+		}
 	}
 	return false
 }
@@ -6577,6 +6797,12 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			}
 		}
 		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
+	case *PyInstance:
+		// Check for __getitem__ method
+		if result, found, err := vm.callDunder(o, "__getitem__", index); found {
+			return result, err
+		}
+		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 	}
 	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 }
@@ -6817,6 +7043,12 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 		// Use hash-based storage for O(1) average case
 		o.DictSet(index, val, vm)
 		return nil
+	case *PyInstance:
+		// Check for __setitem__ method
+		if _, found, err := vm.callDunder(o, "__setitem__", index, val); found {
+			return err
+		}
+		return fmt.Errorf("'%s' object does not support item assignment", vm.typeName(obj))
 	}
 	return fmt.Errorf("'%s' object does not support item assignment", vm.typeName(obj))
 }
@@ -6837,6 +7069,12 @@ func (vm *VM) delItem(obj Value, index Value) error {
 		// Use hash-based deletion for O(1) average case
 		o.DictDelete(index, vm)
 		return nil
+	case *PyInstance:
+		// Check for __delitem__ method
+		if _, found, err := vm.callDunder(o, "__delitem__", index); found {
+			return err
+		}
+		return fmt.Errorf("'%s' object does not support item deletion", vm.typeName(obj))
 	}
 	return fmt.Errorf("'%s' object does not support item deletion", vm.typeName(obj))
 }
@@ -6991,6 +7229,33 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 					// Call the __call__ method with the userdata as first argument
 					allArgs := append([]Value{fn}, args...)
 					return vm.callGoFunction(&PyGoFunc{Name: "__call__", Fn: callMethod}, allArgs)
+				}
+			}
+		}
+		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+
+	case *PyInstance:
+		// Check for __call__ method
+		// We need to look up __call__ via MRO and call it with kwargs support
+		for _, cls := range fn.Class.Mro {
+			if method, ok := cls.Dict["__call__"]; ok {
+				if callFn, ok := method.(*PyFunction); ok {
+					// Prepend instance as self
+					allArgs := append([]Value{fn}, args...)
+					return vm.callFunction(callFn, allArgs, kwargs)
+				}
+				if callBuiltin, ok := method.(*PyBuiltinFunc); ok {
+					allArgs := append([]Value{fn}, args...)
+					return callBuiltin.Fn(allArgs, kwargs)
+				}
+			}
+		}
+		// Fallback: check class dict directly if MRO is empty
+		if len(fn.Class.Mro) == 0 {
+			if method, ok := fn.Class.Dict["__call__"]; ok {
+				if callFn, ok := method.(*PyFunction); ok {
+					allArgs := append([]Value{fn}, args...)
+					return vm.callFunction(callFn, allArgs, kwargs)
 				}
 			}
 		}

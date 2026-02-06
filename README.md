@@ -332,7 +332,14 @@ RAGE is under active development. Currently supported:
 - Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
-- Full async/await (basic support via asyncio module)
+- Full async/await - async generators, async context managers (basic support via asyncio module)
+- Most dunder methods for custom classes - `__new__`, `__del__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__call__`, `__contains__`, `__hash__`, operator overloading (`__add__`, `__lt__`, etc.)
+- Metaclasses - `class Foo(metaclass=...)`
+- `__slots__`
+- Full descriptor protocol
+- Matrix multiplication `@` operator
+- `nonlocal` statement
+- Extended unpacking - `a, *rest, b = seq`
 
 ### Security Notes
 Reflection builtins (`globals`, `locals`, `compile`, `exec`, `eval`) are opt-in and disabled by default. Enable them explicitly if needed:
