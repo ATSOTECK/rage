@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 // PyModule represents a Python module
@@ -142,6 +144,34 @@ func (vm *VM) ImportModule(name string) (*PyModule, error) {
 		mod := loader(vm)
 		loadedModules[name] = mod
 		return mod, nil
+	}
+
+	// Filesystem fallback: search SearchPaths for <name>.py
+	if vm.FileImporter != nil {
+		for _, dir := range vm.SearchPaths {
+			pyFile := filepath.Join(dir, name+".py")
+			if _, err := os.Stat(pyFile); err == nil {
+				code, err := vm.FileImporter(pyFile)
+				if err != nil {
+					return nil, fmt.Errorf("error importing '%s': %v", name, err)
+				}
+
+				mod := NewModule(name)
+				mod.Package = name
+				mod.Dict["__package__"] = NewString(name)
+				mod.Dict["__file__"] = NewString(pyFile)
+
+				// Cache before executing to handle circular imports
+				loadedModules[name] = mod
+
+				if err := vm.ExecuteInModule(code, mod); err != nil {
+					delete(loadedModules, name)
+					return nil, fmt.Errorf("error executing '%s': %v", name, err)
+				}
+
+				return mod, nil
+			}
+		}
 	}
 
 	return nil, fmt.Errorf("ModuleNotFoundError: No module named '%s'", name)

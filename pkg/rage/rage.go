@@ -18,6 +18,8 @@ package rage
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ATSOTECK/rage/internal/compiler"
@@ -251,6 +253,19 @@ func NewStateWithModules(opts ...StateOption) *State {
 
 	vm := runtime.NewVM()
 
+	// Set up filesystem imports
+	vm.FileImporter = func(path string) (*runtime.CodeObject, error) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		code, errs := compiler.CompileSource(string(src), path)
+		if len(errs) > 0 {
+			return nil, errs[0]
+		}
+		return code, nil
+	}
+
 	// Initialize opt-in builtins
 	for b := range cfg.builtins {
 		initBuiltin(vm, b)
@@ -475,6 +490,26 @@ func (s *State) RunWithFilename(source, filename string) (Value, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, err
 	}
+
+	// Set search paths from the script's directory so local imports work
+	if filename != "<string>" {
+		absPath, err := filepath.Abs(filename)
+		if err == nil {
+			dir := filepath.Dir(absPath)
+			// Add the script's directory if not already present
+			found := false
+			for _, p := range s.vm.SearchPaths {
+				if p == dir {
+					found = true
+					break
+				}
+			}
+			if !found {
+				s.vm.SearchPaths = append(s.vm.SearchPaths, dir)
+			}
+		}
+	}
+
 	code, errs := compiler.CompileSource(source, filename)
 	if len(errs) > 0 {
 		return nil, &CompileErrors{Errors: errs}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
@@ -39,6 +40,22 @@ func main() {
 
 	// Execute
 	vm := runtime.NewVM()
+
+	// Set up filesystem imports so scripts can import local .py files
+	absFilename, _ := filepath.Abs(filename)
+	vm.SearchPaths = []string{filepath.Dir(absFilename)}
+	vm.FileImporter = func(path string) (*runtime.CodeObject, error) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		code, errs := compiler.CompileSource(string(src), path)
+		if len(errs) > 0 {
+			return nil, errs[0]
+		}
+		return code, nil
+	}
+
 	_, err = vm.Execute(code)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)

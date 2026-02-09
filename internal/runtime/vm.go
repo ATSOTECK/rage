@@ -25,6 +25,10 @@ type VM struct {
 
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
+
+	// Filesystem module imports
+	SearchPaths  []string                              // Directories to search for .py modules
+	FileImporter func(filename string) (*CodeObject, error) // Callback to compile a .py file (avoids circular dep)
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
