@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 )
 
@@ -740,8 +741,15 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 	case *PyInt:
 		switch bv := b.(type) {
 		case *PyInt:
+			if av.BigValue != nil || bv.BigValue != nil {
+				return av.BigIntValue().Cmp(bv.BigIntValue()) == 0
+			}
 			return av.Value == bv.Value
 		case *PyFloat:
+			if av.BigValue != nil {
+				bf := new(big.Float).SetInt(av.BigIntValue())
+				return bf.Cmp(big.NewFloat(bv.Value)) == 0
+			}
 			return float64(av.Value) == bv.Value
 		}
 	case *PyFloat:

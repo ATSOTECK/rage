@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 
 	"github.com/ATSOTECK/rage/internal/model"
@@ -819,8 +820,31 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 
 	switch e := expr.(type) {
 	case *model.IntLit:
-		val, _ := strconv.ParseInt(e.Value, 0, 64)
-		c.emitLoadConst(val)
+		val, err := strconv.ParseInt(e.Value, 0, 64)
+		if err != nil {
+			// Overflow: use big.Int
+			bi := new(big.Int)
+			s := e.Value
+			// Handle base prefixes for big.Int
+			base := 10
+			if len(s) > 2 {
+				switch s[:2] {
+				case "0x", "0X":
+					base = 16
+					s = s[2:]
+				case "0o", "0O":
+					base = 8
+					s = s[2:]
+				case "0b", "0B":
+					base = 2
+					s = s[2:]
+				}
+			}
+			bi.SetString(s, base)
+			c.emitLoadConst(runtime.MakeBigInt(bi))
+		} else {
+			c.emitLoadConst(val)
+		}
 
 	case *model.FloatLit:
 		val, _ := strconv.ParseFloat(e.Value, 64)
@@ -2160,7 +2184,8 @@ func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 
 	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
 		compCompiler.compileExpr(e.Elt)
-		// Yield the value (simplified)
+		compCompiler.emit(runtime.OpYieldValue)
+		compCompiler.emit(runtime.OpPop) // Discard send value on resume
 	}, 0)
 
 	compCompiler.emitLoadConst(nil)

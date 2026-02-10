@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -35,6 +36,8 @@ func (vm *VM) toValue(v any) Value {
 			items[i] = &PyString{Value: s}
 		}
 		return &PyTuple{Items: items}
+	case *big.Int:
+		return MakeBigInt(val)
 	case *CodeObject:
 		return val
 	case Value:
@@ -54,6 +57,10 @@ func (vm *VM) toInt(v Value) int64 {
 func (vm *VM) tryToInt(v Value) (int64, error) {
 	switch val := v.(type) {
 	case *PyInt:
+		if val.BigValue != nil {
+			// Big int doesn't fit in int64
+			return 0, fmt.Errorf("OverflowError: Python int too large to convert to int64")
+		}
 		return val.Value, nil
 	case *PyFloat:
 		return int64(val.Value), nil
@@ -89,6 +96,37 @@ func (vm *VM) tryToInt(v Value) (int64, error) {
 		return 0, fmt.Errorf("TypeError: int() argument must be a string or a number, not '%s'", vm.typeName(v))
 	default:
 		return 0, fmt.Errorf("TypeError: int() argument must be a string or a number, not '%s'", vm.typeName(v))
+	}
+}
+
+// tryToIntValue converts a value to a PyInt (possibly big), returning an error if conversion fails.
+func (vm *VM) tryToIntValue(v Value) (Value, error) {
+	switch val := v.(type) {
+	case *PyInt:
+		return val, nil
+	case *PyString:
+		s := strings.TrimSpace(val.Value)
+		if s == "" {
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+		}
+		s = strings.ReplaceAll(s, "_", "")
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			// Try big.Int for overflow
+			bi := new(big.Int)
+			_, ok := bi.SetString(s, 10)
+			if !ok {
+				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			}
+			return MakeBigInt(bi), nil
+		}
+		return MakeInt(i), nil
+	default:
+		i, err := vm.tryToInt(v)
+		if err != nil {
+			return nil, err
+		}
+		return MakeInt(i), nil
 	}
 }
 
@@ -186,7 +224,16 @@ func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
 
 	i, err := strconv.ParseInt(s, int(base), 64)
 	if err != nil {
-		return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+		// Try big.Int for overflow
+		bi := new(big.Int)
+		_, ok := bi.SetString(s, int(base))
+		if !ok {
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+		}
+		if negative {
+			bi.Neg(bi)
+		}
+		return MakeBigInt(bi), nil
 	}
 	if negative {
 		i = -i

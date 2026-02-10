@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"strings"
 	"sync"
@@ -47,11 +48,39 @@ var (
 
 // PyInt represents a Python integer
 type PyInt struct {
-	Value int64
+	Value    int64
+	BigValue *big.Int // non-nil for integers that overflow int64
 }
 
-func (i *PyInt) Type() string   { return "int" }
-func (i *PyInt) String() string { return fmt.Sprintf("%d", i.Value) }
+func (i *PyInt) Type() string { return "int" }
+func (i *PyInt) String() string {
+	if i.BigValue != nil {
+		return i.BigValue.String()
+	}
+	return fmt.Sprintf("%d", i.Value)
+}
+
+// IsBig returns true if this integer uses big.Int representation
+func (i *PyInt) IsBig() bool {
+	return i.BigValue != nil
+}
+
+// BigIntValue returns the big.Int representation of this integer
+func (i *PyInt) BigIntValue() *big.Int {
+	if i.BigValue != nil {
+		return i.BigValue
+	}
+	return big.NewInt(i.Value)
+}
+
+// MakeBigInt returns a PyInt from a big.Int value
+func MakeBigInt(v *big.Int) *PyInt {
+	// If it fits in int64, use the regular representation
+	if v.IsInt64() {
+		return MakeInt(v.Int64())
+	}
+	return &PyInt{BigValue: v}
+}
 
 // Small integer cache for common values (-5 to 256)
 // This avoids allocations for frequently used integers

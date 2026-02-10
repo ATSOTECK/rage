@@ -138,11 +138,7 @@ func (vm *VM) initBuiltins() {
 				return vm.intFromStringBase(s.Value, base)
 			}
 
-			i, err := vm.tryToInt(args[0])
-			if err != nil {
-				return nil, err
-			}
-			return MakeInt(i), nil
+			return vm.tryToIntValue(args[0])
 		},
 	}
 
