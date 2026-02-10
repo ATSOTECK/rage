@@ -1797,6 +1797,18 @@ func (o *Optimizer) optimizeLenCalls(instrs []*instruction, code *runtime.CodeOb
 			continue
 		}
 
+		// Verify i+1 is a simple load (the argument to len), not a CALL or other complex op
+		switch instrs[i+1].op {
+		case runtime.OpLoadConst, runtime.OpLoadName, runtime.OpLoadFast,
+			runtime.OpLoadGlobal, runtime.OpLoadDeref, runtime.OpLoadClosure,
+			runtime.OpLoadFast0, runtime.OpLoadFast1, runtime.OpLoadFast2, runtime.OpLoadFast3,
+			runtime.OpLoadNone, runtime.OpLoadTrue, runtime.OpLoadFalse,
+			runtime.OpLoadZero, runtime.OpLoadOne, runtime.OpLoadAttr:
+			// These are safe single-value loads
+		default:
+			continue
+		}
+
 		// Check for CALL with 1 argument
 		if instrs[i+2].op != runtime.OpCall || instrs[i+2].arg != 1 {
 			continue

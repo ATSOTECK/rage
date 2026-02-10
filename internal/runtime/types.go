@@ -191,10 +191,17 @@ func hashValue(v Value) uint64 {
 	case *PyNone:
 		return 0x9e3779b97f4a7c15 // FNV offset basis
 	case *PyBool:
+		// Bool hash must match int hash: hash(True) == hash(1), hash(False) == hash(0)
+		h := uint64(0)
 		if val.Value {
-			return 1
+			h = 1
 		}
-		return 0
+		h ^= h >> 33
+		h *= 0xff51afd7ed558ccd
+		h ^= h >> 33
+		h *= 0xc4ceb9fe1a85ec53
+		h ^= h >> 33
+		return h
 	case *PyInt:
 		// Use FNV-1a style hashing for integers
 		h := uint64(val.Value)
@@ -880,6 +887,40 @@ type PyRange struct {
 
 func (r *PyRange) Type() string   { return "range" }
 func (r *PyRange) String() string { return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step) }
+
+// Len returns the number of elements in the range
+func (r *PyRange) Len() int64 {
+	return rangeLen(r)
+}
+
+// Contains returns whether val is in the range
+func (r *PyRange) Contains(val int64) bool {
+	if r.Step > 0 {
+		if val < r.Start || val >= r.Stop {
+			return false
+		}
+		return (val-r.Start)%r.Step == 0
+	} else {
+		if val > r.Start || val <= r.Stop {
+			return false
+		}
+		return (r.Start-val)%(-r.Step) == 0
+	}
+}
+
+func rangeLen(r *PyRange) int64 {
+	if r.Step > 0 {
+		if r.Stop <= r.Start {
+			return 0
+		}
+		return (r.Stop - r.Start + r.Step - 1) / r.Step
+	} else {
+		if r.Stop >= r.Start {
+			return 0
+		}
+		return (r.Start - r.Stop - r.Step - 1) / (-r.Step)
+	}
+}
 
 // PySlice represents a slice object for slicing sequences
 type PySlice struct {

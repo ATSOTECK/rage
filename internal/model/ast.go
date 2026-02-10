@@ -93,6 +93,7 @@ type FStringPart struct {
 	Value      string // the literal string value (if IsExpr is false)
 	Expr       Expr   // the expression (if IsExpr is true)
 	FormatSpec string // optional format spec after ':'
+	Conversion byte   // 0 for none, 'r' for !r, 's' for !s, 'a' for !a
 }
 
 // FStringLit represents an f-string literal like f"hello {name}".

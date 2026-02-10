@@ -40,6 +40,15 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			return nil, fmt.Errorf("IndexError: string index out of range")
 		}
 		return &PyString{Value: string(runes[idx])}, nil
+	case *PyBytes:
+		idx := int(vm.toInt(index))
+		if idx < 0 {
+			idx = len(o.Value) + idx
+		}
+		if idx < 0 || idx >= len(o.Value) {
+			return nil, fmt.Errorf("IndexError: index out of range")
+		}
+		return MakeInt(int64(o.Value[idx])), nil
 	case *PyDict:
 		// Use hash-based lookup for O(1) average case
 		if val, found := o.DictGet(index, vm); found {
@@ -234,6 +243,72 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 			}
 		}
 		return &PyTuple{Items: result}, nil
+
+	case *PyBytes:
+		length := len(o.Value)
+		step := getInt(slice.Step, 1)
+
+		if step == 0 {
+			return nil, fmt.Errorf("slice step cannot be zero")
+		}
+
+		// Compute start/stop with correct defaults based on step direction
+		var start, stop int
+		if step > 0 {
+			if slice.Start == nil || slice.Start == None {
+				start = 0
+			} else {
+				start = getInt(slice.Start, 0)
+			}
+			if slice.Stop == nil || slice.Stop == None {
+				stop = length
+			} else {
+				stop = getInt(slice.Stop, length)
+			}
+		} else {
+			if slice.Start == nil || slice.Start == None {
+				start = length - 1
+			} else {
+				start = getInt(slice.Start, length-1)
+			}
+			if slice.Stop == nil || slice.Stop == None {
+				stop = -length - 1
+			} else {
+				stop = getInt(slice.Stop, -length-1)
+			}
+		}
+
+		// Handle negative indices
+		if start < 0 && start >= -length {
+			start = length + start
+		}
+		if stop < 0 && stop >= -length {
+			stop = length + stop
+		}
+
+		var result []byte
+		if step > 0 {
+			if start < 0 {
+				start = 0
+			}
+			if stop > length {
+				stop = length
+			}
+			for i := start; i < stop && i < length; i += step {
+				result = append(result, o.Value[i])
+			}
+		} else {
+			if start >= length {
+				start = length - 1
+			}
+			for i := start; i > stop && i >= 0; i += step {
+				result = append(result, o.Value[i])
+			}
+		}
+		if result == nil {
+			result = []byte{}
+		}
+		return &PyBytes{Value: result}, nil
 
 	case *PyString:
 		runes := []rune(o.Value)

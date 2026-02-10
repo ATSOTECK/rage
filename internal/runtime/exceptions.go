@@ -76,13 +76,18 @@ func (vm *VM) isExceptionClass(cls *PyClass) bool {
 func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
 	switch t := exceptionType.(type) {
 	case *PyClass:
-		// Check if exc.ExcType is t or subclass of t
-		for _, mroClass := range exc.ExcType.Mro {
-			if mroClass == t {
-				return true
+		// If exc has a typed ExcType, check class hierarchy
+		if exc.ExcType != nil {
+			for _, mroClass := range exc.ExcType.Mro {
+				if mroClass == t {
+					return true
+				}
 			}
+			return false
 		}
-		return false
+		// Fall back to name matching for exceptions created without ExcType
+		return vm.exceptionNameMatches(exc.TypeName, t)
+
 	case *PyTuple:
 		// Tuple of exception types - match any
 		for _, item := range t.Items {
@@ -94,6 +99,26 @@ func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
 	default:
 		return false
 	}
+}
+
+// exceptionNameMatches checks if an exception type name matches a class by walking the MRO
+func (vm *VM) exceptionNameMatches(typeName string, cls *PyClass) bool {
+	// Direct name match
+	if cls.Name == typeName {
+		return true
+	}
+	// Check if the exception's type name matches any parent in the class hierarchy
+	// Look up the exception class by name and check MRO
+	if excClass, ok := vm.builtins[typeName]; ok {
+		if excPyClass, ok := excClass.(*PyClass); ok {
+			for _, mroClass := range excPyClass.Mro {
+				if mroClass == cls {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // buildTraceback builds a traceback from current frame stack
