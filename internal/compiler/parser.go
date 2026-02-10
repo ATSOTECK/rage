@@ -206,8 +206,6 @@ func (p *Parser) parseStatement() model.Stmt {
 		return p.parseNonlocalStmt()
 	case model.TK_Match:
 		return p.parseMatchStmt()
-	case model.TK_Type:
-		return p.parseTypeAlias()
 	case model.TK_At:
 		return p.parseDecorated()
 	default:
@@ -2291,7 +2289,7 @@ func (p *Parser) parseStarredExpr() model.Expr {
 }
 
 func (p *Parser) parseCallExpr(fn model.Expr) model.Expr {
-	p.expect(model.TK_LParen)
+	startTok := p.expect(model.TK_LParen)
 
 	var args []model.Expr
 	var keywords []*model.Keyword
@@ -2315,7 +2313,19 @@ func (p *Parser) parseCallExpr(fn model.Expr) model.Expr {
 				StartPos: name.Pos(),
 			})
 		} else {
-			args = append(args, p.parseExpression())
+			expr := p.parseExpression()
+			// Check for generator expression: f(x for x in ...)
+			if p.check(model.TK_For) {
+				generators := p.parseComprehensionClauses()
+				genExpr := &model.GeneratorExpr{
+					Elt:        expr,
+					Generators: generators,
+					StartPos:   startTok.Pos,
+				}
+				args = append(args, genExpr)
+			} else {
+				args = append(args, expr)
+			}
 		}
 
 		if !p.match(model.TK_Comma) {

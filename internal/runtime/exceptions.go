@@ -218,9 +218,18 @@ func (vm *VM) wrapGoError(err error) *PyException {
 		}
 	}
 
+	// Extract just the message after the type prefix (e.g., "ValueError: msg" -> "msg")
+	msg := errStr
+	for _, ep := range exceptionPrefixes {
+		if len(errStr) > len(ep.prefix)+2 && errStr[:len(ep.prefix)] == ep.prefix && errStr[len(ep.prefix):len(ep.prefix)+2] == ": " {
+			msg = errStr[len(ep.prefix)+2:]
+			break
+		}
+	}
+
 	return &PyException{
 		ExcType: excClass,
-		Args:    &PyTuple{Items: []Value{&PyString{Value: errStr}}},
-		Message: errStr,
+		Args:    &PyTuple{Items: []Value{&PyString{Value: msg}}},
+		Message: msg,
 	}
 }

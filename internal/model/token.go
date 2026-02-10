@@ -272,7 +272,6 @@ var Keywords = map[string]TokenKind{
 	"raise":    TK_Raise,
 	"return":   TK_Return,
 	"try":      TK_Try,
-	"type":     TK_Type,
 	"while":    TK_While,
 	"with":     TK_With,
 	"yield":    TK_Yield,

@@ -1244,7 +1244,22 @@ func (c *Compiler) compileStore(target model.Expr) {
 		} else {
 			elts = t.(*model.List).Elts
 		}
-		c.emitArg(runtime.OpUnpackSequence, len(elts))
+		// Check for starred element
+		starIdx := -1
+		for i, elt := range elts {
+			if _, ok := elt.(*model.Starred); ok {
+				starIdx = i
+				break
+			}
+		}
+		if starIdx >= 0 {
+			// Emit OpUnpackEx: arg = countBefore | (countAfter << 8)
+			countBefore := starIdx
+			countAfter := len(elts) - starIdx - 1
+			c.emitArg(runtime.OpUnpackEx, countBefore|(countAfter<<8))
+		} else {
+			c.emitArg(runtime.OpUnpackSequence, len(elts))
+		}
 		for _, elt := range elts {
 			c.compileStore(elt)
 		}

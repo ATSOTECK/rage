@@ -230,6 +230,15 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				return &PyList{Items: items}, nil
 			}
 		}
+		// Tuple concatenation
+		if at, ok := a.(*PyTuple); ok {
+			if bt, ok := b.(*PyTuple); ok {
+				items := make([]Value, len(at.Items)+len(bt.Items))
+				copy(items, at.Items)
+				copy(items[len(at.Items):], bt.Items)
+				return &PyTuple{Items: items}, nil
+			}
+		}
 	}
 
 	// String repetition - use strings.Repeat for O(n) instead of O(n²)
@@ -278,6 +287,79 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 					items = append(items, al.Items...)
 				}
 				return &PyList{Items: items}, nil
+			}
+		}
+		if al, ok := b.(*PyList); ok {
+			if bi, ok := a.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyList{Items: []Value{}}, nil
+				}
+				resultItems := int64(len(al.Items)) * bi.Value
+				if resultItems > maxListRepeatItems {
+					return nil, fmt.Errorf("MemoryError: list repetition result too large")
+				}
+				count := int(bi.Value)
+				items := make([]Value, 0, len(al.Items)*count)
+				for i := 0; i < count; i++ {
+					items = append(items, al.Items...)
+				}
+				return &PyList{Items: items}, nil
+			}
+		}
+		// Tuple repetition
+		const maxTupleRepeatItems = 10 * 1024 * 1024
+		if at, ok := a.(*PyTuple); ok {
+			if bi, ok := b.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyTuple{Items: []Value{}}, nil
+				}
+				resultItems := int64(len(at.Items)) * bi.Value
+				if resultItems > maxTupleRepeatItems {
+					return nil, fmt.Errorf("MemoryError: tuple repetition result too large")
+				}
+				count := int(bi.Value)
+				items := make([]Value, 0, len(at.Items)*count)
+				for i := 0; i < count; i++ {
+					items = append(items, at.Items...)
+				}
+				return &PyTuple{Items: items}, nil
+			}
+		}
+		if at, ok := b.(*PyTuple); ok {
+			if bi, ok := a.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyTuple{Items: []Value{}}, nil
+				}
+				resultItems := int64(len(at.Items)) * bi.Value
+				if resultItems > maxTupleRepeatItems {
+					return nil, fmt.Errorf("MemoryError: tuple repetition result too large")
+				}
+				count := int(bi.Value)
+				items := make([]Value, 0, len(at.Items)*count)
+				for i := 0; i < count; i++ {
+					items = append(items, at.Items...)
+				}
+				return &PyTuple{Items: items}, nil
+			}
+		}
+	}
+
+	// Dict merge operator: d1 | d2
+	if op == OpBinaryOr {
+		if ad, ok := a.(*PyDict); ok {
+			if bd, ok := b.(*PyDict); ok {
+				result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				for _, k := range ad.Keys(vm) {
+					if v, ok := ad.DictGet(k, vm); ok {
+						result.DictSet(k, v, vm)
+					}
+				}
+				for _, k := range bd.Keys(vm) {
+					if v, ok := bd.DictGet(k, vm); ok {
+						result.DictSet(k, v, vm)
+					}
+				}
+				return result, nil
 			}
 		}
 	}
@@ -480,7 +562,12 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 			if bf.Value == 0 {
 				return nil, fmt.Errorf("float modulo by zero")
 			}
-			return &PyFloat{Value: math.Mod(af.Value, bf.Value)}, nil
+			// Python modulo: result has same sign as divisor
+			r := math.Mod(af.Value, bf.Value)
+			if r != 0 && (r < 0) != (bf.Value < 0) {
+				r += bf.Value
+			}
+			return &PyFloat{Value: r}, nil
 		case OpBinaryPower:
 			return &PyFloat{Value: math.Pow(af.Value, bf.Value)}, nil
 		}
@@ -525,6 +612,58 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 					return True
 				}
 				return False
+			}
+		}
+	}
+
+	// Set comparison operators: <=, <, >=, > mean subset/superset
+	if as, aOk := a.(*PySet); aOk {
+		if bs, bOk := b.(*PySet); bOk {
+			switch op {
+			case OpCompareEq:
+				if vm.equal(a, b) {
+					return True
+				}
+				return False
+			case OpCompareNe:
+				if !vm.equal(a, b) {
+					return True
+				}
+				return False
+			case OpCompareLt: // proper subset
+				if len(as.Items) >= len(bs.Items) {
+					return False
+				}
+				for k := range as.Items {
+					if !bs.SetContains(k, vm) {
+						return False
+					}
+				}
+				return True
+			case OpCompareLe: // subset
+				for k := range as.Items {
+					if !bs.SetContains(k, vm) {
+						return False
+					}
+				}
+				return True
+			case OpCompareGt: // proper superset
+				if len(as.Items) <= len(bs.Items) {
+					return False
+				}
+				for k := range bs.Items {
+					if !as.SetContains(k, vm) {
+						return False
+					}
+				}
+				return True
+			case OpCompareGe: // superset
+				for k := range bs.Items {
+					if !as.SetContains(k, vm) {
+						return False
+					}
+				}
+				return True
 			}
 		}
 	}
@@ -796,6 +935,44 @@ func (vm *VM) compare(a, b Value) int {
 			if av.Value < bv.Value {
 				return -1
 			} else if av.Value > bv.Value {
+				return 1
+			}
+			return 0
+		}
+	case *PyList:
+		if bv, ok := b.(*PyList); ok {
+			minLen := len(av.Items)
+			if len(bv.Items) < minLen {
+				minLen = len(bv.Items)
+			}
+			for i := 0; i < minLen; i++ {
+				c := vm.compare(av.Items[i], bv.Items[i])
+				if c != 0 {
+					return c
+				}
+			}
+			if len(av.Items) < len(bv.Items) {
+				return -1
+			} else if len(av.Items) > len(bv.Items) {
+				return 1
+			}
+			return 0
+		}
+	case *PyTuple:
+		if bv, ok := b.(*PyTuple); ok {
+			minLen := len(av.Items)
+			if len(bv.Items) < minLen {
+				minLen = len(bv.Items)
+			}
+			for i := 0; i < minLen; i++ {
+				c := vm.compare(av.Items[i], bv.Items[i])
+				if c != 0 {
+					return c
+				}
+			}
+			if len(av.Items) < len(bv.Items) {
+				return -1
+			} else if len(av.Items) > len(bv.Items) {
 				return 1
 			}
 			return 0

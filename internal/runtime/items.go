@@ -17,7 +17,7 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			idx = len(o.Items) + idx
 		}
 		if idx < 0 || idx >= len(o.Items) {
-			return nil, fmt.Errorf("list index out of range")
+			return nil, fmt.Errorf("IndexError: list index out of range")
 		}
 		return o.Items[idx], nil
 	case *PyTuple:
@@ -26,7 +26,7 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			idx = len(o.Items) + idx
 		}
 		if idx < 0 || idx >= len(o.Items) {
-			return nil, fmt.Errorf("tuple index out of range")
+			return nil, fmt.Errorf("IndexError: tuple index out of range")
 		}
 		return o.Items[idx], nil
 	case *PyString:
@@ -37,7 +37,7 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			idx = len(runes) + idx
 		}
 		if idx < 0 || idx >= len(runes) {
-			return nil, fmt.Errorf("string index out of range")
+			return nil, fmt.Errorf("IndexError: string index out of range")
 		}
 		return &PyString{Value: string(runes[idx])}, nil
 	case *PyDict:
@@ -308,6 +308,10 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 }
 
 func (vm *VM) setItem(obj Value, index Value, val Value) error {
+	// Handle slice assignment
+	if slice, ok := index.(*PySlice); ok {
+		return vm.setSlice(obj, slice, val)
+	}
 	switch o := obj.(type) {
 	case *PyList:
 		idx := int(vm.toInt(index))
@@ -315,7 +319,7 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 			idx = len(o.Items) + idx
 		}
 		if idx < 0 || idx >= len(o.Items) {
-			return fmt.Errorf("list assignment index out of range")
+			return fmt.Errorf("IndexError: list assignment index out of range")
 		}
 		o.Items[idx] = val
 		return nil
@@ -331,12 +335,110 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 		if _, found, err := vm.callDunder(o, "__setitem__", index, val); found {
 			return err
 		}
-		return fmt.Errorf("'%s' object does not support item assignment", vm.typeName(obj))
+		return fmt.Errorf("TypeError: '%s' object does not support item assignment", vm.typeName(obj))
 	}
-	return fmt.Errorf("'%s' object does not support item assignment", vm.typeName(obj))
+	return fmt.Errorf("TypeError: '%s' object does not support item assignment", vm.typeName(obj))
+}
+
+func (vm *VM) setSlice(obj Value, slice *PySlice, val Value) error {
+	lst, ok := obj.(*PyList)
+	if !ok {
+		return fmt.Errorf("TypeError: '%s' object does not support slice assignment", vm.typeName(obj))
+	}
+	newItems, err := vm.toList(val)
+	if err != nil {
+		return err
+	}
+
+	length := len(lst.Items)
+	start := 0
+	stop := length
+	if slice.Start != nil && slice.Start != None {
+		start = int(vm.toInt(slice.Start))
+		if start < 0 {
+			start = length + start
+		}
+		if start < 0 {
+			start = 0
+		}
+		if start > length {
+			start = length
+		}
+	}
+	if slice.Stop != nil && slice.Stop != None {
+		stop = int(vm.toInt(slice.Stop))
+		if stop < 0 {
+			stop = length + stop
+		}
+		if stop < 0 {
+			stop = 0
+		}
+		if stop > length {
+			stop = length
+		}
+	}
+	if start > stop {
+		stop = start
+	}
+
+	// Replace lst.Items[start:stop] with newItems
+	result := make([]Value, 0, start+len(newItems)+(length-stop))
+	result = append(result, lst.Items[:start]...)
+	result = append(result, newItems...)
+	result = append(result, lst.Items[stop:]...)
+	lst.Items = result
+	return nil
+}
+
+func (vm *VM) delSlice(obj Value, slice *PySlice) error {
+	lst, ok := obj.(*PyList)
+	if !ok {
+		return fmt.Errorf("TypeError: '%s' object does not support slice deletion", vm.typeName(obj))
+	}
+
+	length := len(lst.Items)
+	start := 0
+	stop := length
+	if slice.Start != nil && slice.Start != None {
+		start = int(vm.toInt(slice.Start))
+		if start < 0 {
+			start = length + start
+		}
+		if start < 0 {
+			start = 0
+		}
+		if start > length {
+			start = length
+		}
+	}
+	if slice.Stop != nil && slice.Stop != None {
+		stop = int(vm.toInt(slice.Stop))
+		if stop < 0 {
+			stop = length + stop
+		}
+		if stop < 0 {
+			stop = 0
+		}
+		if stop > length {
+			stop = length
+		}
+	}
+	if start > stop {
+		return nil
+	}
+
+	result := make([]Value, 0, start+(length-stop))
+	result = append(result, lst.Items[:start]...)
+	result = append(result, lst.Items[stop:]...)
+	lst.Items = result
+	return nil
 }
 
 func (vm *VM) delItem(obj Value, index Value) error {
+	// Handle slice deletion
+	if slice, ok := index.(*PySlice); ok {
+		return vm.delSlice(obj, slice)
+	}
 	switch o := obj.(type) {
 	case *PyList:
 		idx := int(vm.toInt(index))
@@ -344,20 +446,22 @@ func (vm *VM) delItem(obj Value, index Value) error {
 			idx = len(o.Items) + idx
 		}
 		if idx < 0 || idx >= len(o.Items) {
-			return fmt.Errorf("list assignment index out of range")
+			return fmt.Errorf("IndexError: list assignment index out of range")
 		}
 		o.Items = append(o.Items[:idx], o.Items[idx+1:]...)
 		return nil
 	case *PyDict:
 		// Use hash-based deletion for O(1) average case
-		o.DictDelete(index, vm)
+		if !o.DictDelete(index, vm) {
+			return fmt.Errorf("KeyError: %s", vm.repr(index))
+		}
 		return nil
 	case *PyInstance:
 		// Check for __delitem__ method
 		if _, found, err := vm.callDunder(o, "__delitem__", index); found {
 			return err
 		}
-		return fmt.Errorf("'%s' object does not support item deletion", vm.typeName(obj))
+		return fmt.Errorf("TypeError: '%s' object does not support item deletion", vm.typeName(obj))
 	}
-	return fmt.Errorf("'%s' object does not support item deletion", vm.typeName(obj))
+	return fmt.Errorf("TypeError: '%s' object does not support item deletion", vm.typeName(obj))
 }
