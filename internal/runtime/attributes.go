@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Attribute access
@@ -419,7 +422,9 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("type object '%s' has no attribute '%s'", o.Name, name)
 	case *PyDict:
-		if name == "get" {
+		d := o
+		switch name {
+		case "get":
 			return &PyBuiltinFunc{Name: "dict.get", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				if len(args) < 1 {
 					return nil, fmt.Errorf("get() requires at least 1 argument")
@@ -429,37 +434,151 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				if len(args) > 1 {
 					def = args[1]
 				}
-				if val, ok := o.Items[key]; ok {
+				val, found := d.DictGet(key, vm)
+				if found {
 					return val, nil
 				}
 				return def, nil
 			}}, nil
-		}
-		if name == "keys" {
+		case "keys":
 			return &PyBuiltinFunc{Name: "dict.keys", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				var keys []Value
-				for k := range o.Items {
-					keys = append(keys, k)
-				}
+				keys := make([]Value, len(d.Keys(vm)))
+				copy(keys, d.Keys(vm))
 				return &PyList{Items: keys}, nil
 			}}, nil
-		}
-		if name == "values" {
+		case "values":
 			return &PyBuiltinFunc{Name: "dict.values", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				var vals []Value
-				for _, v := range o.Items {
-					vals = append(vals, v)
+				orderedKeys := d.Keys(vm)
+				vals := make([]Value, 0, len(orderedKeys))
+				for _, k := range orderedKeys {
+					if v, ok := d.DictGet(k, vm); ok {
+						vals = append(vals, v)
+					}
 				}
 				return &PyList{Items: vals}, nil
 			}}, nil
-		}
-		if name == "items" {
+		case "items":
 			return &PyBuiltinFunc{Name: "dict.items", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				var items []Value
-				for k, v := range o.Items {
-					items = append(items, &PyTuple{Items: []Value{k, v}})
+				orderedKeys := d.Keys(vm)
+				items := make([]Value, 0, len(orderedKeys))
+				for _, k := range orderedKeys {
+					if v, ok := d.DictGet(k, vm); ok {
+						items = append(items, &PyTuple{Items: []Value{k, v}})
+					}
 				}
 				return &PyList{Items: items}, nil
+			}}, nil
+		case "update":
+			return &PyBuiltinFunc{Name: "dict.update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) > 0 {
+					switch src := args[0].(type) {
+					case *PyDict:
+						for _, k := range src.Keys(vm) {
+							if v, ok := src.DictGet(k, vm); ok {
+								d.DictSet(k, v, vm)
+							}
+						}
+					default:
+						items, err := vm.toList(args[0])
+						if err != nil {
+							return nil, err
+						}
+						for _, item := range items {
+							pair, err := vm.toList(item)
+							if err != nil {
+								return nil, err
+							}
+							if len(pair) != 2 {
+								return nil, fmt.Errorf("ValueError: dictionary update sequence element has length %d; 2 is required", len(pair))
+							}
+							d.DictSet(pair[0], pair[1], vm)
+						}
+					}
+				}
+				for k, v := range kwargs {
+					d.DictSet(&PyString{Value: k}, v, vm)
+				}
+				return None, nil
+			}}, nil
+		case "pop":
+			return &PyBuiltinFunc{Name: "dict.pop", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("pop expected at least 1 argument")
+				}
+				key := args[0]
+				val, found := d.DictGet(key, vm)
+				if found {
+					d.DictDelete(key, vm)
+					return val, nil
+				}
+				if len(args) > 1 {
+					return args[1], nil
+				}
+				return nil, fmt.Errorf("KeyError: %s", vm.str(key))
+			}}, nil
+		case "popitem":
+			return &PyBuiltinFunc{Name: "dict.popitem", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(d.Items) == 0 {
+					return nil, fmt.Errorf("KeyError: 'popitem(): dictionary is empty'")
+				}
+				keys := d.Keys(vm)
+				lastKey := keys[len(keys)-1]
+				lastVal, _ := d.DictGet(lastKey, vm)
+				d.DictDelete(lastKey, vm)
+				return &PyTuple{Items: []Value{lastKey, lastVal}}, nil
+			}}, nil
+		case "setdefault":
+			return &PyBuiltinFunc{Name: "dict.setdefault", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("setdefault() takes at least 1 argument")
+				}
+				key := args[0]
+				val, found := d.DictGet(key, vm)
+				if found {
+					return val, nil
+				}
+				def := Value(None)
+				if len(args) > 1 {
+					def = args[1]
+				}
+				d.DictSet(key, def, vm)
+				return def, nil
+			}}, nil
+		case "clear":
+			return &PyBuiltinFunc{Name: "dict.clear", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				d.Items = make(map[Value]Value)
+				d.buckets = make(map[uint64][]dictEntry)
+				d.orderedKeys = nil
+				return None, nil
+			}}, nil
+		case "copy":
+			return &PyBuiltinFunc{Name: "dict.copy", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				cp := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				for _, k := range d.Keys(vm) {
+					if v, ok := d.DictGet(k, vm); ok {
+						cp.DictSet(k, v, vm)
+					}
+				}
+				return cp, nil
+			}}, nil
+		case "fromkeys":
+			return &PyBuiltinFunc{Name: "dict.fromkeys", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("fromkeys() requires at least 1 argument")
+				}
+				keys, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				def := Value(None)
+				if len(args) > 1 {
+					def = args[1]
+				}
+				result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				for _, k := range keys {
+					result.DictSet(k, def, vm)
+				}
+				return result, nil
 			}}, nil
 		}
 	case *PyFrozenSet:
@@ -659,31 +778,313 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return True, nil
 			}}, nil
 		}
+	case *PySet:
+		s := o
+		switch name {
+		case "add":
+			return &PyBuiltinFunc{Name: "set.add", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("add() takes exactly 1 argument")
+				}
+				if !isHashable(args[0]) {
+					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(args[0]))
+				}
+				s.SetAdd(args[0], vm)
+				return None, nil
+			}}, nil
+		case "discard":
+			return &PyBuiltinFunc{Name: "set.discard", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("discard() takes exactly 1 argument")
+				}
+				s.SetRemove(args[0], vm)
+				return None, nil
+			}}, nil
+		case "remove":
+			return &PyBuiltinFunc{Name: "set.remove", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("remove() takes exactly 1 argument")
+				}
+				if !s.SetContains(args[0], vm) {
+					return nil, fmt.Errorf("KeyError: %s", vm.str(args[0]))
+				}
+				s.SetRemove(args[0], vm)
+				return None, nil
+			}}, nil
+		case "pop":
+			return &PyBuiltinFunc{Name: "set.pop", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(s.Items) == 0 {
+					return nil, fmt.Errorf("KeyError: 'pop from an empty set'")
+				}
+				var item Value
+				for k := range s.Items {
+					item = k
+					break
+				}
+				s.SetRemove(item, vm)
+				return item, nil
+			}}, nil
+		case "clear":
+			return &PyBuiltinFunc{Name: "set.clear", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s.Items = make(map[Value]struct{})
+				s.buckets = make(map[uint64][]setEntry)
+				return None, nil
+			}}, nil
+		case "copy":
+			return &PyBuiltinFunc{Name: "set.copy", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				cp := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					cp.SetAdd(k, vm)
+				}
+				return cp, nil
+			}}, nil
+		case "update":
+			return &PyBuiltinFunc{Name: "set.update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						if !isHashable(item) {
+							return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+						}
+						s.SetAdd(item, vm)
+					}
+				}
+				return None, nil
+			}}, nil
+		case "union":
+			return &PyBuiltinFunc{Name: "set.union", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					result.SetAdd(k, vm)
+				}
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						result.SetAdd(item, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		case "intersection":
+			return &PyBuiltinFunc{Name: "set.intersection", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				if len(args) == 0 {
+					for k := range s.Items {
+						result.SetAdd(k, vm)
+					}
+					return result, nil
+				}
+				for k := range s.Items {
+					inAll := true
+					for _, arg := range args {
+						items, err := vm.toList(arg)
+						if err != nil {
+							return nil, err
+						}
+						found := false
+						for _, item := range items {
+							if vm.equal(k, item) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							inAll = false
+							break
+						}
+					}
+					if inAll {
+						result.SetAdd(k, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		case "difference":
+			return &PyBuiltinFunc{Name: "set.difference", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					result.SetAdd(k, vm)
+				}
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						result.SetRemove(item, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		case "symmetric_difference":
+			return &PyBuiltinFunc{Name: "set.symmetric_difference", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("symmetric_difference() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					found := false
+					for _, item := range other {
+						if vm.equal(k, item) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						result.SetAdd(k, vm)
+					}
+				}
+				for _, item := range other {
+					if !s.SetContains(item, vm) {
+						result.SetAdd(item, vm)
+					}
+				}
+				return result, nil
+			}}, nil
+		case "issubset":
+			return &PyBuiltinFunc{Name: "set.issubset", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("issubset() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for k := range s.Items {
+					found := false
+					for _, item := range other {
+						if vm.equal(k, item) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "issuperset":
+			return &PyBuiltinFunc{Name: "set.issuperset", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("issuperset() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for _, item := range other {
+					if !s.SetContains(item, vm) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "isdisjoint":
+			return &PyBuiltinFunc{Name: "set.isdisjoint", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("isdisjoint() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				for _, item := range other {
+					if s.SetContains(item, vm) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		}
+	case *PyTuple:
+		tpl := o
+		switch name {
+		case "count":
+			return &PyBuiltinFunc{Name: "tuple.count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("count() takes exactly 1 argument")
+				}
+				count := 0
+				for _, item := range tpl.Items {
+					if vm.equal(item, args[0]) {
+						count++
+					}
+				}
+				return MakeInt(int64(count)), nil
+			}}, nil
+		case "index":
+			return &PyBuiltinFunc{Name: "tuple.index", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("index() takes at least 1 argument")
+				}
+				start := 0
+				end := len(tpl.Items)
+				if len(args) > 1 {
+					start = int(vm.toInt(args[1]))
+				}
+				if len(args) > 2 {
+					end = int(vm.toInt(args[2]))
+				}
+				for i := start; i < end; i++ {
+					if vm.equal(tpl.Items[i], args[0]) {
+						return MakeInt(int64(i)), nil
+					}
+				}
+				return nil, fmt.Errorf("ValueError: tuple.index(x): x not in tuple")
+			}}, nil
+		}
+	case *PyFloat:
+		if name == "is_integer" {
+			f := o
+			return &PyBuiltinFunc{Name: "float.is_integer", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if f.Value == float64(int64(f.Value)) {
+					return True, nil
+				}
+				return False, nil
+			}}, nil
+		}
 	case *PyList:
-		if name == "append" {
+		lst := o
+		switch name {
+		case "append":
 			return &PyBuiltinFunc{Name: "list.append", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				if len(args) != 1 {
 					return nil, fmt.Errorf("append() takes exactly 1 argument")
 				}
-				o.Items = append(o.Items, args[0])
+				lst.Items = append(lst.Items, args[0])
 				return None, nil
 			}}, nil
-		}
-		if name == "pop" {
+		case "pop":
 			return &PyBuiltinFunc{Name: "list.pop", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				if len(o.Items) == 0 {
-					return nil, fmt.Errorf("pop from empty list")
+				if len(lst.Items) == 0 {
+					return nil, fmt.Errorf("IndexError: pop from empty list")
 				}
-				idx := len(o.Items) - 1
+				idx := len(lst.Items) - 1
 				if len(args) > 0 {
 					idx = int(vm.toInt(args[0]))
+					if idx < 0 {
+						idx += len(lst.Items)
+					}
 				}
-				val := o.Items[idx]
-				o.Items = append(o.Items[:idx], o.Items[idx+1:]...)
+				if idx < 0 || idx >= len(lst.Items) {
+					return nil, fmt.Errorf("IndexError: pop index out of range")
+				}
+				val := lst.Items[idx]
+				lst.Items = append(lst.Items[:idx], lst.Items[idx+1:]...)
 				return val, nil
 			}}, nil
-		}
-		if name == "extend" {
+		case "extend":
 			return &PyBuiltinFunc{Name: "list.extend", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				if len(args) != 1 {
 					return nil, fmt.Errorf("extend() takes exactly 1 argument")
@@ -692,30 +1093,162 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				if err != nil {
 					return nil, err
 				}
-				o.Items = append(o.Items, items...)
+				lst.Items = append(lst.Items, items...)
 				return None, nil
+			}}, nil
+		case "insert":
+			return &PyBuiltinFunc{Name: "list.insert", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 2 {
+					return nil, fmt.Errorf("insert() takes exactly 2 arguments")
+				}
+				idx := int(vm.toInt(args[0]))
+				if idx < 0 {
+					idx += len(lst.Items)
+					if idx < 0 {
+						idx = 0
+					}
+				}
+				if idx >= len(lst.Items) {
+					lst.Items = append(lst.Items, args[1])
+				} else {
+					lst.Items = append(lst.Items, nil)
+					copy(lst.Items[idx+1:], lst.Items[idx:])
+					lst.Items[idx] = args[1]
+				}
+				return None, nil
+			}}, nil
+		case "remove":
+			return &PyBuiltinFunc{Name: "list.remove", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("remove() takes exactly 1 argument")
+				}
+				for i, item := range lst.Items {
+					if vm.equal(item, args[0]) {
+						lst.Items = append(lst.Items[:i], lst.Items[i+1:]...)
+						return None, nil
+					}
+				}
+				return nil, fmt.Errorf("ValueError: list.remove(x): x not in list")
+			}}, nil
+		case "clear":
+			return &PyBuiltinFunc{Name: "list.clear", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				lst.Items = []Value{}
+				return None, nil
+			}}, nil
+		case "index":
+			return &PyBuiltinFunc{Name: "list.index", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("index() takes at least 1 argument")
+				}
+				start := 0
+				end := len(lst.Items)
+				if len(args) > 1 {
+					start = int(vm.toInt(args[1]))
+				}
+				if len(args) > 2 {
+					end = int(vm.toInt(args[2]))
+				}
+				for i := start; i < end && i < len(lst.Items); i++ {
+					if vm.equal(lst.Items[i], args[0]) {
+						return MakeInt(int64(i)), nil
+					}
+				}
+				return nil, fmt.Errorf("ValueError: %s is not in list", vm.str(args[0]))
+			}}, nil
+		case "count":
+			return &PyBuiltinFunc{Name: "list.count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("count() takes exactly 1 argument")
+				}
+				count := 0
+				for _, item := range lst.Items {
+					if vm.equal(item, args[0]) {
+						count++
+					}
+				}
+				return MakeInt(int64(count)), nil
+			}}, nil
+		case "reverse":
+			return &PyBuiltinFunc{Name: "list.reverse", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for i, j := 0, len(lst.Items)-1; i < j; i, j = i+1, j-1 {
+					lst.Items[i], lst.Items[j] = lst.Items[j], lst.Items[i]
+				}
+				return None, nil
+			}}, nil
+		case "sort":
+			return &PyBuiltinFunc{Name: "list.sort", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				var keyFn Value
+				if k, ok := kwargs["key"]; ok && k != None {
+					keyFn = k
+				}
+				reverse := false
+				if r, ok := kwargs["reverse"]; ok {
+					reverse = vm.truthy(r)
+				}
+				var sortErr error
+				sort.SliceStable(lst.Items, func(i, j int) bool {
+					if sortErr != nil {
+						return false
+					}
+					a, b := lst.Items[i], lst.Items[j]
+					if keyFn != nil {
+						var err error
+						a, err = vm.call(keyFn, []Value{a}, nil)
+						if err != nil {
+							sortErr = err
+							return false
+						}
+						b, err = vm.call(keyFn, []Value{b}, nil)
+						if err != nil {
+							sortErr = err
+							return false
+						}
+					}
+					cmp := vm.compare(a, b)
+					if reverse {
+						return cmp > 0
+					}
+					return cmp < 0
+				})
+				if sortErr != nil {
+					return nil, sortErr
+				}
+				return None, nil
+			}}, nil
+		case "copy":
+			return &PyBuiltinFunc{Name: "list.copy", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				cp := make([]Value, len(lst.Items))
+				copy(cp, lst.Items)
+				return &PyList{Items: cp}, nil
 			}}, nil
 		}
 	case *PyString:
-		if name == "upper" {
+		str := o
+		switch name {
+		case "upper":
 			return &PyBuiltinFunc{Name: "str.upper", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				return &PyString{Value: strings.ToUpper(o.Value)}, nil
+				return &PyString{Value: strings.ToUpper(str.Value)}, nil
 			}}, nil
-		}
-		if name == "lower" {
+		case "lower":
 			return &PyBuiltinFunc{Name: "str.lower", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				return &PyString{Value: strings.ToLower(o.Value)}, nil
+				return &PyString{Value: strings.ToLower(str.Value)}, nil
 			}}, nil
-		}
-		if name == "split" {
+		case "split":
 			return &PyBuiltinFunc{Name: "str.split", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				var strParts []string
 				if len(args) == 0 {
-					// No separator: split on whitespace and remove empty strings
-					strParts = strings.Fields(o.Value)
+					strParts = strings.Fields(str.Value)
 				} else {
 					sep := vm.str(args[0])
-					strParts = strings.Split(o.Value, sep)
+					maxSplit := -1
+					if len(args) > 1 {
+						maxSplit = int(vm.toInt(args[1]))
+					}
+					if maxSplit < 0 {
+						strParts = strings.Split(str.Value, sep)
+					} else {
+						strParts = strings.SplitN(str.Value, sep, maxSplit+1)
+					}
 				}
 				parts := make([]Value, len(strParts))
 				for i, s := range strParts {
@@ -723,8 +1256,49 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				return &PyList{Items: parts}, nil
 			}}, nil
-		}
-		if name == "join" {
+		case "rsplit":
+			return &PyBuiltinFunc{Name: "str.rsplit", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) == 0 {
+					strParts := strings.Fields(str.Value)
+					parts := make([]Value, len(strParts))
+					for i, s := range strParts {
+						parts[i] = &PyString{Value: s}
+					}
+					return &PyList{Items: parts}, nil
+				}
+				sep := vm.str(args[0])
+				maxSplit := -1
+				if len(args) > 1 {
+					maxSplit = int(vm.toInt(args[1]))
+				}
+				if maxSplit < 0 {
+					strParts := strings.Split(str.Value, sep)
+					parts := make([]Value, len(strParts))
+					for i, s := range strParts {
+						parts[i] = &PyString{Value: s}
+					}
+					return &PyList{Items: parts}, nil
+				}
+				// rsplit from right
+				s := str.Value
+				var result []string
+				for maxSplit > 0 {
+					idx := strings.LastIndex(s, sep)
+					if idx < 0 {
+						break
+					}
+					result = append([]string{s[idx+len(sep):]}, result...)
+					s = s[:idx]
+					maxSplit--
+				}
+				result = append([]string{s}, result...)
+				parts := make([]Value, len(result))
+				for i, p := range result {
+					parts[i] = &PyString{Value: p}
+				}
+				return &PyList{Items: parts}, nil
+			}}, nil
+		case "join":
 			return &PyBuiltinFunc{Name: "str.join", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				if len(args) != 1 {
 					return nil, fmt.Errorf("join() takes exactly 1 argument")
@@ -735,50 +1309,459 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				var parts []string
 				for _, item := range items {
-					parts = append(parts, vm.str(item))
-				}
-				result := ""
-				for i, p := range parts {
-					if i > 0 {
-						result += o.Value
+					s, ok := item.(*PyString)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: sequence item: expected str instance, %s found", vm.typeName(item))
 					}
-					result += p
+					parts = append(parts, s.Value)
 				}
-				return &PyString{Value: result}, nil
+				return &PyString{Value: strings.Join(parts, str.Value)}, nil
 			}}, nil
-		}
-		if name == "strip" {
+		case "strip":
 			return &PyBuiltinFunc{Name: "str.strip", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				s := o.Value
-				start := 0
-				end := len(s)
-				for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-					start++
+				if len(args) > 0 {
+					chars := vm.str(args[0])
+					return &PyString{Value: strings.Trim(str.Value, chars)}, nil
 				}
-				for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-					end--
-				}
-				return &PyString{Value: s[start:end]}, nil
+				return &PyString{Value: strings.TrimSpace(str.Value)}, nil
 			}}, nil
-		}
-		if name == "replace" {
+		case "lstrip":
+			return &PyBuiltinFunc{Name: "str.lstrip", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) > 0 {
+					chars := vm.str(args[0])
+					return &PyString{Value: strings.TrimLeft(str.Value, chars)}, nil
+				}
+				return &PyString{Value: strings.TrimLeftFunc(str.Value, func(r rune) bool {
+					return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+				})}, nil
+			}}, nil
+		case "rstrip":
+			return &PyBuiltinFunc{Name: "str.rstrip", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) > 0 {
+					chars := vm.str(args[0])
+					return &PyString{Value: strings.TrimRight(str.Value, chars)}, nil
+				}
+				return &PyString{Value: strings.TrimRightFunc(str.Value, func(r rune) bool {
+					return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+				})}, nil
+			}}, nil
+		case "replace":
 			return &PyBuiltinFunc{Name: "str.replace", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				if len(args) < 2 {
 					return nil, fmt.Errorf("replace() takes at least 2 arguments")
 				}
 				old := vm.str(args[0])
-				new := vm.str(args[1])
-				result := ""
-				for i := 0; i < len(o.Value); {
-					if i+len(old) <= len(o.Value) && o.Value[i:i+len(old)] == old {
-						result += new
-						i += len(old)
-					} else {
-						result += string(o.Value[i])
-						i++
+				newStr := vm.str(args[1])
+				count := -1
+				if len(args) > 2 {
+					count = int(vm.toInt(args[2]))
+				}
+				return &PyString{Value: strings.Replace(str.Value, old, newStr, count)}, nil
+			}}, nil
+		case "find":
+			return &PyBuiltinFunc{Name: "str.find", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("find() takes at least 1 argument")
+				}
+				sub := vm.str(args[0])
+				s := str.Value
+				start := 0
+				if len(args) > 1 {
+					start = int(vm.toInt(args[1]))
+					if start < 0 {
+						start += len([]rune(s))
+						if start < 0 {
+							start = 0
+						}
 					}
 				}
+				if start > len(s) {
+					return MakeInt(-1), nil
+				}
+				idx := strings.Index(s[start:], sub)
+				if idx < 0 {
+					return MakeInt(-1), nil
+				}
+				return MakeInt(int64(start + idx)), nil
+			}}, nil
+		case "rfind":
+			return &PyBuiltinFunc{Name: "str.rfind", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("rfind() takes at least 1 argument")
+				}
+				sub := vm.str(args[0])
+				idx := strings.LastIndex(str.Value, sub)
+				return MakeInt(int64(idx)), nil
+			}}, nil
+		case "index":
+			return &PyBuiltinFunc{Name: "str.index", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("index() takes at least 1 argument")
+				}
+				sub := vm.str(args[0])
+				idx := strings.Index(str.Value, sub)
+				if idx < 0 {
+					return nil, fmt.Errorf("ValueError: substring not found")
+				}
+				return MakeInt(int64(idx)), nil
+			}}, nil
+		case "rindex":
+			return &PyBuiltinFunc{Name: "str.rindex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("rindex() takes at least 1 argument")
+				}
+				sub := vm.str(args[0])
+				idx := strings.LastIndex(str.Value, sub)
+				if idx < 0 {
+					return nil, fmt.Errorf("ValueError: substring not found")
+				}
+				return MakeInt(int64(idx)), nil
+			}}, nil
+		case "startswith":
+			return &PyBuiltinFunc{Name: "str.startswith", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("startswith() takes at least 1 argument")
+				}
+				// Handle tuple of prefixes
+				if t, ok := args[0].(*PyTuple); ok {
+					for _, item := range t.Items {
+						prefix := vm.str(item)
+						if strings.HasPrefix(str.Value, prefix) {
+							return True, nil
+						}
+					}
+					return False, nil
+				}
+				prefix := vm.str(args[0])
+				if strings.HasPrefix(str.Value, prefix) {
+					return True, nil
+				}
+				return False, nil
+			}}, nil
+		case "endswith":
+			return &PyBuiltinFunc{Name: "str.endswith", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("endswith() takes at least 1 argument")
+				}
+				if t, ok := args[0].(*PyTuple); ok {
+					for _, item := range t.Items {
+						suffix := vm.str(item)
+						if strings.HasSuffix(str.Value, suffix) {
+							return True, nil
+						}
+					}
+					return False, nil
+				}
+				suffix := vm.str(args[0])
+				if strings.HasSuffix(str.Value, suffix) {
+					return True, nil
+				}
+				return False, nil
+			}}, nil
+		case "count":
+			return &PyBuiltinFunc{Name: "str.count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("count() takes at least 1 argument")
+				}
+				sub := vm.str(args[0])
+				s := str.Value
+				start := 0
+				end := len(s)
+				if len(args) > 1 {
+					start = int(vm.toInt(args[1]))
+				}
+				if len(args) > 2 {
+					end = int(vm.toInt(args[2]))
+				}
+				if start > len(s) {
+					return MakeInt(0), nil
+				}
+				if end > len(s) {
+					end = len(s)
+				}
+				return MakeInt(int64(strings.Count(s[start:end], sub))), nil
+			}}, nil
+		case "center":
+			return &PyBuiltinFunc{Name: "str.center", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("center() takes at least 1 argument")
+				}
+				width := int(vm.toInt(args[0]))
+				fillChar := " "
+				if len(args) > 1 {
+					fillChar = vm.str(args[1])
+				}
+				s := str.Value
+				if len(s) >= width {
+					return &PyString{Value: s}, nil
+				}
+				total := width - len(s)
+				left := total / 2
+				right := total - left
+				return &PyString{Value: strings.Repeat(fillChar, left) + s + strings.Repeat(fillChar, right)}, nil
+			}}, nil
+		case "ljust":
+			return &PyBuiltinFunc{Name: "str.ljust", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("ljust() takes at least 1 argument")
+				}
+				width := int(vm.toInt(args[0]))
+				fillChar := " "
+				if len(args) > 1 {
+					fillChar = vm.str(args[1])
+				}
+				s := str.Value
+				if len(s) >= width {
+					return &PyString{Value: s}, nil
+				}
+				return &PyString{Value: s + strings.Repeat(fillChar, width-len(s))}, nil
+			}}, nil
+		case "rjust":
+			return &PyBuiltinFunc{Name: "str.rjust", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("rjust() takes at least 1 argument")
+				}
+				width := int(vm.toInt(args[0]))
+				fillChar := " "
+				if len(args) > 1 {
+					fillChar = vm.str(args[1])
+				}
+				s := str.Value
+				if len(s) >= width {
+					return &PyString{Value: s}, nil
+				}
+				return &PyString{Value: strings.Repeat(fillChar, width-len(s)) + s}, nil
+			}}, nil
+		case "zfill":
+			return &PyBuiltinFunc{Name: "str.zfill", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("zfill() takes exactly 1 argument")
+				}
+				width := int(vm.toInt(args[0]))
+				s := str.Value
+				if len(s) >= width {
+					return &PyString{Value: s}, nil
+				}
+				if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+					return &PyString{Value: string(s[0]) + strings.Repeat("0", width-len(s)) + s[1:]}, nil
+				}
+				return &PyString{Value: strings.Repeat("0", width-len(s)) + s}, nil
+			}}, nil
+		case "expandtabs":
+			return &PyBuiltinFunc{Name: "str.expandtabs", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				tabSize := 8
+				if len(args) > 0 {
+					tabSize = int(vm.toInt(args[0]))
+				}
+				var result strings.Builder
+				col := 0
+				for _, ch := range str.Value {
+					if ch == '\t' {
+						spaces := tabSize - (col % tabSize)
+						result.WriteString(strings.Repeat(" ", spaces))
+						col += spaces
+					} else if ch == '\n' || ch == '\r' {
+						result.WriteRune(ch)
+						col = 0
+					} else {
+						result.WriteRune(ch)
+						col++
+					}
+				}
+				return &PyString{Value: result.String()}, nil
+			}}, nil
+		case "partition":
+			return &PyBuiltinFunc{Name: "str.partition", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("partition() takes exactly 1 argument")
+				}
+				sep := vm.str(args[0])
+				idx := strings.Index(str.Value, sep)
+				if idx < 0 {
+					return &PyTuple{Items: []Value{
+						&PyString{Value: str.Value},
+						&PyString{Value: ""},
+						&PyString{Value: ""},
+					}}, nil
+				}
+				return &PyTuple{Items: []Value{
+					&PyString{Value: str.Value[:idx]},
+					&PyString{Value: sep},
+					&PyString{Value: str.Value[idx+len(sep):]},
+				}}, nil
+			}}, nil
+		case "rpartition":
+			return &PyBuiltinFunc{Name: "str.rpartition", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("rpartition() takes exactly 1 argument")
+				}
+				sep := vm.str(args[0])
+				idx := strings.LastIndex(str.Value, sep)
+				if idx < 0 {
+					return &PyTuple{Items: []Value{
+						&PyString{Value: ""},
+						&PyString{Value: ""},
+						&PyString{Value: str.Value},
+					}}, nil
+				}
+				return &PyTuple{Items: []Value{
+					&PyString{Value: str.Value[:idx]},
+					&PyString{Value: sep},
+					&PyString{Value: str.Value[idx+len(sep):]},
+				}}, nil
+			}}, nil
+		case "title":
+			return &PyBuiltinFunc{Name: "str.title", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyString{Value: strings.Title(str.Value)}, nil
+			}}, nil
+		case "swapcase":
+			return &PyBuiltinFunc{Name: "str.swapcase", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				var result strings.Builder
+				for _, ch := range str.Value {
+					if ch >= 'a' && ch <= 'z' {
+						result.WriteRune(ch - 32)
+					} else if ch >= 'A' && ch <= 'Z' {
+						result.WriteRune(ch + 32)
+					} else {
+						result.WriteRune(ch)
+					}
+				}
+				return &PyString{Value: result.String()}, nil
+			}}, nil
+		case "capitalize":
+			return &PyBuiltinFunc{Name: "str.capitalize", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				if len(s) == 0 {
+					return &PyString{Value: ""}, nil
+				}
+				runes := []rune(s)
+				result := strings.ToUpper(string(runes[0:1])) + strings.ToLower(string(runes[1:]))
 				return &PyString{Value: result}, nil
+			}}, nil
+		case "isalpha":
+			return &PyBuiltinFunc{Name: "str.isalpha", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				if len(s) == 0 {
+					return False, nil
+				}
+				for _, ch := range s {
+					if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "isdigit":
+			return &PyBuiltinFunc{Name: "str.isdigit", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				if len(s) == 0 {
+					return False, nil
+				}
+				for _, ch := range s {
+					if ch < '0' || ch > '9' {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "isalnum":
+			return &PyBuiltinFunc{Name: "str.isalnum", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				if len(s) == 0 {
+					return False, nil
+				}
+				for _, ch := range s {
+					if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "isspace":
+			return &PyBuiltinFunc{Name: "str.isspace", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				if len(s) == 0 {
+					return False, nil
+				}
+				for _, ch := range s {
+					if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f' && ch != '\v' {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "isupper":
+			return &PyBuiltinFunc{Name: "str.isupper", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				hasUpper := false
+				for _, ch := range s {
+					if ch >= 'a' && ch <= 'z' {
+						return False, nil
+					}
+					if ch >= 'A' && ch <= 'Z' {
+						hasUpper = true
+					}
+				}
+				if hasUpper {
+					return True, nil
+				}
+				return False, nil
+			}}, nil
+		case "islower":
+			return &PyBuiltinFunc{Name: "str.islower", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				s := str.Value
+				hasLower := false
+				for _, ch := range s {
+					if ch >= 'A' && ch <= 'Z' {
+						return False, nil
+					}
+					if ch >= 'a' && ch <= 'z' {
+						hasLower = true
+					}
+				}
+				if hasLower {
+					return True, nil
+				}
+				return False, nil
+			}}, nil
+		case "format":
+			return &PyBuiltinFunc{Name: "str.format", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return vm.strFormat(str.Value, args, kwargs)
+			}}, nil
+		case "splitlines":
+			return &PyBuiltinFunc{Name: "str.splitlines", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				keepends := false
+				if len(args) > 0 {
+					keepends = vm.truthy(args[0])
+				}
+				s := str.Value
+				if len(s) == 0 {
+					return &PyList{Items: []Value{}}, nil
+				}
+				var lines []Value
+				start := 0
+				for i := 0; i < len(s); i++ {
+					if s[i] == '\n' || s[i] == '\r' {
+						end := i
+						if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+							i++
+						}
+						if keepends {
+							lines = append(lines, &PyString{Value: s[start : i+1]})
+						} else {
+							lines = append(lines, &PyString{Value: s[start:end]})
+						}
+						start = i + 1
+					}
+				}
+				if start < len(s) {
+					lines = append(lines, &PyString{Value: s[start:]})
+				}
+				return &PyList{Items: lines}, nil
+			}}, nil
+		case "encode":
+			return &PyBuiltinFunc{Name: "str.encode", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyBytes{Value: []byte(str.Value)}, nil
 			}}, nil
 		}
 	case *PyFunction:
@@ -799,6 +1782,28 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return nil, fmt.Errorf("'function' object has no attribute '__wrapped__'")
 		}
 		return nil, fmt.Errorf("'function' object has no attribute '%s'", name)
+	case *PyBuiltinFunc:
+		// Handle class methods on builtin types (e.g., dict.fromkeys)
+		if o.Name == "dict" && name == "fromkeys" {
+			return &PyBuiltinFunc{Name: "dict.fromkeys", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("fromkeys() requires at least 1 argument")
+				}
+				keys, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				def := Value(None)
+				if len(args) > 1 {
+					def = args[1]
+				}
+				result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				for _, k := range keys {
+					result.DictSet(k, def, vm)
+				}
+				return result, nil
+			}}, nil
+		}
 	}
 	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
 }
@@ -829,3 +1834,234 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	}
 	return fmt.Errorf("'%s' object attribute '%s' is read-only", vm.typeName(obj), name)
 }
+
+// strFormat implements Python's str.format() method
+func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) (Value, error) {
+	var result strings.Builder
+	argIdx := 0
+
+	i := 0
+	for i < len(template) {
+		if template[i] == '{' {
+			if i+1 < len(template) && template[i+1] == '{' {
+				result.WriteByte('{')
+				i += 2
+				continue
+			}
+			// Find closing brace
+			j := i + 1
+			for j < len(template) && template[j] != '}' {
+				j++
+			}
+			if j >= len(template) {
+				return nil, fmt.Errorf("ValueError: Single '{' encountered in format string")
+			}
+			field := template[i+1 : j]
+
+			// Parse field name and format spec
+			var fieldName, formatSpec string
+			if colonIdx := strings.Index(field, ":"); colonIdx >= 0 {
+				fieldName = field[:colonIdx]
+				formatSpec = field[colonIdx+1:]
+			} else {
+				fieldName = field
+			}
+
+			// Get value
+			var val Value
+			if fieldName == "" {
+				if argIdx >= len(args) {
+					return nil, fmt.Errorf("IndexError: Replacement index %d out of range", argIdx)
+				}
+				val = args[argIdx]
+				argIdx++
+			} else if idx, err := strconv.Atoi(fieldName); err == nil {
+				if idx >= len(args) {
+					return nil, fmt.Errorf("IndexError: Replacement index %d out of range", idx)
+				}
+				val = args[idx]
+			} else {
+				if v, ok := kwargs[fieldName]; ok {
+					val = v
+				} else {
+					return nil, fmt.Errorf("KeyError: '%s'", fieldName)
+				}
+			}
+
+			// Apply format spec
+			if formatSpec != "" {
+				formatted := vm.applyFormatSpec(val, formatSpec)
+				result.WriteString(formatted)
+			} else {
+				result.WriteString(vm.str(val))
+			}
+			i = j + 1
+		} else if template[i] == '}' {
+			if i+1 < len(template) && template[i+1] == '}' {
+				result.WriteByte('}')
+				i += 2
+				continue
+			}
+			return nil, fmt.Errorf("ValueError: Single '}' encountered in format string")
+		} else {
+			result.WriteByte(template[i])
+			i++
+		}
+	}
+	return &PyString{Value: result.String()}, nil
+}
+
+// applyFormatSpec applies a format spec like ">10", "<10", "^10", ".2f", "05d"
+func (vm *VM) applyFormatSpec(val Value, spec string) string {
+	if len(spec) == 0 {
+		return vm.str(val)
+	}
+
+	// Parse alignment and fill
+	fill := " "
+	align := byte(0)
+	i := 0
+
+	// Check for fill+align or just align
+	if len(spec) > 1 && (spec[1] == '<' || spec[1] == '>' || spec[1] == '^') {
+		fill = string(spec[0])
+		align = spec[1]
+		i = 2
+	} else if len(spec) > 0 && (spec[0] == '<' || spec[0] == '>' || spec[0] == '^') {
+		align = spec[0]
+		i = 1
+	}
+
+	// Check for zero-fill
+	zeroFill := false
+	if i < len(spec) && spec[i] == '0' {
+		zeroFill = true
+		fill = "0"
+		if align == 0 {
+			align = '>'
+		}
+		i++
+	}
+
+	// Parse width
+	width := 0
+	for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+		width = width*10 + int(spec[i]-'0')
+		i++
+	}
+
+	// Parse precision
+	precision := -1
+	if i < len(spec) && spec[i] == '.' {
+		i++
+		precision = 0
+		for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
+			precision = precision*10 + int(spec[i]-'0')
+			i++
+		}
+	}
+
+	// Parse type
+	typeChar := byte(0)
+	if i < len(spec) {
+		typeChar = spec[i]
+	}
+
+	// Format the value
+	var s string
+	switch typeChar {
+	case 'f', 'F':
+		f := vm.toFloat(val)
+		if precision < 0 {
+			precision = 6
+		}
+		s = strconv.FormatFloat(f, 'f', precision, 64)
+	case 'd':
+		n := vm.toInt(val)
+		s = strconv.FormatInt(n, 10)
+	case 'x':
+		n := vm.toInt(val)
+		s = strconv.FormatInt(n, 16)
+	case 'X':
+		n := vm.toInt(val)
+		s = strings.ToUpper(strconv.FormatInt(n, 16))
+	case 'o':
+		n := vm.toInt(val)
+		s = strconv.FormatInt(n, 8)
+	case 'b':
+		n := vm.toInt(val)
+		s = strconv.FormatInt(n, 2)
+	case 'e', 'E':
+		f := vm.toFloat(val)
+		if precision < 0 {
+			precision = 6
+		}
+		s = strconv.FormatFloat(f, byte(typeChar), precision, 64)
+	case 'g', 'G':
+		f := vm.toFloat(val)
+		if precision < 0 {
+			precision = 6
+		}
+		s = strconv.FormatFloat(f, byte(typeChar), precision, 64)
+	case 's', 0:
+		s = vm.str(val)
+		if precision >= 0 && len(s) > precision {
+			s = s[:precision]
+		}
+	default:
+		s = vm.str(val)
+	}
+
+	// Apply zero-fill for numeric types
+	if zeroFill && width > 0 {
+		neg := false
+		if len(s) > 0 && s[0] == '-' {
+			neg = true
+			s = s[1:]
+		}
+		for len(s) < width-boolToInt(neg) {
+			s = "0" + s
+		}
+		if neg {
+			s = "-" + s
+		}
+		return s
+	}
+
+	// Apply width and alignment
+	if width > utf8.RuneCountInString(s) {
+		padding := width - utf8.RuneCountInString(s)
+		switch align {
+		case '<':
+			s = s + strings.Repeat(fill, padding)
+		case '>':
+			s = strings.Repeat(fill, padding) + s
+		case '^':
+			left := padding / 2
+			right := padding - left
+			s = strings.Repeat(fill, left) + s + strings.Repeat(fill, right)
+		default:
+			// Default: right-align for numbers, left-align for strings
+			switch val.(type) {
+			case *PyInt, *PyFloat:
+				s = strings.Repeat(fill, padding) + s
+			default:
+				s = s + strings.Repeat(fill, padding)
+			}
+		}
+	}
+
+	return s
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// Ensure unused imports are satisfied
+var _ = sort.SliceStable
+var _ = strconv.Atoi
+var _ = utf8.RuneCountInString

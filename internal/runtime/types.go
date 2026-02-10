@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"strings"
 	"sync"
@@ -47,11 +48,39 @@ var (
 
 // PyInt represents a Python integer
 type PyInt struct {
-	Value int64
+	Value    int64
+	BigValue *big.Int // non-nil for integers that overflow int64
 }
 
-func (i *PyInt) Type() string   { return "int" }
-func (i *PyInt) String() string { return fmt.Sprintf("%d", i.Value) }
+func (i *PyInt) Type() string { return "int" }
+func (i *PyInt) String() string {
+	if i.BigValue != nil {
+		return i.BigValue.String()
+	}
+	return fmt.Sprintf("%d", i.Value)
+}
+
+// IsBig returns true if this integer uses big.Int representation
+func (i *PyInt) IsBig() bool {
+	return i.BigValue != nil
+}
+
+// BigIntValue returns the big.Int representation of this integer
+func (i *PyInt) BigIntValue() *big.Int {
+	if i.BigValue != nil {
+		return i.BigValue
+	}
+	return big.NewInt(i.Value)
+}
+
+// MakeBigInt returns a PyInt from a big.Int value
+func MakeBigInt(v *big.Int) *PyInt {
+	// If it fits in int64, use the regular representation
+	if v.IsInt64() {
+		return MakeInt(v.Int64())
+	}
+	return &PyInt{BigValue: v}
+}
 
 // Small integer cache for common values (-5 to 256)
 // This avoids allocations for frequently used integers
@@ -176,6 +205,18 @@ func hashValue(v Value) uint64 {
 		h ^= h >> 33
 		return h
 	case *PyFloat:
+		// If the float is a whole number, hash it the same as the equivalent int
+		// This ensures hash(1) == hash(1.0) as required by Python
+		if val.Value == math.Trunc(val.Value) && !math.IsInf(val.Value, 0) && !math.IsNaN(val.Value) {
+			intVal := int64(val.Value)
+			h := uint64(intVal)
+			h ^= h >> 33
+			h *= 0xff51afd7ed558ccd
+			h ^= h >> 33
+			h *= 0xc4ceb9fe1a85ec53
+			h ^= h >> 33
+			return h
+		}
 		// Hash the bit representation of the float
 		bits := math.Float64bits(val.Value)
 		h := bits
@@ -297,9 +338,10 @@ type dictEntry struct {
 
 // PyDict represents a Python dictionary with hash-based lookups
 type PyDict struct {
-	Items   map[Value]Value      // Legacy field for compatibility
-	buckets map[uint64][]dictEntry // Hash buckets for O(1) lookup
-	size    int
+	Items       map[Value]Value      // Legacy field for compatibility
+	buckets     map[uint64][]dictEntry // Hash buckets for O(1) lookup
+	size        int
+	orderedKeys []Value // Insertion-ordered keys for Python 3.7+ dict ordering
 }
 
 func (d *PyDict) Type() string { return "dict" }
@@ -341,27 +383,71 @@ func (d *PyDict) DictSet(key, value Value, vm *VM) {
 	for i, e := range entries {
 		if vm.equal(e.key, key) {
 			d.buckets[h][i].value = value
-			// Also update legacy Items for compatibility
+			// Update legacy Items using original key from bucket (value equality)
 			if d.Items != nil {
-				d.Items[key] = value
+				d.deleteItemByEquality(e.key, vm)
+				d.Items[e.key] = value
 			}
+			// Update value in orderedKeys entry (key stays the same, just update bucket value)
 			return
 		}
 	}
 	d.buckets[h] = append(entries, dictEntry{key: key, value: value})
 	d.size++
+	d.orderedKeys = append(d.orderedKeys, key)
 	// Also update legacy Items for compatibility
 	if d.Items == nil {
 		d.Items = make(map[Value]Value)
 	}
+	d.deleteItemByEquality(key, vm) // Remove any existing entry with equivalent key
 	d.Items[key] = value
+}
+
+// deleteItemByEquality removes a key from legacy Items using value equality
+func (d *PyDict) deleteItemByEquality(key Value, vm *VM) {
+	for k := range d.Items {
+		if vm.equal(k, key) {
+			delete(d.Items, k)
+			return
+		}
+	}
+}
+
+// removeOrderedKey removes a key from the orderedKeys slice using value equality
+func (d *PyDict) removeOrderedKey(key Value, vm *VM) {
+	for i, k := range d.orderedKeys {
+		if vm.equal(k, key) {
+			d.orderedKeys = append(d.orderedKeys[:i], d.orderedKeys[i+1:]...)
+			return
+		}
+	}
+}
+
+// Keys returns keys in insertion order
+func (d *PyDict) Keys(vm *VM) []Value {
+	if len(d.orderedKeys) > 0 {
+		return d.orderedKeys
+	}
+	// Fallback for dicts created without ordered tracking
+	var keys []Value
+	for k := range d.Items {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // DictDelete removes a key using hash-based lookup
 func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 	if d.buckets == nil {
-		delete(d.Items, key)
-		return true
+		// Use value equality for legacy Items
+		for k := range d.Items {
+			if vm.equal(k, key) {
+				delete(d.Items, k)
+				d.removeOrderedKey(key, vm)
+				return true
+			}
+		}
+		return false
 	}
 	h := vm.hashValueVM(key)
 	entries := d.buckets[h]
@@ -370,7 +456,8 @@ func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 			// Remove entry by replacing with last and truncating
 			d.buckets[h] = append(entries[:i], entries[i+1:]...)
 			d.size--
-			delete(d.Items, key)
+			d.deleteItemByEquality(e.key, vm)
+			d.removeOrderedKey(key, vm)
 			return true
 		}
 	}

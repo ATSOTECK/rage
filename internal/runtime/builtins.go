@@ -107,13 +107,38 @@ func (vm *VM) initBuiltins() {
 		Name: "int",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) == 0 {
+				if _, hasBase := kwargs["base"]; hasBase {
+					return nil, fmt.Errorf("TypeError: int() missing string argument")
+				}
 				return MakeInt(0), nil
 			}
-			i, err := vm.tryToInt(args[0])
-			if err != nil {
-				return nil, err
+
+			// Check for base argument
+			var base int64
+			hasBase := false
+			if len(args) > 1 {
+				b, err := vm.getIntIndex(args[1])
+				if err != nil {
+					return nil, fmt.Errorf("TypeError: '%s' object cannot be interpreted as an integer", vm.typeName(args[1]))
+				}
+				base = b
+				hasBase = true
 			}
-			return MakeInt(i), nil
+			if b, ok := kwargs["base"]; ok {
+				base = vm.toInt(b)
+				hasBase = true
+			}
+
+			if hasBase {
+				// Base conversion requires string argument
+				s, ok := args[0].(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: int() can't convert non-string with explicit base")
+				}
+				return vm.intFromStringBase(s.Value, base)
+			}
+
+			return vm.tryToIntValue(args[0])
 		},
 	}
 
@@ -138,6 +163,16 @@ func (vm *VM) initBuiltins() {
 				return &PyString{Value: ""}, nil
 			}
 			return &PyString{Value: vm.str(args[0])}, nil
+		},
+	}
+
+	vm.builtins["repr"] = &PyBuiltinFunc{
+		Name: "repr",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("repr() takes exactly 1 argument (%d given)", len(args))
+			}
+			return &PyString{Value: vm.repr(args[0])}, nil
 		},
 	}
 
@@ -186,8 +221,31 @@ func (vm *VM) initBuiltins() {
 		Name: "dict",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+			if len(args) > 0 {
+				switch src := args[0].(type) {
+				case *PyDict:
+					for k, v := range src.Items {
+						d.DictSet(k, v, vm)
+					}
+				default:
+					// Iterable of (key, value) pairs
+					items, err := vm.toList(args[0])
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						pair, err := vm.toList(item)
+						if err != nil {
+							return nil, fmt.Errorf("TypeError: cannot convert dictionary update sequence element to a sequence")
+						}
+						if len(pair) != 2 {
+							return nil, fmt.Errorf("ValueError: dictionary update sequence element has length %d; 2 is required", len(pair))
+						}
+						d.DictSet(pair[0], pair[1], vm)
+					}
+				}
+			}
 			for k, v := range kwargs {
-				// Use hash-based storage for O(1) lookup
 				d.DictSet(&PyString{Value: k}, v, vm)
 			}
 			return d, nil
@@ -235,13 +293,40 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	typeClassCache := make(map[string]*PyClass)
+	getTypeClass := func(name string) *PyClass {
+		if cls, ok := typeClassCache[name]; ok {
+			return cls
+		}
+		cls := &PyClass{Name: name}
+		cls.Mro = []*PyClass{cls}
+		typeClassCache[name] = cls
+		return cls
+	}
 	vm.builtins["type"] = &PyBuiltinFunc{
 		Name: "type",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			if len(args) != 1 {
-				return nil, fmt.Errorf("type() takes 1 argument")
+			if len(args) == 1 {
+				switch v := args[0].(type) {
+				case *PyInstance:
+					return v.Class, nil
+				case *PyClass:
+					return getTypeClass("type"), nil
+				default:
+					return getTypeClass(vm.typeName(args[0])), nil
+				}
 			}
-			return &PyString{Value: vm.typeName(args[0])}, nil
+			if len(args) == 3 {
+				// 3-arg form: type(name, bases, dict) - metaclass creation
+				nameStr, ok := args[0].(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: type() argument 1 must be str, not %s", vm.typeName(args[0]))
+				}
+				cls := &PyClass{Name: nameStr.Value, Dict: make(map[string]Value)}
+				cls.Mro = []*PyClass{cls}
+				return cls, nil
+			}
+			return nil, fmt.Errorf("type() takes 1 or 3 arguments")
 		},
 	}
 
@@ -464,13 +549,17 @@ func (vm *VM) initBuiltins() {
 		Name: "ord",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) != 1 {
-				return nil, fmt.Errorf("ord() takes exactly one argument")
+				return nil, fmt.Errorf("TypeError: ord() takes exactly one argument")
 			}
 			s, ok := args[0].(*PyString)
-			if !ok || len(s.Value) != 1 {
-				return nil, fmt.Errorf("ord() expected a character")
+			if !ok {
+				return nil, fmt.Errorf("TypeError: ord() expected string of length 1, but %s found", vm.typeName(args[0]))
 			}
-			return MakeInt(int64(s.Value[0])), nil
+			runes := []rune(s.Value)
+			if len(runes) != 1 {
+				return nil, fmt.Errorf("TypeError: ord() expected a character, but string of length %d found", len(runes))
+			}
+			return MakeInt(int64(runes[0])), nil
 		},
 	}
 
@@ -823,11 +912,9 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("module '%s' has no attribute '%s'", o.Name, name.Value)
 			case *PyDict:
 				// Allow delattr on dict for dynamic attribute-style access
-				for k := range o.Items {
-					if str, ok := k.(*PyString); ok && str.Value == name.Value {
-						delete(o.Items, k)
-						return None, nil
-					}
+				key := &PyString{Value: name.Value}
+				if o.DictDelete(key, vm) {
+					return None, nil
 				}
 				return nil, fmt.Errorf("'dict' object has no attribute '%s'", name.Value)
 			default:
@@ -1293,6 +1380,7 @@ func (vm *VM) initExceptionClasses() {
 	makeExc("StopIteration", exception)
 	makeExc("NotImplementedError", exception)
 	makeExc("RecursionError", exception)
+	makeExc("MemoryError", exception)
 
 	// OSError and its subclasses
 	osError := makeExc("OSError", exception)

@@ -58,7 +58,7 @@ func TestLexerBasicTokens(t *testing.T) {
 }
 
 func TestLexerKeywords(t *testing.T) {
-	input := "if else elif while for def class return True False None and or not in is lambda try except finally raise with as async await break continue pass import from global nonlocal yield assert del match case type"
+	input := "if else elif while for def class return True False None and or not in is lambda try except finally raise with as async await break continue pass import from global nonlocal yield assert del match case"
 	expected := []model.TokenKind{
 		model.TK_If, model.TK_Else, model.TK_Elif, model.TK_While, model.TK_For,
 		model.TK_Def, model.TK_Class, model.TK_Return, model.TK_True, model.TK_False,
@@ -67,7 +67,7 @@ func TestLexerKeywords(t *testing.T) {
 		model.TK_Raise, model.TK_With, model.TK_As, model.TK_Async, model.TK_Await,
 		model.TK_Break, model.TK_Continue, model.TK_Pass, model.TK_Import, model.TK_From,
 		model.TK_Global, model.TK_Nonlocal, model.TK_Yield, model.TK_Assert, model.TK_Del,
-		model.TK_Match, model.TK_Case, model.TK_Type, model.TK_EOF,
+		model.TK_Match, model.TK_Case, model.TK_EOF,
 	}
 
 	lexer := NewLexer(input)

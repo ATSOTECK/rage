@@ -39,7 +39,7 @@ def test_str_count():
     expect(s.count("abra")).to_be(2)
     expect(s.count("z")).to_be(0)
     expect(s.count("a", 1)).to_be(4)
-    expect(s.count("a", 1, 5)).to_be(2)
+    expect(s.count("a", 1, 6)).to_be(2)
 
 def test_str_center_ljust_rjust():
     expect("hi".center(10)).to_be("    hi    ")

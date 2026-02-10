@@ -977,6 +977,28 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			vm.push(items[i])
 		}
 
+	case OpUnpackEx:
+		countBefore := arg & 0xFF
+		countAfter := (arg >> 8) & 0xFF
+		seq := vm.pop()
+		items, err := vm.toList(seq)
+		if err != nil {
+			return nil, err
+		}
+		totalRequired := countBefore + countAfter
+		if len(items) < totalRequired {
+			return nil, fmt.Errorf("ValueError: not enough values to unpack (expected at least %d, got %d)", totalRequired, len(items))
+		}
+		for i := len(items) - 1; i >= len(items)-countAfter; i-- {
+			vm.push(items[i])
+		}
+		starItems := make([]Value, len(items)-totalRequired)
+		copy(starItems, items[countBefore:len(items)-countAfter])
+		vm.push(&PyList{Items: starItems})
+		for i := countBefore - 1; i >= 0; i-- {
+			vm.push(items[i])
+		}
+
 	case OpCompareIn:
 		container := vm.pop()
 		item := vm.pop()

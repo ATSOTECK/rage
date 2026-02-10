@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"fmt"
+	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -34,6 +36,8 @@ func (vm *VM) toValue(v any) Value {
 			items[i] = &PyString{Value: s}
 		}
 		return &PyTuple{Items: items}
+	case *big.Int:
+		return MakeBigInt(val)
 	case *CodeObject:
 		return val
 	case Value:
@@ -53,6 +57,10 @@ func (vm *VM) toInt(v Value) int64 {
 func (vm *VM) tryToInt(v Value) (int64, error) {
 	switch val := v.(type) {
 	case *PyInt:
+		if val.BigValue != nil {
+			// Big int doesn't fit in int64
+			return 0, fmt.Errorf("OverflowError: Python int too large to convert to int64")
+		}
 		return val.Value, nil
 	case *PyFloat:
 		return int64(val.Value), nil
@@ -66,20 +74,171 @@ func (vm *VM) tryToInt(v Value) (int64, error) {
 		if s == "" {
 			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
 		}
+		// Remove underscores
+		s = strings.ReplaceAll(s, "_", "")
 		// Try parsing as integer
 		i, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			// Try parsing as float then converting
-			f, ferr := strconv.ParseFloat(s, 64)
-			if ferr != nil {
-				return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
-			}
-			return int64(f), nil
+			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
 		}
 		return i, nil
+	case *PyInstance:
+		// Check for __int__ method
+		if result, found, err := vm.callDunder(val, "__int__"); found {
+			if err != nil {
+				return 0, err
+			}
+			if i, ok := result.(*PyInt); ok {
+				return i.Value, nil
+			}
+			return 0, fmt.Errorf("TypeError: __int__ returned non-int")
+		}
+		return 0, fmt.Errorf("TypeError: int() argument must be a string or a number, not '%s'", vm.typeName(v))
 	default:
 		return 0, fmt.Errorf("TypeError: int() argument must be a string or a number, not '%s'", vm.typeName(v))
 	}
+}
+
+// tryToIntValue converts a value to a PyInt (possibly big), returning an error if conversion fails.
+func (vm *VM) tryToIntValue(v Value) (Value, error) {
+	switch val := v.(type) {
+	case *PyInt:
+		return val, nil
+	case *PyString:
+		s := strings.TrimSpace(val.Value)
+		if s == "" {
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+		}
+		s = strings.ReplaceAll(s, "_", "")
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			// Try big.Int for overflow
+			bi := new(big.Int)
+			_, ok := bi.SetString(s, 10)
+			if !ok {
+				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			}
+			return MakeBigInt(bi), nil
+		}
+		return MakeInt(i), nil
+	default:
+		i, err := vm.tryToInt(v)
+		if err != nil {
+			return nil, err
+		}
+		return MakeInt(i), nil
+	}
+}
+
+// getIntIndex gets an integer index value, supporting __index__ protocol
+func (vm *VM) getIntIndex(v Value) (int64, error) {
+	switch val := v.(type) {
+	case *PyInt:
+		return val.Value, nil
+	case *PyBool:
+		if val.Value {
+			return 1, nil
+		}
+		return 0, nil
+	case *PyInstance:
+		if result, found, err := vm.callDunder(val, "__index__"); found {
+			if err != nil {
+				return 0, err
+			}
+			if i, ok := result.(*PyInt); ok {
+				return i.Value, nil
+			}
+		}
+		return 0, fmt.Errorf("TypeError: '%s' object cannot be interpreted as an integer", vm.typeName(v))
+	default:
+		return 0, fmt.Errorf("TypeError: '%s' object cannot be interpreted as an integer", vm.typeName(v))
+	}
+}
+
+// intFromStringBase converts a string to int with a given base
+func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: ''", base)
+	}
+
+	// Validate base range
+	if base != 0 && (base < 2 || base > 36) {
+		return nil, fmt.Errorf("ValueError: int() base must be >= 2 and <= 36, or 0")
+	}
+
+	// Remove underscores
+	s = strings.ReplaceAll(s, "_", "")
+
+	// Handle sign
+	negative := false
+	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
+		negative = s[0] == '-'
+		s = s[1:]
+		if s == "" {
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+		}
+	}
+
+	// Handle base 0 (auto-detect)
+	if base == 0 {
+		if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+			base = 16
+			s = s[2:]
+		} else if strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O") {
+			base = 8
+			s = s[2:]
+		} else if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
+			base = 2
+			s = s[2:]
+		} else if len(s) > 1 && s[0] == '0' {
+			// Leading zeros in base 0 are not allowed (except "0" itself)
+			allZeros := true
+			for _, c := range s {
+				if c != '0' {
+					allZeros = false
+					break
+				}
+			}
+			if !allZeros {
+				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 0: '0%s'", s[1:])
+			}
+			base = 10
+		} else {
+			base = 10
+		}
+	} else {
+		// Strip prefix if it matches the base
+		if base == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
+			s = s[2:]
+		} else if base == 8 && (strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O")) {
+			s = s[2:]
+		} else if base == 2 && (strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B")) {
+			s = s[2:]
+		}
+	}
+
+	if s == "" {
+		return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: ''", base)
+	}
+
+	i, err := strconv.ParseInt(s, int(base), 64)
+	if err != nil {
+		// Try big.Int for overflow
+		bi := new(big.Int)
+		_, ok := bi.SetString(s, int(base))
+		if !ok {
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+		}
+		if negative {
+			bi.Neg(bi)
+		}
+		return MakeBigInt(bi), nil
+	}
+	if negative {
+		i = -i
+	}
+	return MakeInt(i), nil
 }
 
 func (vm *VM) toFloat(v Value) float64 {
@@ -105,8 +264,24 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 		if s == "" {
 			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
 		}
+		// Handle Python-style special values (case-insensitive)
+		lower := strings.ToLower(s)
+		switch lower {
+		case "inf", "+inf", "infinity", "+infinity":
+			return math.Inf(1), nil
+		case "-inf", "-infinity":
+			return math.Inf(-1), nil
+		case "nan", "+nan", "-nan":
+			return math.NaN(), nil
+		}
+		// Remove underscores (Python numeric literal syntax)
+		s = strings.ReplaceAll(s, "_", "")
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil {
+			// ParseFloat returns ±Inf for overflow (ErrRange), which Python accepts
+			if math.IsInf(f, 0) {
+				return f, nil
+			}
 			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
 		}
 		return f, nil
@@ -147,13 +322,28 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 		}
 		return items, nil
 	case *PyDict:
-		var items []Value
-		for k := range val.Items {
-			items = append(items, k)
-		}
+		keys := val.Keys(vm)
+		items := make([]Value, len(keys))
+		copy(items, keys)
 		return items, nil
 	case *PyIterator:
 		return val.Items[val.Index:], nil
+	case *PyGenerator:
+		var items []Value
+		for {
+			value, done, err := vm.GeneratorSend(val, None)
+			if done || err != nil {
+				if err != nil {
+					if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+						break
+					}
+					return nil, err
+				}
+				break
+			}
+			items = append(items, value)
+		}
+		return items, nil
 	default:
 		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	}
@@ -213,7 +403,12 @@ func (vm *VM) str(v Value) string {
 	case *PyInt:
 		return fmt.Sprintf("%d", val.Value)
 	case *PyFloat:
-		return fmt.Sprintf("%g", val.Value)
+		s := strconv.FormatFloat(val.Value, 'g', -1, 64)
+		// Python always shows at least one decimal for floats
+		if !strings.ContainsAny(s, ".eEn") {
+			s += ".0"
+		}
+		return s
 	case *PyString:
 		return val.Value
 	case *PyBytes:
@@ -366,5 +561,61 @@ func (vm *VM) typeName(v Value) string {
 		return "module"
 	default:
 		return "object"
+	}
+}
+
+func (vm *VM) repr(v Value) string {
+	switch val := v.(type) {
+	case *PyString:
+		return fmt.Sprintf("'%s'", val.Value)
+	case *PyNone:
+		return "None"
+	case *PyBool:
+		if val.Value {
+			return "True"
+		}
+		return "False"
+	case *PyList:
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.repr(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case *PyTuple:
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.repr(item)
+		}
+		if len(parts) == 1 {
+			return "(" + parts[0] + ",)"
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	case *PyDict:
+		orderedKeys := val.Keys(vm)
+		parts := make([]string, 0, len(orderedKeys))
+		for _, k := range orderedKeys {
+			if v, ok := val.DictGet(k, vm); ok {
+				parts = append(parts, vm.repr(k)+": "+vm.repr(v))
+			}
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case *PySet:
+		if len(val.Items) == 0 {
+			return "set()"
+		}
+		parts := make([]string, 0, len(val.Items))
+		for k := range val.Items {
+			parts = append(parts, vm.repr(k))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case *PyInstance:
+		if result, found, err := vm.callDunder(val, "__repr__"); found && err == nil {
+			if s, ok := result.(*PyString); ok {
+				return s.Value
+			}
+		}
+		return fmt.Sprintf("<%s object>", val.Class.Name)
+	default:
+		return vm.str(v)
 	}
 }

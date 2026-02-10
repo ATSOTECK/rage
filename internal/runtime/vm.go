@@ -144,6 +144,34 @@ func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) error {
 	return err
 }
 
+
+// tryHandleError attempts to handle a Go error as a Python exception.
+// Returns (true, nil) if handler found in current frame (caller should continue).
+// Returns (false, errExceptionHandledInOuterFrame) if handled in outer frame.
+// Returns (false, err) if no handler found (caller should return nil, err).
+func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
+	if err == errExceptionHandledInOuterFrame {
+		if vm.frame == frame {
+			return true, nil
+		}
+		return false, errExceptionHandledInOuterFrame
+	}
+	var pyExc *PyException
+	if pe, ok := err.(*PyException); ok {
+		pyExc = pe
+	} else {
+		pyExc = vm.wrapGoError(err)
+	}
+	_, handleErr := vm.handleException(pyExc)
+	if handleErr != nil {
+		return false, handleErr
+	}
+	if vm.frame != frame {
+		return false, errExceptionHandledInOuterFrame
+	}
+	return true, nil
+}
+
 func (vm *VM) run() (Value, error) {
 	frame := vm.frame
 
@@ -996,7 +1024,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			val, err := vm.getAttr(obj, name)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(val)
 
@@ -1006,7 +1038,11 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			err = vm.setAttr(obj, name, val)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 
 		case OpBinarySubscr:
@@ -1014,7 +1050,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			val, err := vm.getItem(obj, index)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(val)
 
@@ -1024,7 +1064,11 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			err = vm.setItem(obj, index, val)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 
 		case OpDeleteSubscr:
@@ -1032,7 +1076,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			err = vm.delItem(obj, index)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 
 		case OpUnaryPositive:
@@ -1053,7 +1101,11 @@ func (vm *VM) run() (Value, error) {
 			a := vm.pop()
 			result, err := vm.unaryOp(op, a)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(result)
 
@@ -1069,7 +1121,11 @@ func (vm *VM) run() (Value, error) {
 			a := vm.pop()
 			result, err := vm.unaryOp(op, a)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(result)
 
@@ -1089,7 +1145,11 @@ func (vm *VM) run() (Value, error) {
 			// Fall back to general case
 			result, err := vm.binaryOp(op, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
@@ -1109,7 +1169,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(op, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
@@ -1129,7 +1193,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(op, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
@@ -1140,7 +1208,11 @@ func (vm *VM) run() (Value, error) {
 			a := vm.pop()
 			result, err := vm.binaryOp(op, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(result)
 
@@ -1153,7 +1225,11 @@ func (vm *VM) run() (Value, error) {
 			binOp := op - OpInplaceAdd + OpBinaryAdd
 			result, err := vm.binaryOp(binOp, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(result)
 
@@ -1267,26 +1343,51 @@ func (vm *VM) run() (Value, error) {
 
 		case OpBuildSet:
 			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+			var buildSetErr error
 			for i := 0; i < arg; i++ {
 				val := vm.pop()
 				if !isHashable(val) {
-					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+					buildSetErr = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+					break
 				}
 				// Use hash-based storage for O(1) lookup
 				s.SetAdd(val, vm)
+			}
+			if buildSetErr != nil {
+				if handled, handleErr := vm.tryHandleError(buildSetErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(s)
 
 		case OpBuildMap:
 			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
-			for i := 0; i < arg; i++ {
+			// Pop all key-value pairs first (they come off stack in reverse order)
+			type kvPair struct {
+				key, val Value
+			}
+			pairs := make([]kvPair, arg)
+			for i := arg - 1; i >= 0; i-- {
 				val := vm.pop()
 				key := vm.pop()
-				if !isHashable(key) {
-					return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
+				pairs[i] = kvPair{key, val}
+			}
+			var buildMapErr error
+			for _, p := range pairs {
+				if !isHashable(p.key) {
+					buildMapErr = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(p.key))
+					break
 				}
-				// Use hash-based storage for O(1) lookup
-				d.DictSet(key, val, vm)
+				d.DictSet(p.key, p.val, vm)
+			}
+			if buildMapErr != nil {
+				if handled, handleErr := vm.tryHandleError(buildMapErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(d)
 
@@ -1294,12 +1395,57 @@ func (vm *VM) run() (Value, error) {
 			seq := vm.pop()
 			items, err := vm.toList(seq)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			if len(items) != arg {
-				return nil, fmt.Errorf("not enough values to unpack (expected %d, got %d)", arg, len(items))
+				err = fmt.Errorf("ValueError: not enough values to unpack (expected %d, got %d)", arg, len(items))
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			for i := len(items) - 1; i >= 0; i-- {
+				vm.push(items[i])
+			}
+
+		case OpUnpackEx:
+			// arg = countBefore | (countAfter << 8)
+			countBefore := arg & 0xFF
+			countAfter := (arg >> 8) & 0xFF
+			seq := vm.pop()
+			items, err := vm.toList(seq)
+			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
+			totalRequired := countBefore + countAfter
+			if len(items) < totalRequired {
+				err = fmt.Errorf("ValueError: not enough values to unpack (expected at least %d, got %d)", totalRequired, len(items))
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
+			// Push in reverse order: after items, starred list, before items
+			// After items (from end)
+			for i := len(items) - 1; i >= len(items)-countAfter; i-- {
+				vm.push(items[i])
+			}
+			// Starred items as a list
+			starItems := make([]Value, len(items)-totalRequired)
+			copy(starItems, items[countBefore:len(items)-countAfter])
+			vm.push(&PyList{Items: starItems})
+			// Before items
+			for i := countBefore - 1; i >= 0; i-- {
 				vm.push(items[i])
 			}
 
@@ -1312,7 +1458,12 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			set := vm.peek(arg).(*PySet)
 			if !isHashable(val) {
-				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+				err = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			// Use hash-based storage for O(1) lookup
 			set.SetAdd(val, vm)
@@ -1322,7 +1473,12 @@ func (vm *VM) run() (Value, error) {
 			key := vm.pop()
 			dict := vm.peek(arg).(*PyDict)
 			if !isHashable(key) {
-				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
+				err = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			// Use hash-based storage for O(1) lookup
 			dict.DictSet(key, val, vm)
@@ -1460,12 +1616,24 @@ func (vm *VM) run() (Value, error) {
 					// Handler is in current frame, continue
 					continue
 				}
-				return nil, err
+				// Convert Go error to Python exception so try/except can catch it
+				pyExc := vm.wrapGoError(err)
+				_, handleErr := vm.handleException(pyExc)
+				if handleErr != nil {
+					return nil, handleErr
+				}
+				if vm.frame != frame {
+					return nil, errExceptionHandledInOuterFrame
+				}
+				continue
 			}
 			vm.push(result)
 
 		case OpCallKw:
-			kwNames := vm.pop().(*PyTuple)
+			kwNames, ok := vm.pop().(*PyTuple)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: internal error: expected keyword names tuple")
+			}
 			totalArgs := arg
 			kwargs := make(map[string]Value)
 			for i := len(kwNames.Items) - 1; i >= 0; i-- {
@@ -1498,7 +1666,16 @@ func (vm *VM) run() (Value, error) {
 					}
 					continue
 				}
-				return nil, err
+				// Convert Go error to Python exception so try/except can catch it
+				pyExc := vm.wrapGoError(err)
+				_, handleErr := vm.handleException(pyExc)
+				if handleErr != nil {
+					return nil, handleErr
+				}
+				if vm.frame != frame {
+					return nil, errExceptionHandledInOuterFrame
+				}
+				continue
 			}
 			vm.push(result)
 
@@ -1864,7 +2041,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			method, err := vm.getAttr(obj, name)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			// Push object and method for CALL_METHOD
 			vm.push(obj)
@@ -1889,7 +2070,11 @@ func (vm *VM) run() (Value, error) {
 				result, err = vm.call(method, allArgs, nil)
 			}
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			vm.push(result)
 
