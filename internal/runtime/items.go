@@ -472,18 +472,39 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 	}
 
 	length := len(lst.Items)
+	step := 1
+	if slice.Step != nil && slice.Step != None {
+		step = int(vm.toInt(slice.Step))
+		if step == 0 {
+			return fmt.Errorf("ValueError: slice step cannot be zero")
+		}
+	}
+
 	start := 0
 	stop := length
+	if step < 0 {
+		start = length - 1
+		stop = -length - 1
+	}
 	if slice.Start != nil && slice.Start != None {
 		start = int(vm.toInt(slice.Start))
 		if start < 0 {
 			start = length + start
 		}
-		if start < 0 {
-			start = 0
-		}
-		if start > length {
-			start = length
+		if step > 0 {
+			if start < 0 {
+				start = 0
+			}
+			if start > length {
+				start = length
+			}
+		} else {
+			if start < -1 {
+				start = -1
+			}
+			if start >= length {
+				start = length - 1
+			}
 		}
 	}
 	if slice.Stop != nil && slice.Stop != None {
@@ -491,20 +512,53 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 		if stop < 0 {
 			stop = length + stop
 		}
-		if stop < 0 {
-			stop = 0
-		}
-		if stop > length {
-			stop = length
+		if step > 0 {
+			if stop < 0 {
+				stop = 0
+			}
+			if stop > length {
+				stop = length
+			}
+		} else {
+			if stop < -length-1 {
+				stop = -length - 1
+			}
+			if stop >= length {
+				stop = length - 1
+			}
 		}
 	}
-	if start > stop {
+
+	if step == 1 {
+		// Contiguous deletion - fast path
+		if start >= stop {
+			return nil
+		}
+		result := make([]Value, 0, start+(length-stop))
+		result = append(result, lst.Items[:start]...)
+		result = append(result, lst.Items[stop:]...)
+		lst.Items = result
 		return nil
 	}
 
-	result := make([]Value, 0, start+(length-stop))
-	result = append(result, lst.Items[:start]...)
-	result = append(result, lst.Items[stop:]...)
+	// Step-based deletion: collect indices to delete
+	toDelete := make(map[int]bool)
+	if step > 0 {
+		for i := start; i < stop; i += step {
+			toDelete[i] = true
+		}
+	} else {
+		for i := start; i > stop; i += step {
+			toDelete[i] = true
+		}
+	}
+
+	result := make([]Value, 0, length-len(toDelete))
+	for i, item := range lst.Items {
+		if !toDelete[i] {
+			result = append(result, item)
+		}
+	}
 	lst.Items = result
 	return nil
 }
