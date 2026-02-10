@@ -350,9 +350,44 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			items = append(items, value)
 		}
 		return items, nil
+	case *PyInstance:
+		// Check for __iter__ method
+		if iterResult, found, err := vm.callDunder(val, "__iter__"); found {
+			if err != nil {
+				return nil, err
+			}
+			// The result of __iter__ should be an iterator with __next__
+			return vm.iteratorToList(iterResult)
+		}
+		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	default:
 		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	}
+}
+
+// iteratorToList collects all items from an iterator (object with __next__) into a list
+func (vm *VM) iteratorToList(iterator Value) ([]Value, error) {
+	inst, ok := iterator.(*PyInstance)
+	if !ok {
+		// If __iter__ returned a known iterable type, just toList it
+		return vm.toList(iterator)
+	}
+	var items []Value
+	for {
+		val, found, err := vm.callDunder(inst, "__next__")
+		if !found {
+			return nil, fmt.Errorf("iterator has no __next__ method")
+		}
+		if err != nil {
+			// StopIteration means we're done
+			if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+				break
+			}
+			return nil, err
+		}
+		items = append(items, val)
+	}
+	return items, nil
 }
 
 func (vm *VM) truthy(v Value) bool {

@@ -70,6 +70,15 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 }
 
 func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
+	// Bool is a subclass of int - coerce for unary operations
+	if ab, ok := a.(*PyBool); ok {
+		if ab.Value {
+			a = MakeInt(1)
+		} else {
+			a = MakeInt(0)
+		}
+	}
+
 	// Check for dunder methods on instances
 	if inst, ok := a.(*PyInstance); ok {
 		var methodName string
@@ -1240,6 +1249,18 @@ func (vm *VM) contains(container, item Value) bool {
 			}
 			// Python's __contains__ can return truthy values
 			return vm.truthy(result)
+		}
+		// Fall back to iterating via __iter__
+		if iter, err := vm.getIter(c); err == nil {
+			for {
+				val, done, err := vm.iterNext(iter)
+				if done || err != nil {
+					break
+				}
+				if vm.equal(val, item) {
+					return true
+				}
+			}
 		}
 	}
 	return false

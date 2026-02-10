@@ -1683,9 +1683,11 @@ func (vm *VM) run() (Value, error) {
 			// Inline pop for return
 			frame.SP--
 			result := frame.Stack[frame.SP]
-			vm.frames = vm.frames[:len(vm.frames)-1]
 			if len(vm.frames) > 0 {
-				vm.frame = vm.frames[len(vm.frames)-1]
+				vm.frames = vm.frames[:len(vm.frames)-1]
+				if len(vm.frames) > 0 {
+					vm.frame = vm.frames[len(vm.frames)-1]
+				}
 			}
 			return result, nil
 

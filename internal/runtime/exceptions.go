@@ -143,43 +143,47 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 	vm.currentException = exc
 	vm.lastException = exc
 
-	for len(vm.frames) > 0 {
-		frame := vm.frame
+	if len(vm.frames) == 0 {
+		return nil, exc
+	}
 
-		// Search block stack for exception handler
-		for len(frame.BlockStack) > 0 {
-			block := frame.BlockStack[len(frame.BlockStack)-1]
-			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+	frame := vm.frame
 
-			switch block.Type {
-			case BlockExcept:
-				// Found exception handler - restore stack and jump to handler
-				frame.SP = block.Level
-				frame.IP = block.Handler
-				vm.push(exc)    // Push exception onto stack for handler
-				return nil, nil // Continue execution at handler
+	// Search block stack for exception handler in the current frame only.
+	// We don't cross function call boundaries because Go-level callers
+	// (like iterNext) need a chance to catch exceptions (e.g. StopIteration)
+	// before Python-level handlers in calling frames see them.
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 
-			case BlockFinally:
-				// Must execute finally block first
-				frame.SP = block.Level
-				frame.IP = block.Handler
-				vm.push(exc)    // Push exception for finally to potentially re-raise
-				return nil, nil // Continue execution at finally
+		switch block.Type {
+		case BlockExcept:
+			// Found exception handler - restore stack and jump to handler
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.push(exc)    // Push exception onto stack for handler
+			return nil, nil // Continue execution at handler
 
-			case BlockLoop:
-				// Skip loop blocks when unwinding for exception
-				continue
-			}
-		}
+		case BlockFinally:
+			// Must execute finally block first
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.push(exc)    // Push exception for finally to potentially re-raise
+			return nil, nil // Continue execution at finally
 
-		// No handler in this frame, pop frame and continue unwinding
-		vm.frames = vm.frames[:len(vm.frames)-1]
-		if len(vm.frames) > 0 {
-			vm.frame = vm.frames[len(vm.frames)-1]
+		case BlockLoop:
+			// Skip loop blocks when unwinding for exception
+			continue
 		}
 	}
 
-	// No handler found anywhere - exception propagates to caller
+	// No handler in this frame, pop frame and propagate to caller
+	vm.frames = vm.frames[:len(vm.frames)-1]
+	if len(vm.frames) > 0 {
+		vm.frame = vm.frames[len(vm.frames)-1]
+	}
+
 	return nil, exc
 }
 
