@@ -303,6 +303,12 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			items[i] = &PyString{Value: string(ch)}
 		}
 		return items, nil
+	case *PyBytes:
+		items := make([]Value, len(val.Value))
+		for i, b := range val.Value {
+			items[i] = MakeInt(int64(b))
+		}
+		return items, nil
 	case *PyRange:
 		var items []Value
 		for i := val.Start; (val.Step > 0 && i < val.Stop) || (val.Step < 0 && i > val.Stop); i += val.Step {
@@ -344,9 +350,44 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			items = append(items, value)
 		}
 		return items, nil
+	case *PyInstance:
+		// Check for __iter__ method
+		if iterResult, found, err := vm.callDunder(val, "__iter__"); found {
+			if err != nil {
+				return nil, err
+			}
+			// The result of __iter__ should be an iterator with __next__
+			return vm.iteratorToList(iterResult)
+		}
+		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	default:
 		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	}
+}
+
+// iteratorToList collects all items from an iterator (object with __next__) into a list
+func (vm *VM) iteratorToList(iterator Value) ([]Value, error) {
+	inst, ok := iterator.(*PyInstance)
+	if !ok {
+		// If __iter__ returned a known iterable type, just toList it
+		return vm.toList(iterator)
+	}
+	var items []Value
+	for {
+		val, found, err := vm.callDunder(inst, "__next__")
+		if !found {
+			return nil, fmt.Errorf("iterator has no __next__ method")
+		}
+		if err != nil {
+			// StopIteration means we're done
+			if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+				break
+			}
+			return nil, err
+		}
+		items = append(items, val)
+	}
+	return items, nil
 }
 
 func (vm *VM) truthy(v Value) bool {
@@ -371,6 +412,10 @@ func (vm *VM) truthy(v Value) bool {
 		return len(val.Items) > 0
 	case *PyFrozenSet:
 		return len(val.Items) > 0
+	case *PyRange:
+		return rangeLen(val) > 0
+	case *PyBytes:
+		return len(val.Value) > 0
 	case *PyInstance:
 		// Check __bool__ first
 		if result, found, err := vm.callDunder(val, "__bool__"); found && err == nil {
@@ -412,20 +457,49 @@ func (vm *VM) str(v Value) string {
 	case *PyString:
 		return val.Value
 	case *PyBytes:
-		return fmt.Sprintf("b'%s'", string(val.Value))
+		return bytesRepr(val.Value)
 	case *PyList:
-		return fmt.Sprintf("%v", val.Items)
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.repr(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
 	case *PyTuple:
-		return fmt.Sprintf("%v", val.Items)
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.repr(item)
+		}
+		if len(parts) == 1 {
+			return "(" + parts[0] + ",)"
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
 	case *PyDict:
-		return fmt.Sprintf("%v", val.Items)
+		orderedKeys := val.Keys(vm)
+		parts := make([]string, 0, len(orderedKeys))
+		for _, k := range orderedKeys {
+			if v, ok := val.DictGet(k, vm); ok {
+				parts = append(parts, vm.repr(k)+": "+vm.repr(v))
+			}
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
 	case *PySet:
-		return fmt.Sprintf("%v", val.Items)
+		if len(val.Items) == 0 {
+			return "set()"
+		}
+		parts := make([]string, 0, len(val.Items))
+		for k := range val.Items {
+			parts = append(parts, vm.repr(k))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
 	case *PyFrozenSet:
 		if len(val.Items) == 0 {
 			return "frozenset()"
 		}
-		return fmt.Sprintf("frozenset(%v)", val.Items)
+		parts := make([]string, 0, len(val.Items))
+		for k := range val.Items {
+			parts = append(parts, vm.repr(k))
+		}
+		return "frozenset({" + strings.Join(parts, ", ") + "})"
 	case *PyFunction:
 		return fmt.Sprintf("<function %s>", val.Name)
 	case *PyBuiltinFunc:
@@ -509,6 +583,32 @@ func (vm *VM) formatException(exc *PyException) string {
 	return typeName
 }
 
+// bytesRepr produces the Python repr for a bytes object
+func bytesRepr(data []byte) string {
+	var b strings.Builder
+	b.WriteString("b'")
+	for _, c := range data {
+		switch {
+		case c == '\\':
+			b.WriteString("\\\\")
+		case c == '\'':
+			b.WriteString("\\'")
+		case c == '\t':
+			b.WriteString("\\t")
+		case c == '\n':
+			b.WriteString("\\n")
+		case c == '\r':
+			b.WriteString("\\r")
+		case c >= 32 && c < 127:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "\\x%02x", c)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
 func (vm *VM) typeName(v Value) string {
 	switch val := v.(type) {
 	case *PyNone:
@@ -568,6 +668,8 @@ func (vm *VM) repr(v Value) string {
 	switch val := v.(type) {
 	case *PyString:
 		return fmt.Sprintf("'%s'", val.Value)
+	case *PyBytes:
+		return bytesRepr(val.Value)
 	case *PyNone:
 		return "None"
 	case *PyBool:

@@ -551,8 +551,10 @@ func (c *Compiler) currentOffset() int {
 func (c *Compiler) addConstant(value any) int {
 	// Skip deduplication for slice types (they can't be compared with ==)
 	switch value.(type) {
-	case []string, []any, []int, []float64:
+	case []string, []any, []int, []float64, []byte:
 		// Don't deduplicate slices, just add them
+	case *runtime.PyInt:
+		// Don't deduplicate PyInt (may contain big.Int which panics on ==)
 	default:
 		for i, v := range c.code.Constants {
 			if v == value {
@@ -857,7 +859,13 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		c.compileFString(e)
 
 	case *model.BytesLit:
-		c.emitLoadConst([]byte(e.Value))
+		// Convert rune-by-rune to preserve raw byte values (e.g., \xff -> 0xFF, not UTF-8 encoded)
+		runes := []rune(e.Value)
+		raw := make([]byte, len(runes))
+		for i, r := range runes {
+			raw[i] = byte(r)
+		}
+		c.emitLoadConst(raw)
 
 	case *model.BoolLit:
 		c.emitLoadConst(e.Value)
@@ -1184,14 +1192,19 @@ func (c *Compiler) compileFString(e *model.FStringLit) {
 	// Compile each part
 	for i, part := range e.Parts {
 		if part.IsExpr {
-			// Load str builtin
-			strIdx := c.addName("str")
-			c.emitArg(runtime.OpLoadGlobal, strIdx)
+			// Choose conversion function based on !r, !s, !a
+			convName := "str"
+			if part.Conversion == 'r' {
+				convName = "repr"
+			}
+			// Load conversion builtin
+			convIdx := c.addName(convName)
+			c.emitArg(runtime.OpLoadGlobal, convIdx)
 
 			// Compile the expression
 			c.compileExpr(part.Expr)
 
-			// Call str(expr)
+			// Call conversion(expr)
 			c.emitArg(runtime.OpCall, 1)
 		} else {
 			// Load literal string

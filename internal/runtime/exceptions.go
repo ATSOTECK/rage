@@ -76,13 +76,18 @@ func (vm *VM) isExceptionClass(cls *PyClass) bool {
 func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
 	switch t := exceptionType.(type) {
 	case *PyClass:
-		// Check if exc.ExcType is t or subclass of t
-		for _, mroClass := range exc.ExcType.Mro {
-			if mroClass == t {
-				return true
+		// If exc has a typed ExcType, check class hierarchy
+		if exc.ExcType != nil {
+			for _, mroClass := range exc.ExcType.Mro {
+				if mroClass == t {
+					return true
+				}
 			}
+			return false
 		}
-		return false
+		// Fall back to name matching for exceptions created without ExcType
+		return vm.exceptionNameMatches(exc.TypeName, t)
+
 	case *PyTuple:
 		// Tuple of exception types - match any
 		for _, item := range t.Items {
@@ -94,6 +99,26 @@ func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
 	default:
 		return false
 	}
+}
+
+// exceptionNameMatches checks if an exception type name matches a class by walking the MRO
+func (vm *VM) exceptionNameMatches(typeName string, cls *PyClass) bool {
+	// Direct name match
+	if cls.Name == typeName {
+		return true
+	}
+	// Check if the exception's type name matches any parent in the class hierarchy
+	// Look up the exception class by name and check MRO
+	if excClass, ok := vm.builtins[typeName]; ok {
+		if excPyClass, ok := excClass.(*PyClass); ok {
+			for _, mroClass := range excPyClass.Mro {
+				if mroClass == cls {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // buildTraceback builds a traceback from current frame stack
@@ -118,43 +143,47 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 	vm.currentException = exc
 	vm.lastException = exc
 
-	for len(vm.frames) > 0 {
-		frame := vm.frame
+	if len(vm.frames) == 0 {
+		return nil, exc
+	}
 
-		// Search block stack for exception handler
-		for len(frame.BlockStack) > 0 {
-			block := frame.BlockStack[len(frame.BlockStack)-1]
-			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+	frame := vm.frame
 
-			switch block.Type {
-			case BlockExcept:
-				// Found exception handler - restore stack and jump to handler
-				frame.SP = block.Level
-				frame.IP = block.Handler
-				vm.push(exc)    // Push exception onto stack for handler
-				return nil, nil // Continue execution at handler
+	// Search block stack for exception handler in the current frame only.
+	// We don't cross function call boundaries because Go-level callers
+	// (like iterNext) need a chance to catch exceptions (e.g. StopIteration)
+	// before Python-level handlers in calling frames see them.
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 
-			case BlockFinally:
-				// Must execute finally block first
-				frame.SP = block.Level
-				frame.IP = block.Handler
-				vm.push(exc)    // Push exception for finally to potentially re-raise
-				return nil, nil // Continue execution at finally
+		switch block.Type {
+		case BlockExcept:
+			// Found exception handler - restore stack and jump to handler
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.push(exc)    // Push exception onto stack for handler
+			return nil, nil // Continue execution at handler
 
-			case BlockLoop:
-				// Skip loop blocks when unwinding for exception
-				continue
-			}
-		}
+		case BlockFinally:
+			// Must execute finally block first
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.push(exc)    // Push exception for finally to potentially re-raise
+			return nil, nil // Continue execution at finally
 
-		// No handler in this frame, pop frame and continue unwinding
-		vm.frames = vm.frames[:len(vm.frames)-1]
-		if len(vm.frames) > 0 {
-			vm.frame = vm.frames[len(vm.frames)-1]
+		case BlockLoop:
+			// Skip loop blocks when unwinding for exception
+			continue
 		}
 	}
 
-	// No handler found anywhere - exception propagates to caller
+	// No handler in this frame, pop frame and propagate to caller
+	vm.frames = vm.frames[:len(vm.frames)-1]
+	if len(vm.frames) > 0 {
+		vm.frame = vm.frames[len(vm.frames)-1]
+	}
+
 	return nil, exc
 }
 

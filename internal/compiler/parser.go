@@ -1785,7 +1785,7 @@ func (p *Parser) parseYieldExpr() model.Expr {
 
 	var value model.Expr
 	endPos := startPos
-	if !p.check(model.TK_Newline) && !p.check(model.TK_RParen) && !p.check(model.TK_EOF) {
+	if !p.check(model.TK_Newline) && !p.check(model.TK_Comment) && !p.check(model.TK_RParen) && !p.check(model.TK_EOF) {
 		value = p.parseExpression()
 		endPos = value.End()
 	}
@@ -1970,8 +1970,18 @@ func (p *Parser) parseFStringLit() model.Expr {
 			exprText = exprText[:colonIdx]
 		}
 
-		// Parse the expression
+		// Check for conversion (!r, !s, !a) at end of expression
+		var conversion byte
 		exprText = strings.TrimSpace(exprText)
+		if len(exprText) >= 2 {
+			suffix := exprText[len(exprText)-2:]
+			if suffix == "!r" || suffix == "!s" || suffix == "!a" {
+				conversion = suffix[1]
+				exprText = strings.TrimSpace(exprText[:len(exprText)-2])
+			}
+		}
+
+		// Parse the expression
 		if exprText != "" {
 			// Create a new parser for the expression
 			exprParser := NewParser(exprText)
@@ -1982,6 +1992,7 @@ func (p *Parser) parseFStringLit() model.Expr {
 					IsExpr:     true,
 					Expr:       expr,
 					FormatSpec: formatSpec,
+					Conversion: conversion,
 				})
 			}
 		}

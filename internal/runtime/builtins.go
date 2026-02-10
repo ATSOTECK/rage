@@ -43,6 +43,8 @@ func (vm *VM) initBuiltins() {
 				return MakeInt(int64(len(v.Items))), nil
 			case *PyBytes:
 				return MakeInt(int64(len(v.Value))), nil
+			case *PyRange:
+				return MakeInt(rangeLen(v)), nil
 			case *PyInstance:
 				// Check for __len__ method
 				if result, found, err := vm.callDunder(v, "__len__"); found {
@@ -65,6 +67,16 @@ func (vm *VM) initBuiltins() {
 		Name: "range",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			var start, stop, step int64 = 0, 0, 1
+			// Validate all arguments are integers (not floats)
+			for i, arg := range args {
+				switch arg.(type) {
+				case *PyInt, *PyBool:
+					// ok
+				default:
+					_ = i
+					return nil, fmt.Errorf("TypeError: '%s' object cannot be interpreted as an integer", vm.typeName(arg))
+				}
+			}
 			switch len(args) {
 			case 1:
 				stop = vm.toInt(args[0])
@@ -77,6 +89,9 @@ func (vm *VM) initBuiltins() {
 				step = vm.toInt(args[2])
 			default:
 				return nil, fmt.Errorf("range expected 1 to 3 arguments, got %d", len(args))
+			}
+			if step == 0 {
+				return nil, fmt.Errorf("ValueError: range() arg 3 must not be zero")
 			}
 			return &PyRange{Start: start, Stop: stop, Step: step}, nil
 		},
@@ -249,6 +264,83 @@ func (vm *VM) initBuiltins() {
 				d.DictSet(&PyString{Value: k}, v, vm)
 			}
 			return d, nil
+		},
+	}
+
+	vm.builtins["bytes"] = &PyBuiltinFunc{
+		Name: "bytes",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) == 0 {
+				return &PyBytes{Value: []byte{}}, nil
+			}
+			switch v := args[0].(type) {
+			case *PyBytes:
+				// bytes(b"hello") -> copy
+				cp := make([]byte, len(v.Value))
+				copy(cp, v.Value)
+				return &PyBytes{Value: cp}, nil
+			case *PyInt:
+				// bytes(3) -> b'\x00\x00\x00'
+				if v.Value < 0 {
+					return nil, fmt.Errorf("ValueError: negative count")
+				}
+				return &PyBytes{Value: make([]byte, v.Value)}, nil
+			case *PyString:
+				// bytes("hello", "utf-8") - requires encoding argument
+				encoding := ""
+				if len(args) > 1 {
+					if enc, ok := args[1].(*PyString); ok {
+						encoding = enc.Value
+					}
+				}
+				if enc, ok := kwargs["encoding"]; ok {
+					if encStr, ok := enc.(*PyString); ok {
+						encoding = encStr.Value
+					}
+				}
+				if encoding == "" {
+					return nil, fmt.Errorf("TypeError: string argument without an encoding")
+				}
+				// We only support utf-8/ascii/latin-1 for now
+				return &PyBytes{Value: []byte(v.Value)}, nil
+			case *PyList:
+				// bytes([65, 66, 67]) -> b'ABC'
+				result := make([]byte, len(v.Items))
+				for i, item := range v.Items {
+					n := vm.toInt(item)
+					if n < 0 || n > 255 {
+						return nil, fmt.Errorf("ValueError: bytes must be in range(0, 256)")
+					}
+					result[i] = byte(n)
+				}
+				return &PyBytes{Value: result}, nil
+			case *PyTuple:
+				// bytes((65, 66, 67)) -> b'ABC'
+				result := make([]byte, len(v.Items))
+				for i, item := range v.Items {
+					n := vm.toInt(item)
+					if n < 0 || n > 255 {
+						return nil, fmt.Errorf("ValueError: bytes must be in range(0, 256)")
+					}
+					result[i] = byte(n)
+				}
+				return &PyBytes{Value: result}, nil
+			default:
+				// Try to iterate
+				items, err := vm.toList(args[0])
+				if err != nil {
+					return nil, fmt.Errorf("TypeError: cannot convert '%s' object to bytes", vm.typeName(args[0]))
+				}
+				result := make([]byte, len(items))
+				for i, item := range items {
+					n := vm.toInt(item)
+					if n < 0 || n > 255 {
+						return nil, fmt.Errorf("ValueError: bytes must be in range(0, 256)")
+					}
+					result[i] = byte(n)
+				}
+				return &PyBytes{Value: result}, nil
+			}
 		},
 	}
 
@@ -468,6 +560,8 @@ func (vm *VM) initBuiltins() {
 			if len(args) == 0 {
 				return nil, fmt.Errorf("min expected at least 1 argument")
 			}
+			keyFn, hasKey := kwargs["key"]
+			defaultVal, hasDefault := kwargs["default"]
 			if len(args) == 1 {
 				items, err := vm.toList(args[0])
 				if err != nil {
@@ -475,9 +569,27 @@ func (vm *VM) initBuiltins() {
 				}
 				args = items
 			}
+			if len(args) == 0 {
+				if hasDefault {
+					return defaultVal, nil
+				}
+				return nil, &PyException{TypeName: "ValueError", Message: "min() arg is an empty sequence"}
+			}
 			minVal := args[0]
 			for _, v := range args[1:] {
-				if vm.compare(v, minVal) < 0 {
+				if hasKey {
+					kv, err := vm.call(keyFn, []Value{v}, nil)
+					if err != nil {
+						return nil, err
+					}
+					km, err := vm.call(keyFn, []Value{minVal}, nil)
+					if err != nil {
+						return nil, err
+					}
+					if vm.compare(kv, km) < 0 {
+						minVal = v
+					}
+				} else if vm.compare(v, minVal) < 0 {
 					minVal = v
 				}
 			}
@@ -491,6 +603,8 @@ func (vm *VM) initBuiltins() {
 			if len(args) == 0 {
 				return nil, fmt.Errorf("max expected at least 1 argument")
 			}
+			keyFn, hasKey := kwargs["key"]
+			defaultVal, hasDefault := kwargs["default"]
 			if len(args) == 1 {
 				items, err := vm.toList(args[0])
 				if err != nil {
@@ -498,9 +612,27 @@ func (vm *VM) initBuiltins() {
 				}
 				args = items
 			}
+			if len(args) == 0 {
+				if hasDefault {
+					return defaultVal, nil
+				}
+				return nil, &PyException{TypeName: "ValueError", Message: "max() arg is an empty sequence"}
+			}
 			maxVal := args[0]
 			for _, v := range args[1:] {
-				if vm.compare(v, maxVal) > 0 {
+				if hasKey {
+					kv, err := vm.call(keyFn, []Value{v}, nil)
+					if err != nil {
+						return nil, err
+					}
+					km, err := vm.call(keyFn, []Value{maxVal}, nil)
+					if err != nil {
+						return nil, err
+					}
+					if vm.compare(kv, km) > 0 {
+						maxVal = v
+					}
+				} else if vm.compare(v, maxVal) > 0 {
 					maxVal = v
 				}
 			}
@@ -977,7 +1109,7 @@ func (vm *VM) initBuiltins() {
 			bInt, bIsInt := args[1].(*PyInt)
 			if aIsInt && bIsInt {
 				if bInt.Value == 0 {
-					return nil, fmt.Errorf("integer division or modulo by zero")
+					return nil, &PyException{TypeName: "ZeroDivisionError", Message: "integer division or modulo by zero"}
 				}
 				q := aInt.Value / bInt.Value
 				r := aInt.Value % bInt.Value
@@ -992,7 +1124,7 @@ func (vm *VM) initBuiltins() {
 			a := vm.toFloat(args[0])
 			b := vm.toFloat(args[1])
 			if b == 0 {
-				return nil, fmt.Errorf("float division by zero")
+				return nil, &PyException{TypeName: "ZeroDivisionError", Message: "float division by zero"}
 			}
 			q := math.Floor(a / b)
 			r := a - q*b
@@ -1094,6 +1226,158 @@ func (vm *VM) initBuiltins() {
 				return False, nil
 			default:
 				return False, nil
+			}
+		},
+	}
+
+	// next(iterator[, default]) - retrieve next item from iterator
+	vm.builtins["next"] = &PyBuiltinFunc{
+		Name: "next",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return nil, fmt.Errorf("TypeError: next expected 1 or 2 arguments, got %d", len(args))
+			}
+			hasDefault := len(args) == 2
+
+			switch it := args[0].(type) {
+			case *PyGenerator:
+				val, done, err := vm.GeneratorSend(it, None)
+				if done || err != nil {
+					if hasDefault {
+						return args[1], nil
+					}
+					if err != nil {
+						return nil, err
+					}
+					return nil, &PyException{TypeName: "StopIteration", Message: ""}
+				}
+				return val, nil
+			case *PyIterator:
+				if it.Index >= len(it.Items) {
+					if hasDefault {
+						return args[1], nil
+					}
+					return nil, &PyException{TypeName: "StopIteration", Message: ""}
+				}
+				val := it.Items[it.Index]
+				it.Index++
+				return val, nil
+			default:
+				// Try __next__ method
+				nextMethod, err := vm.getAttr(args[0], "__next__")
+				if err != nil {
+					return nil, fmt.Errorf("TypeError: '%s' object is not an iterator", vm.typeName(args[0]))
+				}
+				result, err := vm.call(nextMethod, nil, nil)
+				if err != nil {
+					if hasDefault {
+						if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+							return args[1], nil
+						}
+					}
+					return nil, err
+				}
+				return result, nil
+			}
+		},
+	}
+
+	// iter(object) - get an iterator from an object
+	vm.builtins["iter"] = &PyBuiltinFunc{
+		Name: "iter",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: iter expected 1 argument, got %d", len(args))
+			}
+			return vm.getIter(args[0])
+		},
+	}
+
+	// issubclass(cls, classinfo) - check if class is a subclass
+	vm.builtins["issubclass"] = &PyBuiltinFunc{
+		Name: "issubclass",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("TypeError: issubclass expected 2 arguments, got %d", len(args))
+			}
+
+			// Get the class name from arg 1
+			getClassName := func(v Value) (string, bool) {
+				switch t := v.(type) {
+				case *PyClass:
+					return t.Name, true
+				case *PyBuiltinFunc:
+					return t.Name, true
+				}
+				return "", false
+			}
+
+			// Builtin type hierarchy
+			builtinSubclass := func(child, parent string) bool {
+				if child == parent {
+					return true
+				}
+				// bool is a subclass of int
+				if child == "bool" && parent == "int" {
+					return true
+				}
+				// Everything is a subclass of object
+				if parent == "object" {
+					return true
+				}
+				return false
+			}
+
+			clsName, ok := getClassName(args[0])
+			if !ok {
+				return nil, fmt.Errorf("TypeError: issubclass() arg 1 must be a class")
+			}
+
+			// Handle PyClass with MRO
+			if cls, ok := args[0].(*PyClass); ok {
+				switch target := args[1].(type) {
+				case *PyClass:
+					for _, mroClass := range cls.Mro {
+						if mroClass == target {
+							return True, nil
+						}
+					}
+					return False, nil
+				case *PyBuiltinFunc:
+					return vm.toValue(builtinSubclass(clsName, target.Name)), nil
+				case *PyTuple:
+					for _, item := range target.Items {
+						targetName, ok := getClassName(item)
+						if !ok {
+							return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
+						}
+						if builtinSubclass(clsName, targetName) {
+							return True, nil
+						}
+					}
+					return False, nil
+				}
+			}
+
+			// Handle builtin types (PyBuiltinFunc)
+			switch target := args[1].(type) {
+			case *PyClass:
+				return vm.toValue(builtinSubclass(clsName, target.Name)), nil
+			case *PyBuiltinFunc:
+				return vm.toValue(builtinSubclass(clsName, target.Name)), nil
+			case *PyTuple:
+				for _, item := range target.Items {
+					targetName, ok := getClassName(item)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
+					}
+					if builtinSubclass(clsName, targetName) {
+						return True, nil
+					}
+				}
+				return False, nil
+			default:
+				return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
 			}
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
 )
 
@@ -69,6 +70,15 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 }
 
 func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
+	// Bool is a subclass of int - coerce for unary operations
+	if ab, ok := a.(*PyBool); ok {
+		if ab.Value {
+			a = MakeInt(1)
+		} else {
+			a = MakeInt(0)
+		}
+	}
+
 	// Check for dunder methods on instances
 	if inst, ok := a.(*PyInstance); ok {
 		var methodName string
@@ -102,6 +112,22 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	// Bool is a subclass of int in Python - coerce bools to ints for arithmetic
+	if ab, ok := a.(*PyBool); ok {
+		if ab.Value {
+			a = MakeInt(1)
+		} else {
+			a = MakeInt(0)
+		}
+	}
+	if bb, ok := b.(*PyBool); ok {
+		if bb.Value {
+			b = MakeInt(1)
+		} else {
+			b = MakeInt(0)
+		}
+	}
+
 	// Check for dunder methods on instances first
 	dunders := map[Opcode]struct{ forward, reverse string }{
 		OpBinaryAdd:      {"__add__", "__radd__"},
@@ -240,6 +266,15 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				return &PyTuple{Items: items}, nil
 			}
 		}
+		// Bytes concatenation
+		if ab, ok := a.(*PyBytes); ok {
+			if bb, ok := b.(*PyBytes); ok {
+				result := make([]byte, len(ab.Value)+len(bb.Value))
+				copy(result, ab.Value)
+				copy(result[len(ab.Value):], bb.Value)
+				return &PyBytes{Value: result}, nil
+			}
+		}
 	}
 
 	// String repetition - use strings.Repeat for O(n) instead of O(n²)
@@ -342,6 +377,49 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				}
 				return &PyTuple{Items: items}, nil
 			}
+		}
+		// Bytes repetition
+		const maxBytesRepeatSize = 100 * 1024 * 1024
+		if ab, ok := a.(*PyBytes); ok {
+			if bi, ok := b.(*PyInt); ok {
+				if bi.Value <= 0 {
+					return &PyBytes{Value: []byte{}}, nil
+				}
+				resultSize := int64(len(ab.Value)) * bi.Value
+				if resultSize > maxBytesRepeatSize {
+					return nil, fmt.Errorf("MemoryError: bytes repetition result too large")
+				}
+				count := int(bi.Value)
+				result := make([]byte, 0, len(ab.Value)*count)
+				for i := 0; i < count; i++ {
+					result = append(result, ab.Value...)
+				}
+				return &PyBytes{Value: result}, nil
+			}
+		}
+		if ab, ok := b.(*PyBytes); ok {
+			if ai, ok := a.(*PyInt); ok {
+				if ai.Value <= 0 {
+					return &PyBytes{Value: []byte{}}, nil
+				}
+				resultSize := int64(len(ab.Value)) * ai.Value
+				if resultSize > maxBytesRepeatSize {
+					return nil, fmt.Errorf("MemoryError: bytes repetition result too large")
+				}
+				count := int(ai.Value)
+				result := make([]byte, 0, len(ab.Value)*count)
+				for i := 0; i < count; i++ {
+					result = append(result, ab.Value...)
+				}
+				return &PyBytes{Value: result}, nil
+			}
+		}
+	}
+
+	// String % formatting (printf-style)
+	if op == OpBinaryModulo {
+		if as, ok := a.(*PyString); ok {
+			return vm.stringFormat(as.Value, b)
 		}
 	}
 
@@ -735,8 +813,21 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 		_, ok := b.(*PyNone)
 		return ok
 	case *PyBool:
-		if bv, ok := b.(*PyBool); ok {
+		switch bv := b.(type) {
+		case *PyBool:
 			return av.Value == bv.Value
+		case *PyInt:
+			ai := int64(0)
+			if av.Value {
+				ai = 1
+			}
+			return ai == bv.Value
+		case *PyFloat:
+			ai := 0.0
+			if av.Value {
+				ai = 1.0
+			}
+			return ai == bv.Value
 		}
 	case *PyInt:
 		switch bv := b.(type) {
@@ -751,6 +842,12 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 				return bf.Cmp(big.NewFloat(bv.Value)) == 0
 			}
 			return float64(av.Value) == bv.Value
+		case *PyBool:
+			bi := int64(0)
+			if bv.Value {
+				bi = 1
+			}
+			return av.Value == bi
 		}
 	case *PyFloat:
 		switch bv := b.(type) {
@@ -762,6 +859,18 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 	case *PyString:
 		if bv, ok := b.(*PyString); ok {
 			return av.Value == bv.Value
+		}
+	case *PyBytes:
+		if bv, ok := b.(*PyBytes); ok {
+			if len(av.Value) != len(bv.Value) {
+				return false
+			}
+			for i := range av.Value {
+				if av.Value[i] != bv.Value[i] {
+					return false
+				}
+			}
+			return true
 		}
 	case *PyList:
 		if bv, ok := b.(*PyList); ok {
@@ -876,6 +985,25 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			}
 			return true
 		}
+	case *PyRange:
+		if bv, ok := b.(*PyRange); ok {
+			// Two ranges are equal if they produce the same sequence
+			aLen := rangeLen(av)
+			bLen := rangeLen(bv)
+			if aLen != bLen {
+				return false
+			}
+			if aLen == 0 {
+				return true
+			}
+			if av.Start != bv.Start {
+				return false
+			}
+			if aLen == 1 {
+				return true
+			}
+			return av.Step == bv.Step
+		}
 	case *PyClass:
 		// Classes are compared by identity
 		return a == b
@@ -901,6 +1029,22 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 }
 
 func (vm *VM) compare(a, b Value) int {
+	// Bool is a subclass of int - coerce for comparison
+	if ab, ok := a.(*PyBool); ok {
+		if ab.Value {
+			a = MakeInt(1)
+		} else {
+			a = MakeInt(0)
+		}
+	}
+	if bb, ok := b.(*PyBool); ok {
+		if bb.Value {
+			b = MakeInt(1)
+		} else {
+			b = MakeInt(0)
+		}
+	}
+
 	switch av := a.(type) {
 	case *PyInt:
 		switch bv := b.(type) {
@@ -943,6 +1087,26 @@ func (vm *VM) compare(a, b Value) int {
 			if av.Value < bv.Value {
 				return -1
 			} else if av.Value > bv.Value {
+				return 1
+			}
+			return 0
+		}
+	case *PyBytes:
+		if bv, ok := b.(*PyBytes); ok {
+			minLen := len(av.Value)
+			if len(bv.Value) < minLen {
+				minLen = len(bv.Value)
+			}
+			for i := 0; i < minLen; i++ {
+				if av.Value[i] < bv.Value[i] {
+					return -1
+				} else if av.Value[i] > bv.Value[i] {
+					return 1
+				}
+			}
+			if len(av.Value) < len(bv.Value) {
+				return -1
+			} else if len(av.Value) > len(bv.Value) {
 				return 1
 			}
 			return 0
@@ -1052,6 +1216,31 @@ func (vm *VM) contains(container, item Value) bool {
 	case *PyDict:
 		// Use hash-based lookup for O(1) average case
 		return c.DictContains(item, vm)
+	case *PyRange:
+		if i, ok := item.(*PyInt); ok && i.BigValue == nil {
+			return c.Contains(i.Value)
+		}
+		if b, ok := item.(*PyBool); ok {
+			v := int64(0)
+			if b.Value {
+				v = 1
+			}
+			return c.Contains(v)
+		}
+	case *PyBytes:
+		if i, ok := item.(*PyInt); ok && i.BigValue == nil {
+			for _, b := range c.Value {
+				if int64(b) == i.Value {
+					return true
+				}
+			}
+		}
+		if sub, ok := item.(*PyBytes); ok {
+			if len(sub.Value) == 0 {
+				return true
+			}
+			return bytesContains(c.Value, sub.Value)
+		}
 	case *PyInstance:
 		// Check for __contains__ method
 		if result, found, err := vm.callDunder(c, "__contains__", item); found && err == nil {
@@ -1061,6 +1250,167 @@ func (vm *VM) contains(container, item Value) bool {
 			// Python's __contains__ can return truthy values
 			return vm.truthy(result)
 		}
+		// Fall back to iterating via __iter__
+		if iter, err := vm.getIter(c); err == nil {
+			for {
+				val, done, err := vm.iterNext(iter)
+				if done || err != nil {
+					break
+				}
+				if vm.equal(val, item) {
+					return true
+				}
+			}
+		}
 	}
 	return false
+}
+
+// bytesContains checks if sub is a subsequence of data
+func bytesContains(data, sub []byte) bool {
+	if len(sub) > len(data) {
+		return false
+	}
+	for i := 0; i <= len(data)-len(sub); i++ {
+		match := true
+		for j := 0; j < len(sub); j++ {
+			if data[i+j] != sub[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// stringFormat implements Python's "string % args" printf-style formatting
+func (vm *VM) stringFormat(format string, args Value) (Value, error) {
+	// Get the list of arguments
+	var argList []Value
+	switch v := args.(type) {
+	case *PyTuple:
+		argList = v.Items
+	default:
+		// Single value
+		argList = []Value{args}
+	}
+
+	var result strings.Builder
+	argIdx := 0
+	i := 0
+	for i < len(format) {
+		if format[i] == '%' {
+			i++
+			if i >= len(format) {
+				break
+			}
+			if format[i] == '%' {
+				result.WriteByte('%')
+				i++
+				continue
+			}
+
+			// Parse flags
+			leftAlign := false
+			zeroPad := false
+			for i < len(format) {
+				if format[i] == '-' {
+					leftAlign = true
+					i++
+				} else if format[i] == '0' {
+					zeroPad = true
+					i++
+				} else {
+					break
+				}
+			}
+
+			// Parse width
+			width := 0
+			for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+				width = width*10 + int(format[i]-'0')
+				i++
+			}
+
+			// Parse precision
+			precision := -1
+			if i < len(format) && format[i] == '.' {
+				i++
+				precision = 0
+				for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+					precision = precision*10 + int(format[i]-'0')
+					i++
+				}
+			}
+
+			if i >= len(format) {
+				break
+			}
+
+			spec := format[i]
+			i++
+
+			if argIdx >= len(argList) {
+				return nil, fmt.Errorf("TypeError: not enough arguments for format string")
+			}
+			arg := argList[argIdx]
+			argIdx++
+
+			var s string
+			switch spec {
+			case 's':
+				s = vm.str(arg)
+			case 'r':
+				s = vm.repr(arg)
+			case 'd', 'i':
+				n := vm.toInt(arg)
+				s = fmt.Sprintf("%d", n)
+			case 'f', 'F':
+				f := vm.toFloat(arg)
+				if precision < 0 {
+					precision = 6
+				}
+				s = strconv.FormatFloat(f, 'f', precision, 64)
+			case 'x':
+				n := vm.toInt(arg)
+				s = fmt.Sprintf("%x", n)
+			case 'X':
+				n := vm.toInt(arg)
+				s = fmt.Sprintf("%X", n)
+			case 'o':
+				n := vm.toInt(arg)
+				s = fmt.Sprintf("%o", n)
+			default:
+				s = vm.str(arg)
+			}
+
+			// Apply width and alignment
+			if width > 0 && len(s) < width {
+				pad := width - len(s)
+				if leftAlign {
+					s = s + strings.Repeat(" ", pad)
+				} else if zeroPad && !leftAlign {
+					neg := ""
+					num := s
+					if len(s) > 0 && s[0] == '-' {
+						neg = "-"
+						num = s[1:]
+					}
+					s = neg + strings.Repeat("0", width-len(neg)-len(num)) + num
+				} else {
+					s = strings.Repeat(" ", pad) + s
+				}
+			}
+
+			result.WriteString(s)
+		} else {
+			result.WriteByte(format[i])
+			i++
+		}
+	}
+
+	return &PyString{Value: result.String()}, nil
 }

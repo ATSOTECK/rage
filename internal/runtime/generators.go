@@ -403,14 +403,26 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 			return value, true, nil
 
 		case OpYieldFrom:
-			// Get the iterator from the stack (don't pop it yet)
+			// On resume after a yield, the sent value is pushed on top of the iterator.
+			// We need to pop the sent value and use the iterator beneath it.
+			// On first execution, only the iterator is on the stack.
+			var sendVal Value = None
 			iter := vm.top()
+
+			// Check if the top of stack is the sent value (not an iterator)
+			// This happens on resume: stack is [..., iterator, sent_value]
+			switch iter.(type) {
+			case *PyGenerator, *PyCoroutine, *PyIterator:
+				// Top is already the iterator
+			default:
+				// Top is the sent value, pop it and get the iterator below
+				sendVal = vm.pop()
+				iter = vm.top()
+			}
 
 			// Try to get next value from iterator
 			switch it := iter.(type) {
 			case *PyGenerator:
-				// For the first iteration, send None
-				sendVal := None
 				val, done, err := vm.GeneratorSend(it, sendVal)
 				if err != nil {
 					if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
