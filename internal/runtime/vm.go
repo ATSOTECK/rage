@@ -565,7 +565,12 @@ func (vm *VM) run() (Value, error) {
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
 					if bi.Value == 0 {
-						return nil, fmt.Errorf("division by zero")
+						divErr := fmt.Errorf("ZeroDivisionError: division by zero")
+						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 					}
 					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}
 					frame.SP++
@@ -573,7 +578,12 @@ func (vm *VM) run() (Value, error) {
 				}
 				if bf, ok := b.(*PyFloat); ok {
 					if bf.Value == 0 {
-						return nil, fmt.Errorf("division by zero")
+						divErr := fmt.Errorf("ZeroDivisionError: float division by zero")
+						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 					}
 					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) / bf.Value}
 					frame.SP++
@@ -583,7 +593,12 @@ func (vm *VM) run() (Value, error) {
 			if af, ok := a.(*PyFloat); ok {
 				if bi, ok := b.(*PyInt); ok {
 					if bi.Value == 0 {
-						return nil, fmt.Errorf("division by zero")
+						divErr := fmt.Errorf("ZeroDivisionError: float division by zero")
+						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 					}
 					frame.Stack[frame.SP] = &PyFloat{Value: af.Value / float64(bi.Value)}
 					frame.SP++
@@ -591,7 +606,12 @@ func (vm *VM) run() (Value, error) {
 				}
 				if bf, ok := b.(*PyFloat); ok {
 					if bf.Value == 0 {
-						return nil, fmt.Errorf("division by zero")
+						divErr := fmt.Errorf("ZeroDivisionError: float division by zero")
+						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 					}
 					frame.Stack[frame.SP] = &PyFloat{Value: af.Value / bf.Value}
 					frame.SP++
@@ -601,7 +621,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryDivide, a, b)
 			if err != nil {
-				return nil, err
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++

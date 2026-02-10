@@ -176,12 +176,12 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				return MakeInt(ai.Value * bi.Value), nil
 			case OpBinaryDivide:
 				if bi.Value == 0 {
-					return nil, fmt.Errorf("division by zero")
+					return nil, fmt.Errorf("ZeroDivisionError: division by zero")
 				}
 				return &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}, nil
 			case OpBinaryFloorDiv:
 				if bi.Value == 0 {
-					return nil, fmt.Errorf("integer division by zero")
+					return nil, fmt.Errorf("ZeroDivisionError: integer division or modulo by zero")
 				}
 				// Python floor division: always rounds toward negative infinity
 				result := ai.Value / bi.Value
@@ -192,7 +192,7 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				return MakeInt(result), nil
 			case OpBinaryModulo:
 				if bi.Value == 0 {
-					return nil, fmt.Errorf("integer modulo by zero")
+					return nil, fmt.Errorf("ZeroDivisionError: integer division or modulo by zero")
 				}
 				// Python modulo: result has same sign as divisor
 				result := ai.Value % bi.Value
@@ -629,17 +629,17 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 			return &PyFloat{Value: af.Value * bf.Value}, nil
 		case OpBinaryDivide:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("division by zero")
+				return nil, fmt.Errorf("ZeroDivisionError: float division by zero")
 			}
 			return &PyFloat{Value: af.Value / bf.Value}, nil
 		case OpBinaryFloorDiv:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("float floor division by zero")
+				return nil, fmt.Errorf("ZeroDivisionError: float floor division by zero")
 			}
 			return &PyFloat{Value: math.Floor(af.Value / bf.Value)}, nil
 		case OpBinaryModulo:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("float modulo by zero")
+				return nil, fmt.Errorf("ZeroDivisionError: float modulo")
 			}
 			// Python modulo: result has same sign as divisor
 			r := math.Mod(af.Value, bf.Value)

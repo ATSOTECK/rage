@@ -1661,6 +1661,11 @@ func (o *Optimizer) optimizeEmptyCollections(instrs []*instruction) bool {
 
 func (o *Optimizer) optimizeCompareJump(instrs []*instruction) bool {
 	// Pattern: COMPARE_xx, POP_JUMP_IF_FALSE -> COMPARE_xx_JUMP
+	// IMPORTANT: Don't fuse if the POP_JUMP_IF_FALSE is a jump target,
+	// because other instructions (e.g. JUMP_IF_FALSE_OR_POP from 'and'/'or')
+	// may jump to it expecting it to pop a value from the stack.
+	jumpTargets := o.computeJumpTargets(instrs)
+
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
@@ -1669,6 +1674,11 @@ func (o *Optimizer) optimizeCompareJump(instrs []*instruction) bool {
 
 		// Check if this is a compare followed by POP_JUMP_IF_FALSE
 		if instrs[i+1].op != runtime.OpPopJumpIfFalse {
+			continue
+		}
+
+		// Don't fuse if the POP_JUMP_IF_FALSE is a jump target
+		if jumpTargets[i+1] {
 			continue
 		}
 
@@ -2024,9 +2034,17 @@ func (o *Optimizer) unrollSmallLoops(instrs []*instruction, code *runtime.CodeOb
 func (o *Optimizer) detectCompareLtLocalJump(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, LOAD_FAST y, COMPARE_LT, POP_JUMP_IF_FALSE target
 	// -> COMPARE_LT_LOCAL_JUMP (x, y, target)
+	// IMPORTANT: Don't fuse if any inner instruction is a jump target.
+	jumpTargets := o.computeJumpTargets(instrs)
+
 	changed := false
 	for i := 0; i < len(instrs)-3; i++ {
 		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+			continue
+		}
+
+		// Don't fuse if any of the inner instructions are jump targets
+		if jumpTargets[i+1] || jumpTargets[i+2] || jumpTargets[i+3] {
 			continue
 		}
 
@@ -2156,7 +2174,8 @@ func isJumpOp(op runtime.Opcode) bool {
 		// New compare+jump superinstructions
 		runtime.OpCompareLtJump, runtime.OpCompareLeJump,
 		runtime.OpCompareGtJump, runtime.OpCompareGeJump,
-		runtime.OpCompareEqJump, runtime.OpCompareNeJump:
+		runtime.OpCompareEqJump, runtime.OpCompareNeJump,
+		runtime.OpCompareLtLocalJump:
 		return true
 	}
 	return false
