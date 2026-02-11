@@ -234,10 +234,27 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 		}
 	}
 
-	// Bind arguments to locals
-	for i, arg := range args {
-		if i < len(frame.Locals) {
-			frame.Locals[i] = arg
+	// Bind positional arguments to locals (up to ArgCount)
+	numPositional := code.ArgCount
+	if numPositional > len(args) {
+		numPositional = len(args)
+	}
+	for i := 0; i < numPositional; i++ {
+		frame.Locals[i] = args[i]
+	}
+
+	// Handle *args: collect extra positional arguments into a tuple
+	if code.Flags&FlagVarArgs != 0 {
+		varArgsIdx := code.ArgCount + code.KwOnlyArgCount
+		if varArgsIdx < len(frame.Locals) {
+			if len(args) > code.ArgCount {
+				extraArgs := args[code.ArgCount:]
+				items := make([]Value, len(extraArgs))
+				copy(items, extraArgs)
+				frame.Locals[varArgsIdx] = &PyTuple{Items: items}
+			} else {
+				frame.Locals[varArgsIdx] = &PyTuple{Items: []Value{}}
+			}
 		}
 	}
 
@@ -259,13 +276,40 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 	// Apply keyword arguments to the appropriate local slots
 	if kwargs != nil {
 		for name, val := range kwargs {
-			// Find the parameter index by name
+			// Find the parameter index by name in positional and kw-only params
 			for i, varName := range code.VarNames {
-				if varName == name && i < code.ArgCount {
+				if varName == name && i < code.ArgCount+code.KwOnlyArgCount {
 					frame.Locals[i] = val
 					break
 				}
 			}
+		}
+	}
+
+	// Handle **kwargs: collect extra keyword arguments into a dict
+	if code.Flags&FlagVarKeywords != 0 {
+		kwArgsIdx := code.ArgCount + code.KwOnlyArgCount
+		if code.Flags&FlagVarArgs != 0 {
+			kwArgsIdx++ // Skip the *args slot
+		}
+		if kwArgsIdx < len(frame.Locals) {
+			kwargsDict := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+			if kwargs != nil {
+				for name, val := range kwargs {
+					// Check if this kwarg matches a named parameter
+					isNamedParam := false
+					for i := 0; i < code.ArgCount+code.KwOnlyArgCount && i < len(code.VarNames); i++ {
+						if code.VarNames[i] == name {
+							isNamedParam = true
+							break
+						}
+					}
+					if !isNamedParam {
+						kwargsDict.DictSet(&PyString{Value: name}, val, vm)
+					}
+				}
+			}
+			frame.Locals[kwArgsIdx] = kwargsDict
 		}
 	}
 
