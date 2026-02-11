@@ -271,7 +271,15 @@ func (vm *VM) run() (Value, error) {
 
 		case OpLoadFast:
 			// Inline push for local variable load
-			frame.Stack[frame.SP] = frame.Locals[arg]
+			val := frame.Locals[arg]
+			if val == nil {
+				varName := ""
+				if arg < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[arg]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpStoreFast:
@@ -322,19 +330,51 @@ func (vm *VM) run() (Value, error) {
 		// ==========================================
 
 		case OpLoadFast0:
-			frame.Stack[frame.SP] = frame.Locals[0]
+			val := frame.Locals[0]
+			if val == nil {
+				varName := ""
+				if len(frame.Code.VarNames) > 0 {
+					varName = frame.Code.VarNames[0]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpLoadFast1:
-			frame.Stack[frame.SP] = frame.Locals[1]
+			val := frame.Locals[1]
+			if val == nil {
+				varName := ""
+				if len(frame.Code.VarNames) > 1 {
+					varName = frame.Code.VarNames[1]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpLoadFast2:
-			frame.Stack[frame.SP] = frame.Locals[2]
+			val := frame.Locals[2]
+			if val == nil {
+				varName := ""
+				if len(frame.Code.VarNames) > 2 {
+					varName = frame.Code.VarNames[2]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpLoadFast3:
-			frame.Stack[frame.SP] = frame.Locals[3]
+			val := frame.Locals[3]
+			if val == nil {
+				varName := ""
+				if len(frame.Code.VarNames) > 3 {
+					varName = frame.Code.VarNames[3]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpStoreFast0:
@@ -375,6 +415,13 @@ func (vm *VM) run() (Value, error) {
 
 		case OpIncrementFast:
 			// Increment local variable by 1
+			if frame.Locals[arg] == nil {
+				varName := ""
+				if arg < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[arg]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(v.Value + 1)
 			} else {
@@ -388,6 +435,13 @@ func (vm *VM) run() (Value, error) {
 
 		case OpDecrementFast:
 			// Decrement local variable by 1
+			if frame.Locals[arg] == nil {
+				varName := ""
+				if arg < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[arg]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(v.Value - 1)
 			} else {
@@ -471,18 +525,42 @@ func (vm *VM) run() (Value, error) {
 			// Load two locals: arg contains packed indices (low byte = first, high byte = second)
 			idx1 := arg & 0xFF
 			idx2 := (arg >> 8) & 0xFF
+			val1 := frame.Locals[idx1]
+			if val1 == nil {
+				varName := ""
+				if idx1 < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[idx1]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			val2 := frame.Locals[idx2]
+			if val2 == nil {
+				varName := ""
+				if idx2 < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[idx2]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			vm.ensureStack(2) // Ensure space for two pushes
-			frame.Stack[frame.SP] = frame.Locals[idx1]
+			frame.Stack[frame.SP] = val1
 			frame.SP++
-			frame.Stack[frame.SP] = frame.Locals[idx2]
+			frame.Stack[frame.SP] = val2
 			frame.SP++
 
 		case OpLoadFastLoadConst:
 			// Load local then const: arg contains packed indices
 			localIdx := arg & 0xFF
 			constIdx := (arg >> 8) & 0xFF
+			val := frame.Locals[localIdx]
+			if val == nil {
+				varName := ""
+				if localIdx < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[localIdx]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			vm.ensureStack(2) // Ensure space for two pushes
-			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			frame.Stack[frame.SP] = val
 			frame.SP++
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
 			frame.SP++
@@ -493,7 +571,15 @@ func (vm *VM) run() (Value, error) {
 			loadIdx := (arg >> 8) & 0xFF
 			frame.SP--
 			frame.Locals[storeIdx] = frame.Stack[frame.SP]
-			frame.Stack[frame.SP] = frame.Locals[loadIdx]
+			val := frame.Locals[loadIdx]
+			if val == nil {
+				varName := ""
+				if loadIdx < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[loadIdx]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpBinaryAddInt:
@@ -900,7 +986,21 @@ func (vm *VM) run() (Value, error) {
 			local2 := (arg >> 8) & 0xFF
 			jumpOffset := arg >> 16
 			a := frame.Locals[local1]
+			if a == nil {
+				varName := ""
+				if local1 < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[local1]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			b := frame.Locals[local2]
+			if b == nil {
+				varName := ""
+				if local2 < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[local2]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			// Fast path for ints
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
@@ -1007,10 +1107,18 @@ func (vm *VM) run() (Value, error) {
 			// Load const then local: arg contains packed indices (high byte = const, low byte = local)
 			constIdx := (arg >> 8) & 0xFF
 			localIdx := arg & 0xFF
+			val := frame.Locals[localIdx]
+			if val == nil {
+				varName := ""
+				if localIdx < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[localIdx]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
 			frame.SP++
-			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			frame.Stack[frame.SP] = val
 			frame.SP++
 
 		case OpLoadGlobalLoadFast:
@@ -1026,7 +1134,15 @@ func (vm *VM) run() (Value, error) {
 				return nil, fmt.Errorf("name '%s' is not defined", name)
 			}
 			frame.SP++
-			frame.Stack[frame.SP] = frame.Locals[localIdx]
+			localVal := frame.Locals[localIdx]
+			if localVal == nil {
+				varName := ""
+				if localIdx < len(frame.Code.VarNames) {
+					varName = frame.Code.VarNames[localIdx]
+				}
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			frame.Stack[frame.SP] = localVal
 			frame.SP++
 
 		case OpLoadGlobal:

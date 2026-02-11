@@ -86,7 +86,25 @@ func (st *SymbolTable) DefineGlobal(name string) *Symbol {
 
 func (st *SymbolTable) DefineNonlocal(name string) *Symbol {
 	st.nonlocals[name] = true
-	// Will be resolved later
+
+	// Resolve through outer scopes to find the variable and set up cell/free linkage
+	if st.outer != nil {
+		outerSym, ok := st.outer.Resolve(name)
+		if ok && outerSym.Scope != ScopeGlobal && outerSym.Scope != ScopeBuiltin {
+			// Mark it as a cell in the outer scope if it's a local
+			if outerSym.Scope == ScopeLocal {
+				st.outer.MarkAsCell(name)
+			}
+
+			// Create a free variable in our scope
+			free := &Symbol{Name: name, Scope: ScopeFree, Index: len(st.freeSyms)}
+			st.freeSyms = append(st.freeSyms, free)
+			st.symbols[name] = free
+			return free
+		}
+	}
+
+	// Fallback: couldn't resolve, create with -1 index (will error at runtime)
 	sym := &Symbol{Name: name, Scope: ScopeFree, Index: -1}
 	st.symbols[name] = sym
 	return sym
@@ -728,8 +746,7 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 					storeName = storeName[:dotIdx]
 				}
 			}
-			storeIdx := c.addName(storeName)
-			c.emitArg(runtime.OpStoreName, storeIdx)
+			c.compileStore(&model.Identifier{Name: storeName})
 		}
 
 	case *model.ImportFrom:
@@ -761,8 +778,7 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 				if alias.AsName != nil {
 					storeName = alias.AsName.Name
 				}
-				storeIdx := c.addName(storeName)
-				c.emitArg(runtime.OpStoreName, storeIdx)
+				c.compileStore(&model.Identifier{Name: storeName})
 			}
 		}
 		c.emit(runtime.OpPop) // Pop the module
@@ -1644,6 +1660,196 @@ func (c *Compiler) compileWith(s *model.With) {
 
 // Function and class compilation
 
+// predefineAssignedLocals scans a function body to find all names that are assigned
+// and pre-defines them as locals in the symbol table. This ensures Python-correct scoping:
+// a variable assigned anywhere in a function is local throughout that function, so reading
+// it before assignment raises UnboundLocalError instead of capturing from an outer scope.
+func predefineAssignedLocals(st *SymbolTable, stmts []model.Stmt) {
+	// Collect global and nonlocal declarations first
+	globals := make(map[string]bool)
+	nonlocals := make(map[string]bool)
+	collectDeclarations(stmts, globals, nonlocals)
+
+	// Collect all assigned names
+	assigned := make(map[string]bool)
+	for _, stmt := range stmts {
+		collectAssignedNames(stmt, assigned)
+	}
+
+	// Pre-define as locals: names that are assigned but not declared global/nonlocal
+	// and not already defined (e.g., as a parameter)
+	for name := range assigned {
+		if globals[name] || nonlocals[name] {
+			continue
+		}
+		if _, exists := st.symbols[name]; exists {
+			continue // Already defined (parameter, etc.)
+		}
+		st.Define(name)
+	}
+}
+
+// collectDeclarations finds all global and nonlocal declarations in statements.
+// Does not descend into nested functions, classes, or comprehensions.
+func collectDeclarations(stmts []model.Stmt, globals, nonlocals map[string]bool) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *model.Global:
+			for _, name := range s.Names {
+				globals[name.Name] = true
+			}
+		case *model.Nonlocal:
+			for _, name := range s.Names {
+				nonlocals[name.Name] = true
+			}
+		case *model.If:
+			collectDeclarations(s.Body, globals, nonlocals)
+			collectDeclarations(s.OrElse, globals, nonlocals)
+		case *model.For:
+			collectDeclarations(s.Body, globals, nonlocals)
+			collectDeclarations(s.OrElse, globals, nonlocals)
+		case *model.While:
+			collectDeclarations(s.Body, globals, nonlocals)
+			collectDeclarations(s.OrElse, globals, nonlocals)
+		case *model.Try:
+			collectDeclarations(s.Body, globals, nonlocals)
+			for _, handler := range s.Handlers {
+				collectDeclarations(handler.Body, globals, nonlocals)
+			}
+			collectDeclarations(s.OrElse, globals, nonlocals)
+			collectDeclarations(s.FinalBody, globals, nonlocals)
+		case *model.With:
+			collectDeclarations(s.Body, globals, nonlocals)
+		}
+		// Don't descend into FunctionDef, ClassDef — they have their own scope
+	}
+}
+
+// collectAssignedNames finds all names that are targets of assignment in statements.
+// Does not descend into nested functions, classes, or comprehensions (they have their own scope).
+func collectAssignedNames(stmt model.Stmt, names map[string]bool) {
+	switch s := stmt.(type) {
+	case *model.Assign:
+		for _, target := range s.Targets {
+			collectNamesFromExpr(target, names)
+		}
+	case *model.AugAssign:
+		collectNamesFromExpr(s.Target, names)
+	case *model.AnnAssign:
+		if s.Value != nil {
+			collectNamesFromExpr(s.Target, names)
+		}
+	case *model.For:
+		collectNamesFromExpr(s.Target, names)
+		for _, bodyStmt := range s.Body {
+			collectAssignedNames(bodyStmt, names)
+		}
+		for _, elseStmt := range s.OrElse {
+			collectAssignedNames(elseStmt, names)
+		}
+	case *model.While:
+		for _, bodyStmt := range s.Body {
+			collectAssignedNames(bodyStmt, names)
+		}
+		for _, elseStmt := range s.OrElse {
+			collectAssignedNames(elseStmt, names)
+		}
+	case *model.If:
+		for _, bodyStmt := range s.Body {
+			collectAssignedNames(bodyStmt, names)
+		}
+		for _, elseStmt := range s.OrElse {
+			collectAssignedNames(elseStmt, names)
+		}
+	case *model.With:
+		for _, item := range s.Items {
+			if item.OptionalVar != nil {
+				collectNamesFromExpr(item.OptionalVar, names)
+			}
+		}
+		for _, bodyStmt := range s.Body {
+			collectAssignedNames(bodyStmt, names)
+		}
+	case *model.Try:
+		for _, bodyStmt := range s.Body {
+			collectAssignedNames(bodyStmt, names)
+		}
+		for _, handler := range s.Handlers {
+			if handler.Name != nil {
+				names[handler.Name.Name] = true
+			}
+			for _, bodyStmt := range handler.Body {
+				collectAssignedNames(bodyStmt, names)
+			}
+		}
+		for _, elseStmt := range s.OrElse {
+			collectAssignedNames(elseStmt, names)
+		}
+		for _, finalStmt := range s.FinalBody {
+			collectAssignedNames(finalStmt, names)
+		}
+	case *model.FunctionDef:
+		// The function name itself is assigned in this scope
+		names[s.Name.Name] = true
+		// Don't descend into function body — it has its own scope
+	case *model.ClassDef:
+		// The class name itself is assigned in this scope
+		names[s.Name.Name] = true
+		// Don't descend into class body — it has its own scope
+	case *model.Import:
+		for _, alias := range s.Names {
+			if alias.AsName != nil {
+				names[alias.AsName.Name] = true
+			} else {
+				// import foo.bar → binds 'foo'
+				parts := alias.Name.Name
+				for i, ch := range parts {
+					if ch == '.' {
+						names[parts[:i]] = true
+						break
+					}
+					if i == len(parts)-1 {
+						names[parts] = true
+					}
+				}
+			}
+		}
+	case *model.ImportFrom:
+		for _, alias := range s.Names {
+			if alias.AsName != nil {
+				names[alias.AsName.Name] = true
+			} else {
+				names[alias.Name.Name] = true
+			}
+		}
+	case *model.Match:
+		for _, mc := range s.Cases {
+			for _, bodyStmt := range mc.Body {
+				collectAssignedNames(bodyStmt, names)
+			}
+		}
+	}
+}
+
+// collectNamesFromExpr extracts simple identifier names from assignment targets.
+func collectNamesFromExpr(expr model.Expr, names map[string]bool) {
+	switch e := expr.(type) {
+	case *model.Identifier:
+		names[e.Name] = true
+	case *model.Tuple:
+		for _, elt := range e.Elts {
+			collectNamesFromExpr(elt, names)
+		}
+	case *model.List:
+		for _, elt := range e.Elts {
+			collectNamesFromExpr(elt, names)
+		}
+	case *model.Starred:
+		collectNamesFromExpr(e.Value, names)
+	}
+	// Attribute, Subscript — not simple names, skip
+}
+
 // containsYield checks if statements contain yield or yield from expressions
 func containsYield(stmts []model.Stmt) bool {
 	for _, stmt := range stmts {
@@ -1847,6 +2053,13 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 			funcCompiler.symbolTable.Define(s.Args.KwArg.Arg.Name)
 		}
 	}
+
+	// Pre-scan: identify all assigned names in the function body and pre-define
+	// them as locals. This ensures that variables assigned anywhere in the function
+	// are treated as local for ALL references (matching Python's scoping rules).
+	// Without this, `x = x + 1` without `nonlocal` would incorrectly capture x
+	// from the enclosing scope instead of raising UnboundLocalError.
+	predefineAssignedLocals(funcCompiler.symbolTable, s.Body)
 
 	// Compile function body
 	for _, stmt := range s.Body {
