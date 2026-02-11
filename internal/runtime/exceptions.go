@@ -172,6 +172,13 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			vm.push(exc)    // Push exception for finally to potentially re-raise
 			return nil, nil // Continue execution at finally
 
+		case BlockWith:
+			// With block - must run __exit__ with exception info
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.push(exc)    // Push exception for WITH_CLEANUP
+			return nil, nil // Continue execution at cleanup handler
+
 		case BlockLoop:
 			// Skip loop blocks when unwinding for exception
 			continue

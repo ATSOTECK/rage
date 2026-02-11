@@ -1512,6 +1512,57 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpClearException:
 		vm.currentException = nil
 
+	case OpSetupWith:
+		block := Block{
+			Type:    BlockWith,
+			Handler: arg,
+			Level:   frame.SP,
+		}
+		frame.BlockStack = append(frame.BlockStack, block)
+
+	case OpWithCleanup:
+		exc := vm.pop()
+		cm := vm.pop()
+
+		exitMethod, err := vm.getAttr(cm, "__exit__")
+		if err != nil {
+			return nil, fmt.Errorf("AttributeError: __exit__: %w", err)
+		}
+
+		var excType, excVal, excTb Value
+		if pyExc, ok := exc.(*PyException); ok {
+			if pyExc.ExcType != nil {
+				excType = pyExc.ExcType
+			} else {
+				excType = &PyString{Value: pyExc.Type()}
+			}
+			excVal = pyExc
+			excTb = None
+		} else {
+			excType = None
+			excVal = None
+			excTb = None
+		}
+
+		var result Value
+		switch fn := exitMethod.(type) {
+		case *PyMethod:
+			result, err = vm.callFunction(fn.Func, []Value{fn.Instance, excType, excVal, excTb}, nil)
+		case *PyFunction:
+			result, err = vm.callFunction(fn, []Value{cm, excType, excVal, excTb}, nil)
+		case *PyBuiltinFunc:
+			result, err = fn.Fn([]Value{cm, excType, excVal, excTb}, nil)
+		default:
+			return nil, fmt.Errorf("TypeError: __exit__ is not callable")
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if vm.truthy(result) {
+			vm.currentException = nil
+		}
+
 	case OpEndFinally:
 		if vm.currentException != nil {
 			exc := vm.currentException

@@ -876,6 +876,7 @@ const (
 	BlockLoop BlockType = iota
 	BlockExcept
 	BlockFinally
+	BlockWith
 )
 
 
