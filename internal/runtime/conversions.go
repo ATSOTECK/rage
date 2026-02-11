@@ -537,50 +537,47 @@ func (vm *VM) str(v Value) string {
 	}
 }
 
-// formatExceptionInstance formats an exception instance for display
+// formatExceptionInstance formats an exception instance for str().
+// In CPython, str(e) returns just the message, not "Type: message".
 func (vm *VM) formatExceptionInstance(inst *PyInstance) string {
-	className := inst.Class.Name
-
 	// Get args from the instance
 	if args, ok := inst.Dict["args"]; ok {
 		if t, ok := args.(*PyTuple); ok && len(t.Items) > 0 {
 			if len(t.Items) == 1 {
-				// Single argument - just show the message
-				return fmt.Sprintf("%s: %s", className, vm.str(t.Items[0]))
+				return vm.str(t.Items[0])
 			}
 			// Multiple arguments - show as tuple
 			parts := make([]string, len(t.Items))
 			for i, item := range t.Items {
-				parts[i] = vm.str(item)
+				parts[i] = vm.repr(item)
 			}
-			return fmt.Sprintf("%s: (%s)", className, strings.Join(parts, ", "))
+			return fmt.Sprintf("(%s)", strings.Join(parts, ", "))
 		}
 	}
 
-	// No args, just show the class name
-	return className
+	// No args
+	return ""
 }
 
-// formatException formats a PyException for display
+// formatException formats a PyException for str().
+// In CPython, str(e) returns just the message, not "Type: message".
 func (vm *VM) formatException(exc *PyException) string {
-	typeName := exc.Type()
-
 	if exc.Args != nil && len(exc.Args.Items) > 0 {
 		if len(exc.Args.Items) == 1 {
-			return fmt.Sprintf("%s: %s", typeName, vm.str(exc.Args.Items[0]))
+			return vm.str(exc.Args.Items[0])
 		}
 		parts := make([]string, len(exc.Args.Items))
 		for i, item := range exc.Args.Items {
-			parts[i] = vm.str(item)
+			parts[i] = vm.repr(item)
 		}
-		return fmt.Sprintf("%s: (%s)", typeName, strings.Join(parts, ", "))
+		return fmt.Sprintf("(%s)", strings.Join(parts, ", "))
 	}
 
-	if exc.Message != "" && exc.Message != typeName {
-		return fmt.Sprintf("%s: %s", typeName, exc.Message)
+	if exc.Message != "" {
+		return exc.Message
 	}
 
-	return typeName
+	return ""
 }
 
 // bytesRepr produces the Python repr for a bytes object

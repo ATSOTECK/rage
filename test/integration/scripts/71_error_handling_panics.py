@@ -71,10 +71,29 @@ def test_zerodiv_message():
         x = 1 / 0
     except ZeroDivisionError as e:
         msg = str(e)
-    # str(e) includes type prefix in RAGE
-    expect("division by zero" in msg).to_be(True)
+    expect(msg).to_be("division by zero")
 
-test("ZeroDivisionError message contains text", test_zerodiv_message)
+test("ZeroDivisionError message", test_zerodiv_message)
+
+def test_exception_str_no_type_prefix():
+    msg = ""
+    try:
+        raise ValueError("test message")
+    except ValueError as e:
+        msg = str(e)
+    expect(msg).to_be("test message")
+
+test("str(exception) returns message without type prefix", test_exception_str_no_type_prefix)
+
+def test_exception_str_no_args():
+    msg = "not empty"
+    try:
+        raise RuntimeError()
+    except RuntimeError as e:
+        msg = str(e)
+    expect(msg).to_be("")
+
+test("str(exception) with no args returns empty string", test_exception_str_no_args)
 
 def test_zerodiv_uncaught():
     # ZeroDivisionError should not be caught by ValueError
