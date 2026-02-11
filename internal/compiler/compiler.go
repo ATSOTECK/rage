@@ -1622,40 +1622,72 @@ func (c *Compiler) compileTry(s *model.Try) {
 }
 
 func (c *Compiler) compileWith(s *model.With) {
-	for i, item := range s.Items {
-		c.compileExpr(item.ContextExpr)
+	c.compileWithItem(s.Items, 0, s.Body)
+}
 
-		// Call __enter__
-		c.emit(runtime.OpDup)
-		enterIdx := c.addName("__enter__")
-		c.emitArg(runtime.OpLoadMethod, enterIdx)
-		c.emitArg(runtime.OpCallMethod, 0)
+func (c *Compiler) compileWithItem(items []*model.WithItem, idx int, body []model.Stmt) {
+	item := items[idx]
 
-		if item.OptionalVar != nil {
-			c.compileStore(item.OptionalVar)
-		} else {
-			c.emit(runtime.OpPop)
-		}
+	// Compile the context expression: stack: [..., cm]
+	c.compileExpr(item.ContextExpr)
 
-		// Setup cleanup
-		if i == len(s.Items)-1 {
-			// Last item, compile body
-			for _, stmt := range s.Body {
-				c.compileStmt(stmt)
-			}
+	// DUP so we have cm for both __enter__ and later __exit__
+	c.emit(runtime.OpDup) // stack: [..., cm, cm]
+
+	// Call __enter__
+	enterIdx := c.addName("__enter__")
+	c.emitArg(runtime.OpLoadMethod, enterIdx)
+	c.emitArg(runtime.OpCallMethod, 0) // stack: [..., cm, enter_result]
+
+	// Store or pop the __enter__ result BEFORE setting up the block,
+	// so block.Level captures SP with only cm on the stack.
+	if item.OptionalVar != nil {
+		c.compileStore(item.OptionalVar) // stack: [..., cm]
+	} else {
+		c.emit(runtime.OpPop) // stack: [..., cm]
+	}
+
+	// Setup with block (push BlockWith onto block stack)
+	// block.Level = SP here, with cm at stack[SP-1]
+	cleanupJump := c.emitJump(runtime.OpSetupWith) // stack: [..., cm]
+
+	// Compile body (or next nested with item)
+	if idx < len(items)-1 {
+		c.compileWithItem(items, idx+1, body)
+	} else {
+		for _, stmt := range body {
+			c.compileStmt(stmt)
 		}
 	}
 
-	// Call __exit__ for each item (in reverse)
-	for range s.Items {
-		exitIdx := c.addName("__exit__")
-		c.emitArg(runtime.OpLoadMethod, exitIdx)
-		c.emitLoadConst(nil) // exc_type
-		c.emitLoadConst(nil) // exc_val
-		c.emitLoadConst(nil) // exc_tb
-		c.emitArg(runtime.OpCallMethod, 3)
-		c.emit(runtime.OpPop)
-	}
+	// Normal exit: pop the BlockWith block
+	c.emit(runtime.OpPopExcept) // stack: [..., cm]
+
+	// Jump over the exception cleanup handler
+	normalJump := c.emitJump(runtime.OpJump)
+
+	// === Exception cleanup handler ===
+	// handleException pushes the exception and jumps here
+	// stack: [..., cm, exception]
+	c.patchJump(cleanupJump, c.currentOffset())
+
+	c.emit(runtime.OpWithCleanup) // calls __exit__(exc_type, exc_val, exc_tb), may suppress
+	c.emit(runtime.OpEndFinally)  // re-raises if currentException still set
+	// If we reach here, exception was suppressed — skip normal exit
+	skipJump := c.emitJump(runtime.OpJump)
+
+	// === Normal exit path ===
+	c.patchJump(normalJump, c.currentOffset())
+	// stack: [..., cm] — call __exit__(None, None, None)
+	exitIdx := c.addName("__exit__")
+	c.emitArg(runtime.OpLoadMethod, exitIdx)
+	c.emitLoadConst(nil) // exc_type
+	c.emitLoadConst(nil) // exc_val
+	c.emitLoadConst(nil) // exc_tb
+	c.emitArg(runtime.OpCallMethod, 3)
+	c.emit(runtime.OpPop) // discard __exit__ return value
+
+	c.patchJump(skipJump, c.currentOffset())
 }
 
 // Function and class compilation

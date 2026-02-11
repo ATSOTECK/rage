@@ -2259,6 +2259,66 @@ func (vm *VM) run() (Value, error) {
 			// Does NOT pop the block stack (block was already popped by handleException)
 			vm.currentException = nil
 
+		case OpSetupWith:
+			// Push with-cleanup block onto block stack
+			block := Block{
+				Type:    BlockWith,
+				Handler: arg,
+				Level:   frame.SP,
+			}
+			frame.BlockStack = append(frame.BlockStack, block)
+
+		case OpWithCleanup:
+			// Exception path: stack has [..., cm, exception]
+			// Pop exception, pop context manager, call __exit__(exc_type, exc_val, exc_tb)
+			exc := vm.pop() // the exception
+			cm := vm.pop()  // the context manager
+
+			// Get __exit__ method
+			exitMethod, err := vm.getAttr(cm, "__exit__")
+			if err != nil {
+				return nil, fmt.Errorf("AttributeError: __exit__: %w", err)
+			}
+
+			// Build args: exc_type, exc_val, exc_tb
+			var excType, excVal, excTb Value
+			if pyExc, ok := exc.(*PyException); ok {
+				// exc_type: the exception type (class or string name)
+				if pyExc.ExcType != nil {
+					excType = pyExc.ExcType
+				} else {
+					excType = &PyString{Value: pyExc.Type()}
+				}
+				excVal = pyExc
+				excTb = None // traceback not implemented as object
+			} else {
+				excType = None
+				excVal = None
+				excTb = None
+			}
+
+			// Call __exit__(exc_type, exc_val, exc_tb)
+			var result Value
+			switch fn := exitMethod.(type) {
+			case *PyMethod:
+				// Bound method: instance already captured, pass as self
+				result, err = vm.callFunction(fn.Func, []Value{fn.Instance, excType, excVal, excTb}, nil)
+			case *PyFunction:
+				result, err = vm.callFunction(fn, []Value{cm, excType, excVal, excTb}, nil)
+			case *PyBuiltinFunc:
+				result, err = fn.Fn([]Value{cm, excType, excVal, excTb}, nil)
+			default:
+				return nil, fmt.Errorf("TypeError: __exit__ is not callable")
+			}
+			if err != nil {
+				return nil, err
+			}
+
+			// If __exit__ returns truthy, suppress the exception
+			if vm.truthy(result) {
+				vm.currentException = nil
+			}
+
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
 			if vm.currentException != nil {
