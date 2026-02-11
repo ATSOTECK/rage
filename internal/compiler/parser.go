@@ -855,7 +855,7 @@ func (p *Parser) parseRaiseStmt() model.Stmt {
 	var exc, cause model.Expr
 	endPos := startPos
 
-	if !p.check(model.TK_Newline) && !p.check(model.TK_EOF) {
+	if !p.check(model.TK_Newline) && !p.check(model.TK_Comment) && !p.check(model.TK_EOF) {
 		exc = p.parseExpression()
 		endPos = exc.End()
 
@@ -865,6 +865,7 @@ func (p *Parser) parseRaiseStmt() model.Stmt {
 		}
 	}
 
+	p.match(model.TK_Comment)
 	p.match(model.TK_Newline)
 
 	return &model.Raise{

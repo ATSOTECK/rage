@@ -1,12 +1,12 @@
-github.com/AlDanial/cloc v 2.06  T=0.14 s (989.1 files/s, 507828.9 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.15 s (979.9 files/s, 501000.4 lines/s)
 ---------------------------------------------------------------------------------------------------------------
 File                                                                        blank        comment           code
 ---------------------------------------------------------------------------------------------------------------
 ./internal/runtime/attributes.go                                               56             94           2994
 ./internal/compiler/compiler.go                                               351            299           2125
-./internal/compiler/parser.go                                                 391             75           2100
-./internal/runtime/vm.go                                                      215            221           1927
-./internal/compiler/optimizer.go                                              213            254           1696
+./internal/compiler/parser.go                                                 391             75           2101
+./internal/runtime/vm.go                                                      215            221           1951
+./internal/compiler/optimizer.go                                              217            260           1705
 ./internal/runtime/builtins.go                                                112            132           1548
 ./internal/runtime/operations.go                                               48             79           1289
 ./internal/runtime/generators.go                                              148            113           1265
@@ -120,6 +120,7 @@ File                                                                        blan
 ./test/integration/scripts/02_operators.py                                     24              2            126
 ./test/integration/scripts/38_cpython_bytes.py                                 26              3            126
 ./test/integration/scripts/05_classes.py                                       25              3            124
+./test/integration/scripts/71_error_handling_panics.py                         33             10            123
 ./test/integration/scripts/29_cpython_float.py                                 23              6            121
 ./test/integration/scripts/47_cpython_lambda.py                                23             16            120
 ./test/integration/scripts/07_comprehensions.py                                34              3            119
@@ -145,5 +146,5 @@ File                                                                        blan
 ./pkg/rage/doc.go                                                              47            128              1
 ./test/integration/scripts/basic/hello.py                                       0              0              1
 ---------------------------------------------------------------------------------------------------------------
-SUM:                                                                         9414           5743          57747
+SUM:                                                                         9451           5759          57904
 ---------------------------------------------------------------------------------------------------------------
