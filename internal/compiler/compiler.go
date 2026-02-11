@@ -1273,7 +1273,15 @@ func (c *Compiler) compileStore(target model.Expr) {
 			idx := c.addName(t.Name)
 			c.emitArg(runtime.OpStoreGlobal, idx)
 		case ScopeFree, ScopeCell:
-			c.emitArg(runtime.OpStoreDeref, sym.Index)
+			// In class scope, assignments create class attributes (OpStoreName),
+			// not modifications to the enclosing scope (OpStoreDeref),
+			// unless explicitly declared nonlocal.
+			if c.symbolTable.scopeType == ScopeClass && !c.symbolTable.nonlocals[t.Name] {
+				idx := c.addName(t.Name)
+				c.emitArg(runtime.OpStoreName, idx)
+			} else {
+				c.emitArg(runtime.OpStoreDeref, sym.Index)
+			}
 		default:
 			// New variable in module scope
 			idx := c.addName(t.Name)

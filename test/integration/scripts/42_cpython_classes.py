@@ -184,8 +184,7 @@ def test_add_dunder():
             self.x = x
             self.y = y
         def __add__(self, other):
-            # Use type(self) instead of Vector to avoid class-in-function scope issue
-            return type(self)(self.x + other.x, self.y + other.y)
+            return Vector(self.x + other.x, self.y + other.y)
         def __eq__(self, other):
             return self.x == other.x and self.y == other.y
     v1 = Vector(1, 2)
