@@ -159,10 +159,8 @@ def test_counter_cm():
     class CountCM:
         count = 0
         def __enter__(self):
-            # Use type(self) to avoid class-in-function scope issue
-            cls = type(self)
-            cls.count = cls.count + 1
-            return cls.count
+            CountCM.count = CountCM.count + 1
+            return CountCM.count
         def __exit__(self, exc_type, exc_val, exc_tb):
             return False
     with CountCM() as c1:
