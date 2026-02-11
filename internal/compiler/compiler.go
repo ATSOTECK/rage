@@ -2085,6 +2085,7 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
+	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
 
 	// Apply peephole optimizations to comprehension body
 	if c.optimizer != nil {
@@ -2125,6 +2126,7 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
+	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
 
 	// Apply peephole optimizations to comprehension body
 	if c.optimizer != nil {
@@ -2165,6 +2167,7 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
+	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
 
 	// Apply peephole optimizations to comprehension body
 	if c.optimizer != nil {
@@ -2205,6 +2208,7 @@ func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 	compCompiler.emit(runtime.OpReturn)
 	compCompiler.finishLineTable()
 	compCompiler.finalizeCode()
+	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
 
 	// Apply peephole optimizations to comprehension body
 	if c.optimizer != nil {
