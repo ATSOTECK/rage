@@ -262,7 +262,7 @@ func (p *Parser) parseAssignment(first model.Expr) model.Stmt {
 	targets := []model.Expr{first}
 
 	for p.match(model.TK_Assign) {
-		next := p.parseExpression()
+		next := p.parseTupleOrExpr()
 		if p.check(model.TK_Assign) {
 			targets = append(targets, next)
 		} else {
@@ -692,7 +692,7 @@ func (p *Parser) parseReturnStmt() model.Stmt {
 	endPos := startPos
 
 	if !p.check(model.TK_Newline) && !p.check(model.TK_EOF) {
-		value = p.parseExpression()
+		value = p.parseTupleOrExpr()
 		endPos = value.End()
 	}
 
@@ -1620,6 +1620,44 @@ func (p *Parser) parseBlock() []model.Stmt {
 
 // Expression parsing using Pratt parser
 
+// parseTupleOrExpr parses a single expression, then checks for trailing commas
+// to form an implicit tuple (e.g. `1, 2, 3`). Returns a single Expr or a Tuple.
+func (p *Parser) parseTupleOrExpr() model.Expr {
+	first := p.parseExpression()
+	if first == nil {
+		return nil
+	}
+
+	if !p.check(model.TK_Comma) {
+		return first
+	}
+
+	elts := []model.Expr{first}
+	for p.match(model.TK_Comma) {
+		// Stop if we hit a terminator after the comma (trailing comma).
+		if p.check(model.TK_Newline) || p.check(model.TK_EOF) || p.check(model.TK_Comment) ||
+			p.check(model.TK_Assign) || p.check(model.TK_RParen) || p.check(model.TK_RBracket) ||
+			p.check(model.TK_Colon) {
+			break
+		}
+		next := p.parseExpression()
+		if next == nil {
+			break
+		}
+		elts = append(elts, next)
+	}
+
+	if len(elts) == 1 {
+		return first
+	}
+
+	return &model.Tuple{
+		Elts:     elts,
+		StartPos: first.Pos(),
+		EndPos:   elts[len(elts)-1].End(),
+	}
+}
+
 func (p *Parser) parseExpression() model.Expr {
 	return p.parsePrecedence(precLowest)
 }
@@ -1787,7 +1825,7 @@ func (p *Parser) parseYieldExpr() model.Expr {
 	var value model.Expr
 	endPos := startPos
 	if !p.check(model.TK_Newline) && !p.check(model.TK_Comment) && !p.check(model.TK_RParen) && !p.check(model.TK_EOF) {
-		value = p.parseExpression()
+		value = p.parseTupleOrExpr()
 		endPos = value.End()
 	}
 
