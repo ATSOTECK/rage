@@ -948,27 +948,49 @@ s1 = Singleton()
 s2 = Singleton()
 result = s1 is s2
 `
-	vm := runtime.NewVM()
-	code, errs, panicked := tryCompile(source)
-	if panicked || len(errs) > 0 {
-		t.Skip("__new__ not supported")
-		return
-	}
-	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("__new__ not implemented: " + err.Error())
-		return
-	}
-	result := vm.GetGlobal("result")
-	if b, ok := result.(*runtime.PyBool); ok {
-		if !b.Value {
-			t.Skip("__new__ singleton pattern not working correctly (s1 is not s2)")
-			return
-		}
-		assert.True(t, b.Value)
-	} else {
-		t.Skip("__new__ singleton pattern not working correctly (result is not bool)")
-	}
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestNewMethodWithInit(t *testing.T) {
+	source := `
+order = []
+
+class MyClass:
+    def __new__(cls, val):
+        order.append("new")
+        instance = object.__new__(cls)
+        return instance
+
+    def __init__(self, val):
+        order.append("init")
+        self.val = val
+
+obj = MyClass(42)
+result_order = order
+result_val = obj.val
+`
+	vm := runCode(t, source)
+	order := vm.GetGlobal("result_order").(*runtime.PyList)
+	require.Len(t, order.Items, 2)
+	assert.Equal(t, "new", order.Items[0].(*runtime.PyString).Value)
+	assert.Equal(t, "init", order.Items[1].(*runtime.PyString).Value)
+	val := vm.GetGlobal("result_val").(*runtime.PyInt)
+	assert.Equal(t, int64(42), val.Value)
+}
+
+func TestNewMethodSkipsInitForDifferentType(t *testing.T) {
+	source := `
+class Factory:
+    def __new__(cls):
+        return 42
+
+result = Factory()
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyInt)
+	assert.Equal(t, int64(42), result.Value)
 }
 
 // =============================================================================

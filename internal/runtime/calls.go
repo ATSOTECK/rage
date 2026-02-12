@@ -22,31 +22,55 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 		return vm.callFunction(fn.Func, allArgs, kwargs)
 
 	case *PyClass:
-		// Create instance and call __init__
-		instance := &PyInstance{
-			Class: fn,
-			Dict:  make(map[string]Value),
-		}
-
-		// Special handling for exception classes - set args attribute
-		if vm.isExceptionClass(fn) {
-			// Convert args to PyTuple for the args attribute
-			tupleItems := make([]Value, len(args))
-			copy(tupleItems, args)
-			instance.Dict["args"] = &PyTuple{Items: tupleItems}
-		}
-
-		// Look for __init__ in class MRO
+		// Step 1: Call __new__ to create the instance
+		var instance Value
+		newFound := false
 		for _, cls := range fn.Mro {
-			if init, ok := cls.Dict["__init__"]; ok {
-				if initFn, ok := init.(*PyFunction); ok {
-					allArgs := append([]Value{instance}, args...)
-					_, err := vm.callFunction(initFn, allArgs, kwargs)
-					if err != nil {
-						return nil, err
-					}
+			if newMethod, ok := cls.Dict["__new__"]; ok {
+				newArgs := append([]Value{fn}, args...)
+				var err error
+				switch nm := newMethod.(type) {
+				case *PyFunction:
+					instance, err = vm.callFunction(nm, newArgs, kwargs)
+				case *PyBuiltinFunc:
+					instance, err = nm.Fn(newArgs, kwargs)
+				case *PyStaticMethod:
+					// __new__ may be explicitly decorated with @staticmethod
+					instance, err = vm.call(nm.Func, newArgs, kwargs)
 				}
+				if err != nil {
+					return nil, err
+				}
+				newFound = true
 				break
+			}
+		}
+		if !newFound {
+			// Fallback (shouldn't happen if object is always in MRO)
+			instance = &PyInstance{Class: fn, Dict: make(map[string]Value)}
+		}
+
+		// Step 2: If __new__ returned an instance of this class, call __init__
+		if inst, ok := instance.(*PyInstance); ok && inst.Class == fn {
+			// Special handling for exception classes - set args attribute
+			if vm.isExceptionClass(fn) {
+				tupleItems := make([]Value, len(args))
+				copy(tupleItems, args)
+				inst.Dict["args"] = &PyTuple{Items: tupleItems}
+			}
+
+			// Look for __init__ in class MRO
+			for _, cls := range fn.Mro {
+				if init, ok := cls.Dict["__init__"]; ok {
+					if initFn, ok := init.(*PyFunction); ok {
+						allArgs := append([]Value{inst}, args...)
+						_, err := vm.callFunction(initFn, allArgs, kwargs)
+						if err != nil {
+							return nil, err
+						}
+					}
+					break
+				}
 			}
 		}
 		return instance, nil
