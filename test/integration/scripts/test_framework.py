@@ -24,6 +24,10 @@ class Expectation:
         if self.actual != expected:
             raise Exception("Expected " + str(expected) + " but got " + str(self.actual))
 
+    def to_equal(self, expected):
+        if self.actual != expected:
+            raise Exception("Expected " + str(expected) + " but got " + str(self.actual))
+
 def expect(actual):
     return Expectation(actual)
 

@@ -1028,30 +1028,10 @@ func (vm *VM) initBuiltins() {
 			if !ok {
 				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
 			}
-			// Handle deletion based on object type
-			switch o := args[0].(type) {
-			case *PyInstance:
-				if _, exists := o.Dict[name.Value]; exists {
-					delete(o.Dict, name.Value)
-					return None, nil
-				}
-				return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Class.Name, name.Value)
-			case *PyModule:
-				if _, exists := o.Dict[name.Value]; exists {
-					delete(o.Dict, name.Value)
-					return None, nil
-				}
-				return nil, fmt.Errorf("module '%s' has no attribute '%s'", o.Name, name.Value)
-			case *PyDict:
-				// Allow delattr on dict for dynamic attribute-style access
-				key := &PyString{Value: name.Value}
-				if o.DictDelete(key, vm) {
-					return None, nil
-				}
-				return nil, fmt.Errorf("'dict' object has no attribute '%s'", name.Value)
-			default:
-				return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(args[0]), name.Value)
+			if err := vm.delAttr(args[0], name.Value); err != nil {
+				return nil, err
 			}
+			return None, nil
 		},
 	}
 
@@ -1612,7 +1592,83 @@ func (vm *VM) initBuiltins() {
 		Mro:   nil,
 	}
 	// Set object's MRO to just itself
-	vm.builtins["object"].(*PyClass).Mro = []*PyClass{vm.builtins["object"].(*PyClass)}
+	objectClass := vm.builtins["object"].(*PyClass)
+	objectClass.Mro = []*PyClass{objectClass}
+
+	// object.__setattr__(self, name, value) - direct instance dict assignment (bypasses user __setattr__)
+	objectClass.Dict["__setattr__"] = &PyBuiltinFunc{
+		Name: "object.__setattr__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 3 {
+				return nil, fmt.Errorf("object.__setattr__() takes exactly 3 arguments (%d given)", len(args))
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("descriptor '__setattr__' requires a 'object' instance")
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			// Respect property setters in MRO
+			for _, cls := range inst.Class.Mro {
+				if clsVal, ok := cls.Dict[name.Value]; ok {
+					if prop, ok := clsVal.(*PyProperty); ok {
+						if prop.Fset == nil {
+							return nil, fmt.Errorf("property '%s' has no setter", name.Value)
+						}
+						_, err := vm.call(prop.Fset, []Value{inst, args[2]}, nil)
+						if err != nil {
+							return nil, err
+						}
+						return None, nil
+					}
+					break
+				}
+			}
+			inst.Dict[name.Value] = args[2]
+			return None, nil
+		},
+	}
+
+	// object.__delattr__(self, name) - direct instance dict deletion (bypasses user __delattr__)
+	objectClass.Dict["__delattr__"] = &PyBuiltinFunc{
+		Name: "object.__delattr__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("object.__delattr__() takes exactly 2 arguments (%d given)", len(args))
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("descriptor '__delattr__' requires a 'object' instance")
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			// Respect property deleters in MRO
+			for _, cls := range inst.Class.Mro {
+				if clsVal, ok := cls.Dict[name.Value]; ok {
+					if prop, ok := clsVal.(*PyProperty); ok {
+						if prop.Fdel == nil {
+							return nil, fmt.Errorf("property '%s' has no deleter", name.Value)
+						}
+						_, err := vm.call(prop.Fdel, []Value{inst}, nil)
+						if err != nil {
+							return nil, err
+						}
+						return None, nil
+					}
+					break
+				}
+			}
+			if _, exists := inst.Dict[name.Value]; !exists {
+				return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", inst.Class.Name, name.Value)
+			}
+			delete(inst.Dict, name.Value)
+			return None, nil
+		},
+	}
 
 	// Initialize exception class hierarchy
 	vm.initExceptionClasses()

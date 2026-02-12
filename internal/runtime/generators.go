@@ -876,6 +876,12 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if err := vm.setAttr(obj, name, val); err != nil {
 			return nil, err
 		}
+	case OpDeleteAttr:
+		name := frame.Code.Names[arg]
+		obj := vm.pop()
+		if err := vm.delAttr(obj, name); err != nil {
+			return nil, err
+		}
 
 	// Subscript
 	case OpBinarySubscr:
