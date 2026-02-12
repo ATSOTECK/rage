@@ -1185,6 +1185,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
+		case OpDeleteAttr:
+			name := frame.Code.Names[arg]
+			obj := vm.pop()
+			err = vm.delAttr(obj, name)
+			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
+
 		case OpBinarySubscr:
 			index := vm.pop()
 			obj := vm.pop()

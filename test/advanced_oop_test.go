@@ -719,15 +719,10 @@ result2 = obj.missing
 `
 	vm := runtime.NewVM()
 	code, errs, panicked := tryCompile(source)
-	if panicked || len(errs) > 0 {
-		t.Skip("__getattr__ syntax not supported")
-		return
-	}
+	require.False(t, panicked)
+	require.Empty(t, errs)
 	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("__getattr__ not implemented: " + err.Error())
-		return
-	}
+	require.NoError(t, err)
 	result1 := vm.GetGlobal("result1").(*runtime.PyString)
 	result2 := vm.GetGlobal("result2").(*runtime.PyString)
 	assert.Equal(t, "I exist", result1.Value)
@@ -751,15 +746,10 @@ result = len(obj.log)
 `
 	vm := runtime.NewVM()
 	code, errs, panicked := tryCompile(source)
-	if panicked || len(errs) > 0 {
-		t.Skip("__setattr__ not supported")
-		return
-	}
+	require.False(t, panicked)
+	require.Empty(t, errs)
 	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("__setattr__ not implemented: " + err.Error())
-		return
-	}
+	require.NoError(t, err)
 	result := vm.GetGlobal("result")
 	if i, ok := result.(*runtime.PyInt); ok {
 		assert.Equal(t, int64(2), i.Value)

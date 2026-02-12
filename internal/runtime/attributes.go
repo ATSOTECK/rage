@@ -358,7 +358,14 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return val, nil
 			}
 		}
-		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Class.Name, name)
+		// Last resort: check for __getattr__
+		if result, found, err := vm.callDunder(o, "__getattr__", &PyString{Value: name}); found {
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		}
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
 	case *PyClass:
 		// Handle special class attributes
 		switch name {
@@ -2599,6 +2606,17 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	switch o := obj.(type) {
 	case *PyInstance:
+		// Check for user-defined __setattr__ (skip object base class)
+		objectClass := vm.builtins["object"].(*PyClass)
+		for _, cls := range o.Class.Mro {
+			if cls == objectClass {
+				break
+			}
+			if method, ok := cls.Dict["__setattr__"]; ok {
+				_, err := vm.call(method, []Value{o, &PyString{Value: name}, val}, nil)
+				return err
+			}
+		}
 		// Check for property with setter in class MRO
 		for _, cls := range o.Class.Mro {
 			if clsVal, ok := cls.Dict[name]; ok {
@@ -2621,6 +2639,60 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 		return nil
 	}
 	return fmt.Errorf("'%s' object attribute '%s' is read-only", vm.typeName(obj), name)
+}
+
+func (vm *VM) delAttr(obj Value, name string) error {
+	switch o := obj.(type) {
+	case *PyInstance:
+		// Check for user-defined __delattr__ (skip object base class)
+		objectClass := vm.builtins["object"].(*PyClass)
+		for _, cls := range o.Class.Mro {
+			if cls == objectClass {
+				break
+			}
+			if method, ok := cls.Dict["__delattr__"]; ok {
+				_, err := vm.call(method, []Value{o, &PyString{Value: name}}, nil)
+				return err
+			}
+		}
+		// Check for property with deleter in class MRO
+		for _, cls := range o.Class.Mro {
+			if clsVal, ok := cls.Dict[name]; ok {
+				if prop, ok := clsVal.(*PyProperty); ok {
+					if prop.Fdel == nil {
+						return fmt.Errorf("property '%s' has no deleter", name)
+					}
+					_, err := vm.call(prop.Fdel, []Value{o}, nil)
+					return err
+				}
+				break
+			}
+		}
+		if _, exists := o.Dict[name]; !exists {
+			return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+		}
+		delete(o.Dict, name)
+		return nil
+	case *PyModule:
+		if _, exists := o.Dict[name]; !exists {
+			return fmt.Errorf("AttributeError: module '%s' has no attribute '%s'", o.Name, name)
+		}
+		delete(o.Dict, name)
+		return nil
+	case *PyClass:
+		if _, exists := o.Dict[name]; !exists {
+			return fmt.Errorf("AttributeError: type object '%s' has no attribute '%s'", o.Name, name)
+		}
+		delete(o.Dict, name)
+		return nil
+	case *PyDict:
+		key := &PyString{Value: name}
+		if o.DictDelete(key, vm) {
+			return nil
+		}
+		return fmt.Errorf("AttributeError: 'dict' object has no attribute '%s'", name)
+	}
+	return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(obj), name)
 }
 
 // strFormat implements Python's str.format() method
