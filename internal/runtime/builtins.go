@@ -1670,6 +1670,24 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	// object.__new__(cls) - create a new instance of cls
+	objectClass.Dict["__new__"] = &PyBuiltinFunc{
+		Name: "object.__new__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 {
+				return nil, fmt.Errorf("object.__new__(): not enough arguments")
+			}
+			cls, ok := args[0].(*PyClass)
+			if !ok {
+				return nil, fmt.Errorf("object.__new__(X): X is not a type object (%s)", vm.typeName(args[0]))
+			}
+			return &PyInstance{
+				Class: cls,
+				Dict:  make(map[string]Value),
+			}, nil
+		},
+	}
+
 	// Initialize exception class hierarchy
 	vm.initExceptionClasses()
 }
