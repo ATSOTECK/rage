@@ -12,4 +12,4 @@ func rage()
 
 @task
 func integration()
-    $ go run ./test/integration/integration_test_runner.go
+    $go run ./test/integration/integration_test_runner.go

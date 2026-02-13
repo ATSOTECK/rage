@@ -11,13 +11,39 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["print"] = &PyBuiltinFunc{
 		Name: "print",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			sep := " "
+			end := "\n"
+			if v, ok := kwargs["sep"]; ok {
+				if v == None {
+					// sep=None means default
+				} else if s, ok := v.(*PyString); ok {
+					sep = s.Value
+				} else {
+					return nil, fmt.Errorf("sep must be None or a string, not %s", vm.typeName(v))
+				}
+			}
+			if v, ok := kwargs["end"]; ok {
+				if v == None {
+					// end=None means default
+				} else if s, ok := v.(*PyString); ok {
+					end = s.Value
+				} else {
+					return nil, fmt.Errorf("end must be None or a string, not %s", vm.typeName(v))
+				}
+			}
+			if v, ok := kwargs["flush"]; ok {
+				_ = v // accepted but no-op (stdout is unbuffered)
+			}
+			if v, ok := kwargs["file"]; ok {
+				_ = v // accepted but ignored (no file I/O yet)
+			}
 			for i, arg := range args {
 				if i > 0 {
-					fmt.Print(" ")
+					fmt.Print(sep)
 				}
 				fmt.Print(vm.str(arg))
 			}
-			fmt.Println()
+			fmt.Print(end)
 			return None, nil
 		},
 	}
