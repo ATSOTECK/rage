@@ -36,4 +36,6 @@ bin
 # OS
 .DS_Store
 
+cloc.sh
+scc.txt
 integration_test_runner
