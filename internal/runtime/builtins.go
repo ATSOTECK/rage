@@ -385,43 +385,6 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
-	typeClassCache := make(map[string]*PyClass)
-	getTypeClass := func(name string) *PyClass {
-		if cls, ok := typeClassCache[name]; ok {
-			return cls
-		}
-		cls := &PyClass{Name: name}
-		cls.Mro = []*PyClass{cls}
-		typeClassCache[name] = cls
-		return cls
-	}
-	vm.builtins["type"] = &PyBuiltinFunc{
-		Name: "type",
-		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			if len(args) == 1 {
-				switch v := args[0].(type) {
-				case *PyInstance:
-					return v.Class, nil
-				case *PyClass:
-					return getTypeClass("type"), nil
-				default:
-					return getTypeClass(vm.typeName(args[0])), nil
-				}
-			}
-			if len(args) == 3 {
-				// 3-arg form: type(name, bases, dict) - metaclass creation
-				nameStr, ok := args[0].(*PyString)
-				if !ok {
-					return nil, fmt.Errorf("TypeError: type() argument 1 must be str, not %s", vm.typeName(args[0]))
-				}
-				cls := &PyClass{Name: nameStr.Value, Dict: make(map[string]Value)}
-				cls.Mro = []*PyClass{cls}
-				return cls, nil
-			}
-			return nil, fmt.Errorf("type() takes 1 or 3 arguments")
-		},
-	}
-
 	vm.builtins["isinstance"] = &PyBuiltinFunc{
 		Name: "isinstance",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -1428,88 +1391,154 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("__build_class__: error executing class body: %w", err)
 			}
 
-			// Create the class
-			class := &PyClass{
-				Name:  className,
-				Bases: bases,
-				Dict:  classDict,
-			}
-
-			// Build MRO using C3 linearization for proper multiple inheritance
-			mro, err := vm.ComputeC3MRO(class, bases)
-			if err != nil {
-				return nil, err
-			}
-			class.Mro = mro
-
-			// Check if this class should use ABC abstract method checking
-			// via metaclass=ABCMeta kwarg or inheriting from an ABC class
+			// Check for metaclass kwarg
+			typeClass := vm.builtins["type"].(*PyClass)
+			var metaclass *PyClass
 			if mc, ok := kwargs["metaclass"]; ok {
 				if mcClass, ok := mc.(*PyClass); ok {
-					class.Metaclass = mcClass
-					if mcClass.IsABC {
-						class.IsABC = true
-					}
+					metaclass = mcClass
 				}
 			}
-			if !class.IsABC {
+
+			var class *PyClass
+
+			if metaclass != nil && metaclass != typeClass {
+				// Metaclass-based class creation: call metaclass.__new__ and __init__
+
+				// Convert to Python values for metaclass methods
+				basesItems := make([]Value, len(bases))
+				for i, b := range bases {
+					basesItems[i] = b
+				}
+				basesTuple := &PyTuple{Items: basesItems}
+				nsDict := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				for k, v := range classDict {
+					nsDict.DictSet(&PyString{Value: k}, v, vm)
+				}
+				nameStr := &PyString{Value: className}
+
+				// Call metaclass.__new__(mcs, name, bases, namespace) via MRO
+				var newResult Value
+				for _, cls := range metaclass.Mro {
+					if newMethod, ok := cls.Dict["__new__"]; ok {
+						newArgs := []Value{metaclass, nameStr, basesTuple, nsDict}
+						switch nm := newMethod.(type) {
+						case *PyFunction:
+							newResult, err = vm.callFunction(nm, newArgs, kwargs)
+						case *PyBuiltinFunc:
+							newResult, err = nm.Fn(newArgs, kwargs)
+						case *PyStaticMethod:
+							newResult, err = vm.call(nm.Func, newArgs, kwargs)
+						}
+						if err != nil {
+							return nil, err
+						}
+						break
+					}
+				}
+
+				if newResult == nil {
+					return nil, fmt.Errorf("TypeError: metaclass __new__ did not return a value")
+				}
+
+				if cls, ok := newResult.(*PyClass); ok {
+					class = cls
+					class.Metaclass = metaclass
+
+					// Call metaclass.__init__(cls, name, bases, namespace) via MRO
+					for _, mroClass := range metaclass.Mro {
+						if initMethod, ok := mroClass.Dict["__init__"]; ok {
+							initArgs := []Value{class, nameStr, basesTuple, nsDict}
+							switch im := initMethod.(type) {
+							case *PyFunction:
+								_, err = vm.callFunction(im, initArgs, kwargs)
+							case *PyBuiltinFunc:
+								_, err = im.Fn(initArgs, kwargs)
+							}
+							if err != nil {
+								return nil, err
+							}
+							break
+						}
+					}
+				} else {
+					// If __new__ didn't return a *PyClass, just return it
+					return newResult, nil
+				}
+			} else {
+				// Standard class creation (no custom metaclass)
+				class = &PyClass{
+					Name:      className,
+					Bases:     bases,
+					Dict:      classDict,
+					Metaclass: typeClass,
+				}
+
+				// Build MRO using C3 linearization for proper multiple inheritance
+				mro, err := vm.ComputeC3MRO(class, bases)
+				if err != nil {
+					return nil, err
+				}
+				class.Mro = mro
+
+				// Check if this class should use ABC abstract method checking
 				for _, base := range bases {
 					if base.IsABC {
 						class.IsABC = true
 						break
 					}
 				}
-			}
 
-			// Collect abstract methods if this is an ABC class
-			if class.IsABC {
-				abstractMethods := make(map[string]bool)
-				// Scan MRO (excluding current class) for abstract methods
-				for _, cls := range mro[1:] {
-					for name, val := range cls.Dict {
-						if isAbstractValue(val) {
-							abstractMethods[name] = true
+				// Collect abstract methods if this is an ABC class
+				if class.IsABC {
+					abstractMethods := make(map[string]bool)
+					// Scan MRO (excluding current class) for abstract methods
+					for _, cls := range mro[1:] {
+						for name, val := range cls.Dict {
+							if isAbstractValue(val) {
+								abstractMethods[name] = true
+							}
 						}
 					}
-				}
-				// Scan current class: abstract methods add, concrete methods remove
-				for name, val := range classDict {
-					if isAbstractValue(val) {
-						abstractMethods[name] = true
-					} else {
-						delete(abstractMethods, name)
+					// Scan current class: abstract methods add, concrete methods remove
+					for name, val := range classDict {
+						if isAbstractValue(val) {
+							abstractMethods[name] = true
+						} else {
+							delete(abstractMethods, name)
+						}
 					}
-				}
-				// Store as a PySet of strings for the instantiation guard
-				if len(abstractMethods) > 0 {
-					items := make([]Value, 0, len(abstractMethods))
-					for name := range abstractMethods {
-						items = append(items, &PyString{Value: name})
+					// Store as a PySet of strings for the instantiation guard
+					if len(abstractMethods) > 0 {
+						items := make([]Value, 0, len(abstractMethods))
+						for name := range abstractMethods {
+							items = append(items, &PyString{Value: name})
+						}
+						class.Dict["__abstractmethods__"] = &PyList{Items: items}
 					}
-					class.Dict["__abstractmethods__"] = &PyList{Items: items}
-				}
 
-				// Inject register() method for ABC classes (if not already defined)
-				if _, hasRegister := class.Dict["register"]; !hasRegister {
-					thisClass := class // capture for closure
-					class.Dict["register"] = &PyBuiltinFunc{
-						Name: "register",
-						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-							if len(args) != 1 {
-								return nil, fmt.Errorf("TypeError: register() takes exactly 1 argument (%d given)", len(args))
-							}
-							subcls, ok := args[0].(*PyClass)
-							if !ok {
-								return nil, fmt.Errorf("TypeError: register() argument must be a class")
-							}
-							for _, existing := range thisClass.RegisteredSubclasses {
-								if existing == subcls {
-									return subcls, nil
+					// Inject register() method for ABC classes (if not already defined)
+					if _, hasRegister := class.Dict["register"]; !hasRegister {
+						thisClass := class // capture for closure
+						class.Dict["register"] = &PyBuiltinFunc{
+							Name: "register",
+							Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+								if len(args) != 1 {
+									return nil, fmt.Errorf("TypeError: register() takes exactly 1 argument (%d given)", len(args))
 								}
-							}
-							thisClass.RegisteredSubclasses = append(thisClass.RegisteredSubclasses, subcls)
-							return subcls, nil
-						},
+								subcls, ok := args[0].(*PyClass)
+								if !ok {
+									return nil, fmt.Errorf("TypeError: register() argument must be a class")
+								}
+								for _, existing := range thisClass.RegisteredSubclasses {
+									if existing == subcls {
+										return subcls, nil
+									}
+								}
+								thisClass.RegisteredSubclasses = append(thisClass.RegisteredSubclasses, subcls)
+								return subcls, nil
+							},
+						}
 					}
 				}
 			}
@@ -1654,7 +1683,22 @@ func (vm *VM) initBuiltins() {
 			if inst, ok := instance.(*PyInstance); ok {
 				mro = inst.Class.Mro
 			} else if cls, ok := instance.(*PyClass); ok {
-				mro = cls.Mro
+				// For class instances, check if thisClass is in the metaclass MRO
+				// (used when super() is called inside a metaclass method)
+				useMetaMro := false
+				if cls.Metaclass != nil {
+					for _, mc := range cls.Metaclass.Mro {
+						if mc == thisClass {
+							useMetaMro = true
+							break
+						}
+					}
+				}
+				if useMetaMro {
+					mro = cls.Metaclass.Mro
+				} else {
+					mro = cls.Mro
+				}
 			} else if instance != nil {
 				return nil, fmt.Errorf("super(type, obj): obj must be an instance or subtype of type")
 			}
@@ -1778,6 +1822,152 @@ func (vm *VM) initBuiltins() {
 				Class: cls,
 				Dict:  make(map[string]Value),
 			}, nil
+		},
+	}
+
+	// type is a proper PyClass (the metaclass of all classes)
+	typeClass := &PyClass{
+		Name:  "type",
+		Bases: []*PyClass{objectClass},
+		Dict:  make(map[string]Value),
+	}
+	typeClass.Mro = []*PyClass{typeClass, objectClass}
+	vm.builtins["type"] = typeClass
+
+	// type.__new__(mcs, name_or_obj, bases, namespace) - static method
+	typeClass.Dict["__new__"] = &PyStaticMethod{Func: &PyBuiltinFunc{
+		Name: "type.__new__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			// 2-arg form: type.__new__(type, x) -> type of x (called as type(x))
+			if len(args) == 2 {
+				switch v := args[1].(type) {
+				case *PyInstance:
+					return v.Class, nil
+				case *PyClass:
+					return typeClass, nil
+				default:
+					// Return a class with the type name
+					typeName := vm.typeName(args[1])
+					cls := &PyClass{Name: typeName}
+					cls.Mro = []*PyClass{cls}
+					return cls, nil
+				}
+			}
+			// 4-arg form: type.__new__(mcs, name, bases, namespace)
+			if len(args) == 4 {
+				mcs, ok := args[0].(*PyClass)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: type.__new__(X): X is not a type object (%s)", vm.typeName(args[0]))
+				}
+				nameStr, ok := args[1].(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: type.__new__() argument 1 must be str, not %s", vm.typeName(args[1]))
+				}
+				basesTuple, ok := args[2].(*PyTuple)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: type.__new__() argument 2 must be tuple, not %s", vm.typeName(args[2]))
+				}
+				nsDict, ok := args[3].(*PyDict)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: type.__new__() argument 3 must be dict, not %s", vm.typeName(args[3]))
+				}
+
+				// Convert bases tuple to []*PyClass
+				var bases []*PyClass
+				for _, b := range basesTuple.Items {
+					if bc, ok := b.(*PyClass); ok {
+						bases = append(bases, bc)
+					}
+				}
+				if len(bases) == 0 {
+					bases = []*PyClass{objectClass}
+				}
+
+				// Convert namespace dict to map[string]Value
+				classDict := make(map[string]Value)
+				for k, v := range nsDict.Items {
+					if ks, ok := k.(*PyString); ok {
+						classDict[ks.Value] = v
+					}
+				}
+
+				cls := &PyClass{
+					Name:      nameStr.Value,
+					Bases:     bases,
+					Dict:      classDict,
+					Metaclass: mcs,
+				}
+
+				// Compute C3 MRO
+				mro, err := vm.ComputeC3MRO(cls, bases)
+				if err != nil {
+					return nil, err
+				}
+				cls.Mro = mro
+
+				// Handle ABC abstract method tracking
+				if mcs.IsABC {
+					cls.IsABC = true
+				}
+				if !cls.IsABC {
+					for _, base := range bases {
+						if base.IsABC {
+							cls.IsABC = true
+							break
+						}
+					}
+				}
+				if cls.IsABC {
+					abstractMethods := make(map[string]bool)
+					for _, mroClass := range mro[1:] {
+						for name, val := range mroClass.Dict {
+							if isAbstractValue(val) {
+								abstractMethods[name] = true
+							}
+						}
+					}
+					for name, val := range classDict {
+						if isAbstractValue(val) {
+							abstractMethods[name] = true
+						} else {
+							delete(abstractMethods, name)
+						}
+					}
+					if len(abstractMethods) > 0 {
+						items := make([]Value, 0, len(abstractMethods))
+						for name := range abstractMethods {
+							items = append(items, &PyString{Value: name})
+						}
+						cls.Dict["__abstractmethods__"] = &PyList{Items: items}
+					}
+				}
+
+				return cls, nil
+			}
+			return nil, fmt.Errorf("type.__new__() takes 2 or 4 arguments (%d given)", len(args))
+		},
+	}}
+
+	// type.__init__(cls, name, bases, namespace) - no-op
+	typeClass.Dict["__init__"] = &PyBuiltinFunc{
+		Name: "type.__init__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			return None, nil
+		},
+	}
+
+	// type.__call__(cls, *args, **kwargs) - default class instantiation
+	typeClass.Dict["__call__"] = &PyBuiltinFunc{
+		Name: "type.__call__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 {
+				return nil, fmt.Errorf("TypeError: type.__call__() requires at least 1 argument")
+			}
+			cls, ok := args[0].(*PyClass)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: descriptor '__call__' requires a 'type' object")
+			}
+			return vm.defaultClassCall(cls, args[1:], kwargs)
 		},
 	}
 

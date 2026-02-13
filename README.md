@@ -320,7 +320,7 @@ RAGE is under active development. Currently supported:
 - Operators: arithmetic, comparison, logical, bitwise, in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
-- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods
+- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`)
 - Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`)
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
@@ -335,7 +335,6 @@ RAGE is under active development. Currently supported:
 
 ### Not Yet Implemented
 - Full async/await - async generators, async context managers (basic support via asyncio module)
-- Metaclasses - `class Foo(metaclass=...)`
 - `__slots__`
 - Full descriptor protocol - `__get__`, `__set__`, `__delete__`
 - Matrix multiplication `@` operator

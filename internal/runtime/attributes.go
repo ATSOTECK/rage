@@ -288,7 +288,21 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		if inst, ok := o.Instance.(*PyInstance); ok {
 			mro = inst.Class.Mro
 		} else if cls, ok := o.Instance.(*PyClass); ok {
-			mro = cls.Mro
+			// Check if ThisClass is in the metaclass MRO
+			useMetaMro := false
+			if cls.Metaclass != nil {
+				for _, mc := range cls.Metaclass.Mro {
+					if mc == o.ThisClass {
+						useMetaMro = true
+						break
+					}
+				}
+			}
+			if useMetaMro {
+				mro = cls.Metaclass.Mro
+			} else {
+				mro = cls.Mro
+			}
 			instance = cls
 		}
 
@@ -323,6 +337,19 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				if fn, ok := val.(*PyFunction); ok {
 					return &PyMethod{Func: fn, Instance: instance}, nil
 				}
+
+				// Bind builtin function to instance (e.g. type.__call__)
+				if bf, ok := val.(*PyBuiltinFunc); ok {
+					boundInst := instance
+					return &PyBuiltinFunc{
+						Name: bf.Name,
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							allArgs := append([]Value{boundInst}, args...)
+							return bf.Fn(allArgs, kwargs)
+						},
+					}, nil
+				}
+
 				return val, nil
 			}
 		}
