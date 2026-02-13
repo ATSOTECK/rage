@@ -166,6 +166,71 @@ while True:
 }
 ```
 
+## Demo: Python as Configuration
+
+The `demo/` directory contains a complete example of RAGE's core use case: **replacing static config files (TOML, JSON, YAML) with Python scripts**. A Go "game server" loads its configuration from Python, showcasing things static formats can't do:
+
+```bash
+go run demo/main.go                       # development settings
+RAGE_ENV=production go run demo/main.go   # production settings
+```
+
+The Go side registers helpers and injects values, then runs pure Python config files:
+
+```go
+state := rage.NewStateWithModules(
+    rage.WithModules(rage.ModuleMath, rage.ModuleDataclasses, rage.ModuleCollections),
+)
+defer state.Close()
+
+// Make Go functions callable from Python
+state.Register("env", func(_ *rage.State, args ...rage.Value) rage.Value {
+    name, _ := rage.AsString(args[0])
+    if v := os.Getenv(name); v != "" {
+        return rage.String(v)
+    }
+    return rage.String("")
+})
+state.SetGlobal("cpu_count", rage.Int(int64(runtime.NumCPU())))
+
+// Load Python config and extract results as Go types
+src, _ := os.ReadFile("config/settings.py")
+state.RunWithFilename(string(src), "config/settings.py")
+settings, _ := rage.AsDict(state.GetGlobal("settings"))
+```
+
+The Python config scripts use conditionals, computed values, validation, and comprehensions:
+
+```python
+# config/settings.py — environment-aware, self-validating config
+environment = env("RAGE_ENV", "development")
+
+if environment == "production":
+    db_pool_size = cpu_count * 4    # computed from Go-injected value
+else:
+    db_pool_size = 2
+
+assert db_pool_size > 0, "db_pool_size must be positive"  # validates at load time
+api_url = f"https://{host}:{port}/api/v1"                  # derived string
+features = {"ssl": port == 8443, "metrics": environment != "development"}
+```
+
+```python
+# config/items.py — one template function generates 15 weapons
+def make_weapon(name, base_damage, material, tier=1):
+    mat = materials[material]
+    return {"name": f"{material.title()} {name}", "damage": int(base_damage * mat["damage"] * (1 + tier * 0.25)), ...}
+
+swords = [make_weapon("Sword", 15, mat, tier) for mat in materials for tier in [1, 3, 5]]
+```
+
+```python
+# config/levels.py — 50 levels of XP/stats from a few formulas
+xp_for_level = [int(100 * (1.15 ** level)) for level in range(50)]
+```
+
+See [`demo/README.md`](demo/README.md) for the full walkthrough.
+
 ## Controlling Standard Library Modules
 
 By default, `NewState()` enables all available stdlib modules. For more control:
