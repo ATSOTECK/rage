@@ -25,7 +25,7 @@ func TestImportMathModule(t *testing.T) {
 import math
 result = math.pi > 3.14
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyBool)
 	assert.True(t, result.Value)
 }
@@ -35,7 +35,7 @@ func TestImportMathFunctions(t *testing.T) {
 import math
 result = math.sqrt(16)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 4.0, result.Value)
 }
@@ -45,7 +45,7 @@ func TestFromImportBasic(t *testing.T) {
 from math import sqrt
 result = sqrt(25)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 5.0, result.Value)
 }
@@ -57,7 +57,7 @@ a = sqrt(16)
 b = floor(3.7)
 c = ceil(3.2)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	a := vm.GetGlobal("a").(*runtime.PyFloat)
 	b := vm.GetGlobal("b")
 	c := vm.GetGlobal("c")
@@ -83,7 +83,7 @@ func TestFromImportAs(t *testing.T) {
 from math import sqrt as square_root
 result = square_root(36)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("from...import...as not fully supported")
@@ -103,7 +103,7 @@ func TestImportAs(t *testing.T) {
 import math as m
 result = m.sqrt(49)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("import...as not fully supported")
@@ -127,7 +127,7 @@ func TestModuleNameAttribute(t *testing.T) {
 import math
 result = math.__name__
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyString)
 	assert.Equal(t, "math", result.Value)
 }
@@ -137,7 +137,7 @@ func TestModuleDocAttribute(t *testing.T) {
 import math
 has_doc = hasattr(math, '__doc__')
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("hasattr not supported for modules")
@@ -162,7 +162,7 @@ import math
 import math as m2
 result = math is m2
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("import...as not fully supported")
@@ -184,7 +184,7 @@ math.custom_value = 42
 import math
 result = math.custom_value
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("Module attribute assignment not supported")
@@ -207,7 +207,7 @@ func TestImportNonexistentModule(t *testing.T) {
 	source := `
 import nonexistent_module_xyz
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		// Compile-time error is acceptable
@@ -222,7 +222,7 @@ func TestFromImportNonexistentAttribute(t *testing.T) {
 	source := `
 from math import nonexistent_function_xyz
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		// Compile-time error is acceptable
@@ -248,7 +248,7 @@ a = math.sqrt(16)
 b = random.random()
 result = a >= 0 and b >= 0
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyBool)
 	assert.True(t, result.Value)
 }
@@ -258,7 +258,7 @@ func TestImportRandomModule(t *testing.T) {
 import random
 result = 0 <= random.random() <= 1
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyBool)
 	assert.True(t, result.Value)
 }
@@ -268,7 +268,7 @@ func TestImportTimeModule(t *testing.T) {
 import time
 result = time.time() > 0
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("time module not available")
@@ -288,7 +288,7 @@ func TestImportSysModule(t *testing.T) {
 import sys
 has_version = hasattr(sys, 'version')
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("sys module or hasattr not available")
@@ -314,7 +314,7 @@ def get_sqrt(n):
 
 result = get_sqrt(64)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 8.0, result.Value)
 }
@@ -330,7 +330,7 @@ results = []
 for i in [4, 9, 16, 25]:
     results.append(calculate(i))
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	results := vm.GetGlobal("results").(*runtime.PyList)
 	require.Len(t, results.Items, 4)
 	expected := []float64{2.0, 3.0, 4.0, 5.0}
@@ -353,7 +353,7 @@ class Calculator:
 calc = Calculator()
 result = calc.sqrt(81)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 9.0, result.Value)
 }
@@ -371,7 +371,7 @@ if x > 5:
 else:
     result = 0
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 10.0, result.Value)
 }
@@ -384,7 +384,7 @@ if x > 5:
     import nonexistent_conditional_module
     result = 0
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyInt)
 	assert.Equal(t, int64(42), result.Value)
 }
@@ -398,7 +398,7 @@ func TestFromImportStarMath(t *testing.T) {
 from math import *
 result = sqrt(144)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("from...import * not supported")
@@ -423,7 +423,7 @@ import math
 m = math
 result = m.sqrt(169)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 13.0, result.Value)
 }
@@ -434,7 +434,7 @@ import math
 modules = [math]
 result = modules[0].sqrt(196)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("Module in list not supported")
@@ -455,7 +455,7 @@ import math
 modules = {"math": math}
 result = modules["math"].sqrt(225)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("Module in dict not supported")
@@ -479,7 +479,7 @@ func TestChainedModuleAccess(t *testing.T) {
 import math
 result = int(math.floor(math.sqrt(50)))
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyInt)
 	assert.Equal(t, int64(7), result.Value)
 }
@@ -492,7 +492,7 @@ func TestImportCollections(t *testing.T) {
 	source := `
 import collections
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("collections module not available")
@@ -512,7 +512,7 @@ from collections import Counter
 c = Counter([1, 2, 2, 3, 3, 3])
 result = c[3]
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("collections.Counter not available")
@@ -534,7 +534,7 @@ d = defaultdict(int)
 d['a'] = d['a'] + 1
 result = d['a']
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("collections.defaultdict not available")
@@ -558,7 +558,7 @@ func TestImportString(t *testing.T) {
 import string
 has_ascii = hasattr(string, 'ascii_lowercase')
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("string module or hasattr not available")
@@ -577,7 +577,7 @@ func TestStringModuleConstants(t *testing.T) {
 import string
 result = len(string.ascii_lowercase)
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("string module not available")
@@ -600,7 +600,7 @@ func TestImportRe(t *testing.T) {
 	source := `
 import re
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("re module not available")
@@ -620,7 +620,7 @@ import re
 m = re.match(r'\d+', '123abc')
 result = m.group() if m else ''
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("re.match not available")
@@ -641,7 +641,7 @@ import re
 m = re.search(r'\d+', 'abc123def')
 result = m.group() if m else ''
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("re.search not available")
@@ -661,7 +661,7 @@ func TestReModuleFindall(t *testing.T) {
 import re
 result = re.findall(r'\d+', 'a1b22c333')
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("re.findall not available")
@@ -684,7 +684,7 @@ func TestReModuleSub(t *testing.T) {
 import re
 result = re.sub(r'\d+', 'X', 'a1b22c333')
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("re.sub not available")
@@ -708,7 +708,7 @@ func TestImportBuiltins(t *testing.T) {
 import builtins
 result = builtins.len([1, 2, 3])
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("builtins module not available")
@@ -737,7 +737,7 @@ result = import_local()
 # math should not be accessible here
 has_math = 'math' in dir()
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("dir() not supported")
@@ -760,7 +760,7 @@ def use_global_import():
 
 result = use_global_import()
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 3.0, result.Value)
 }
@@ -777,7 +777,7 @@ import math
 result.append(math.sqrt(1))
 result.append(math.sqrt(4))
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyList)
 	require.Len(t, result.Items, 2)
 	assert.Equal(t, 1.0, result.Items[0].(*runtime.PyFloat).Value)
@@ -795,7 +795,7 @@ import math
 import math
 result = math.sqrt(256)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 16.0, result.Value)
 }
@@ -806,7 +806,7 @@ from math import sqrt
 import math
 result = sqrt(9) + math.sqrt(16)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 7.0, result.Value)
 }
@@ -817,7 +817,7 @@ import math
 from math import sqrt
 result = sqrt(25) + math.sqrt(36)
 `
-	vm := runCode(t, source)
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyFloat)
 	assert.Equal(t, 11.0, result.Value)
 }
@@ -831,7 +831,7 @@ func TestModuleTypeString(t *testing.T) {
 import math
 result = type(math).__name__
 `
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 	code, errs := compiler.CompileSource(source, "<test>")
 	if len(errs) > 0 {
 		t.Skip("type().__name__ not supported")

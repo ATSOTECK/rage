@@ -49,51 +49,6 @@ type ScriptResult struct {
 	Failures string        `json:"failures,omitempty"`
 }
 
-// convertValue converts a rage.Value to a Go any
-func convertValue(v rage.Value) any {
-	if v == nil || rage.IsNone(v) {
-		return nil
-	}
-
-	switch {
-	case rage.IsBool(v):
-		b, _ := rage.AsBool(v)
-		return b
-	case rage.IsInt(v):
-		i, _ := rage.AsInt(v)
-		return i
-	case rage.IsFloat(v):
-		f, _ := rage.AsFloat(v)
-		return f
-	case rage.IsString(v):
-		s, _ := rage.AsString(v)
-		return s
-	case rage.IsList(v):
-		items, _ := rage.AsList(v)
-		result := make([]any, len(items))
-		for i, item := range items {
-			result[i] = convertValue(item)
-		}
-		return result
-	case rage.IsTuple(v):
-		items, _ := rage.AsTuple(v)
-		result := make([]any, len(items))
-		for i, item := range items {
-			result[i] = convertValue(item)
-		}
-		return result
-	case rage.IsDict(v):
-		items, _ := rage.AsDict(v)
-		result := make(map[string]any)
-		for k, val := range items {
-			result[k] = convertValue(val)
-		}
-		return result
-	default:
-		return fmt.Sprintf("%v", v.GoValue())
-	}
-}
-
 // extractTestCounts extracts pass/fail counts from the test_framework module
 func extractTestCounts(state *rage.State) (passed, failed int, failures string) {
 	if v := state.GetModuleAttr("test_framework", "__test_passed__"); v != nil {

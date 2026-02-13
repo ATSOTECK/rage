@@ -10,44 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Helper to run code and expect a specific error type
-// Accepts multiple possible error substrings
-// If an error occurs but message doesn't match any expected string, skips the test
-// (since RAGE error messages may not include Python exception type names)
-func runExpectError(t *testing.T, source string, expectedErrors ...string) {
-	vm := runtime.NewVM()
-	code, errs := compiler.CompileSource(source, "<test>")
-	if len(errs) > 0 {
-		// Check if compilation error matches any expected
-		for _, e := range errs {
-			for _, expected := range expectedErrors {
-				if strings.Contains(e.Error(), expected) {
-					return
-				}
-			}
-		}
-		// If not a matching compile error, still check
-		t.Logf("Compilation errors: %v", errs)
-	}
-
-	if len(errs) == 0 {
-		_, err := vm.Execute(code)
-		require.Error(t, err, "Expected error containing one of %v", expectedErrors)
-		errStr := err.Error()
-		matched := false
-		for _, expected := range expectedErrors {
-			if strings.Contains(errStr, expected) {
-				matched = true
-				break
-			}
-		}
-		// Skip if error format doesn't match - RAGE may use different error message format
-		if !matched {
-			t.Skipf("Error occurred (%q) but message doesn't match expected format %v", errStr, expectedErrors)
-		}
-	}
-}
-
 // =============================================================================
 // ZeroDivisionError Tests
 // =============================================================================
