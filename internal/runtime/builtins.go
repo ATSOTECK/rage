@@ -1444,6 +1444,13 @@ func (vm *VM) initBuiltins() {
 				if cls, ok := newResult.(*PyClass); ok {
 					class = cls
 					class.Metaclass = metaclass
+					// Extract __slots__ if defined
+					if class.Slots == nil {
+						slots := extractSlots(class.Dict, bases)
+						if slots != nil {
+							class.Slots = slots
+						}
+					}
 
 					// Call metaclass.__init__(cls, name, bases, namespace) via MRO
 					for _, mroClass := range metaclass.Mro {
@@ -1467,11 +1474,13 @@ func (vm *VM) initBuiltins() {
 				}
 			} else {
 				// Standard class creation (no custom metaclass)
+				slots := extractSlots(classDict, bases)
 				class = &PyClass{
 					Name:      className,
 					Bases:     bases,
 					Dict:      classDict,
 					Metaclass: typeClass,
+					Slots:     slots,
 				}
 
 				// Build MRO using C3 linearization for proper multiple inheritance
@@ -1763,7 +1772,14 @@ func (vm *VM) initBuiltins() {
 					break
 				}
 			}
-			inst.Dict[name.Value] = args[2]
+			if inst.Slots != nil {
+				if !isValidSlot(inst.Class, name.Value) {
+					return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", inst.Class.Name, name.Value)
+				}
+				inst.Slots[name.Value] = args[2]
+			} else {
+				inst.Dict[name.Value] = args[2]
+			}
 			return None, nil
 		},
 	}
@@ -1799,10 +1815,17 @@ func (vm *VM) initBuiltins() {
 					break
 				}
 			}
-			if _, exists := inst.Dict[name.Value]; !exists {
-				return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", inst.Class.Name, name.Value)
+			if inst.Slots != nil {
+				if _, exists := inst.Slots[name.Value]; !exists {
+					return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", inst.Class.Name, name.Value)
+				}
+				delete(inst.Slots, name.Value)
+			} else {
+				if _, exists := inst.Dict[name.Value]; !exists {
+					return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", inst.Class.Name, name.Value)
+				}
+				delete(inst.Dict, name.Value)
 			}
-			delete(inst.Dict, name.Value)
 			return None, nil
 		},
 	}
@@ -1817,6 +1840,12 @@ func (vm *VM) initBuiltins() {
 			cls, ok := args[0].(*PyClass)
 			if !ok {
 				return nil, fmt.Errorf("object.__new__(X): X is not a type object (%s)", vm.typeName(args[0]))
+			}
+			if cls.Slots != nil {
+				return &PyInstance{
+					Class: cls,
+					Slots: make(map[string]Value),
+				}, nil
 			}
 			return &PyInstance{
 				Class: cls,
@@ -1891,11 +1920,13 @@ func (vm *VM) initBuiltins() {
 					}
 				}
 
+				slots := extractSlots(classDict, bases)
 				cls := &PyClass{
 					Name:      nameStr.Value,
 					Bases:     bases,
 					Dict:      classDict,
 					Metaclass: mcs,
+					Slots:     slots,
 				}
 
 				// Compute C3 MRO
@@ -1973,6 +2004,60 @@ func (vm *VM) initBuiltins() {
 
 	// Initialize exception class hierarchy
 	vm.initExceptionClasses()
+}
+
+// extractSlots checks classDict for __slots__ and returns the slot names.
+// Returns nil if __slots__ is not defined. Removes __slots__ from classDict.
+func extractSlots(classDict map[string]Value, bases []*PyClass) []string {
+	slotsVal, ok := classDict["__slots__"]
+	if !ok {
+		return nil
+	}
+	delete(classDict, "__slots__")
+
+	var slotNames []string
+	switch s := slotsVal.(type) {
+	case *PyList:
+		for _, item := range s.Items {
+			if str, ok := item.(*PyString); ok {
+				slotNames = append(slotNames, str.Value)
+			}
+		}
+	case *PyTuple:
+		for _, item := range s.Items {
+			if str, ok := item.(*PyString); ok {
+				slotNames = append(slotNames, str.Value)
+			}
+		}
+	}
+
+	// Collect slots from base classes that define __slots__
+	for _, base := range bases {
+		if base.Slots != nil {
+			for _, s := range base.Slots {
+				slotNames = append(slotNames, s)
+			}
+		}
+	}
+
+	if slotNames == nil {
+		slotNames = []string{} // empty __slots__ = () should be non-nil empty slice
+	}
+	return slotNames
+}
+
+// isValidSlot checks whether name is in the class's allowed slots (including base class slots via MRO).
+func isValidSlot(cls *PyClass, name string) bool {
+	for _, mroClass := range cls.Mro {
+		if mroClass.Slots != nil {
+			for _, s := range mroClass.Slots {
+				if s == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // initExceptionClasses sets up the exception class hierarchy

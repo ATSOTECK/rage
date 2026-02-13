@@ -345,10 +345,11 @@ type dictEntry struct {
 
 // PyDict represents a Python dictionary with hash-based lookups
 type PyDict struct {
-	Items       map[Value]Value      // Legacy field for compatibility
-	buckets     map[uint64][]dictEntry // Hash buckets for O(1) lookup
-	size        int
-	orderedKeys []Value // Insertion-ordered keys for Python 3.7+ dict ordering
+	Items         map[Value]Value        // Legacy field for compatibility
+	buckets       map[uint64][]dictEntry // Hash buckets for O(1) lookup
+	size          int
+	orderedKeys   []Value // Insertion-ordered keys for Python 3.7+ dict ordering
+	instanceOwner *PyInstance            // if non-nil, sync mutations back to instance's Dict
 }
 
 func (d *PyDict) Type() string { return "dict" }
@@ -408,6 +409,12 @@ func (d *PyDict) DictSet(key, value Value, vm *VM) {
 	}
 	d.deleteItemByEquality(key, vm) // Remove any existing entry with equivalent key
 	d.Items[key] = value
+	// Sync back to instance dict if this is a __dict__ proxy
+	if d.instanceOwner != nil {
+		if ks, ok := key.(*PyString); ok {
+			d.instanceOwner.Dict[ks.Value] = value
+		}
+	}
 }
 
 // deleteItemByEquality removes a key from legacy Items using value equality
@@ -451,6 +458,11 @@ func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 			if vm.equal(k, key) {
 				delete(d.Items, k)
 				d.removeOrderedKey(key, vm)
+				if d.instanceOwner != nil {
+					if ks, ok := key.(*PyString); ok {
+						delete(d.instanceOwner.Dict, ks.Value)
+					}
+				}
 				return true
 			}
 		}
@@ -465,6 +477,11 @@ func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 			d.size--
 			d.deleteItemByEquality(e.key, vm)
 			d.removeOrderedKey(key, vm)
+			if d.instanceOwner != nil {
+				if ks, ok := key.(*PyString); ok {
+					delete(d.instanceOwner.Dict, ks.Value)
+				}
+			}
 			return true
 		}
 	}
@@ -685,6 +702,7 @@ type PyClass struct {
 	IsABC                bool       // True if class uses ABC abstract method checking
 	RegisteredSubclasses []*PyClass // Virtual subclasses registered via ABC.register()
 	Metaclass            *PyClass   // Custom metaclass (if any)
+	Slots                []string   // nil means no __slots__ (dict allowed); non-nil restricts instance attrs
 }
 
 func (c *PyClass) Type() string   { return "type" }
@@ -693,7 +711,8 @@ func (c *PyClass) String() string { return fmt.Sprintf("<class '%s'>", c.Name) }
 // PyInstance represents an instance of a class
 type PyInstance struct {
 	Class *PyClass
-	Dict  map[string]Value
+	Dict  map[string]Value   // nil when class defines __slots__
+	Slots map[string]Value   // non-nil when class defines __slots__
 }
 
 func (i *PyInstance) Type() string   { return i.Class.Name }

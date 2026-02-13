@@ -382,8 +382,21 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}
 		}
 
-		// Then check instance dict
-		if val, ok := o.Dict[name]; ok {
+		// Handle __dict__ access on instances
+		if name == "__dict__" && o.Dict != nil {
+			d := &PyDict{Items: make(map[Value]Value), instanceOwner: o}
+			for k, v := range o.Dict {
+				d.DictSet(&PyString{Value: k}, v, vm)
+			}
+			return d, nil
+		}
+
+		// Then check instance dict or slots
+		if o.Slots != nil {
+			if val, ok := o.Slots[name]; ok {
+				return val, nil
+			}
+		} else if val, ok := o.Dict[name]; ok {
 			return val, nil
 		}
 
@@ -2711,8 +2724,15 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 				break // Found in class dict but not a descriptor, fall through to instance assignment
 			}
 		}
-		// Not a descriptor, set on instance dict
-		o.Dict[name] = val
+		// Not a descriptor, set on instance dict or slots
+		if o.Slots != nil {
+			if !isValidSlot(o.Class, name) {
+				return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+			}
+			o.Slots[name] = val
+		} else {
+			o.Dict[name] = val
+		}
 		return nil
 	case *PyClass:
 		o.Dict[name] = val
@@ -2748,10 +2768,17 @@ func (vm *VM) delAttr(obj Value, name string) error {
 				break
 			}
 		}
-		if _, exists := o.Dict[name]; !exists {
-			return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+		if o.Slots != nil {
+			if _, exists := o.Slots[name]; !exists {
+				return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+			}
+			delete(o.Slots, name)
+		} else {
+			if _, exists := o.Dict[name]; !exists {
+				return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+			}
+			delete(o.Dict, name)
 		}
-		delete(o.Dict, name)
 		return nil
 	case *PyModule:
 		if _, exists := o.Dict[name]; !exists {
