@@ -73,8 +73,7 @@ func getBytes(vm *runtime.VM, idx int) ([]byte, bool) {
 // b64Encode encodes bytes using base64.
 // b64encode(s, altchars=None) -> bytes
 func b64Encode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b64encode() missing required argument: 's'")
+	if !vm.RequireArgs("b64encode", 1) {
 		return 0
 	}
 
@@ -111,8 +110,7 @@ func b64Encode(vm *runtime.VM) int {
 // b64Decode decodes base64 encoded bytes.
 // b64decode(s, altchars=None, validate=False) -> bytes
 func b64Decode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b64decode() missing required argument: 's'")
+	if !vm.RequireArgs("b64decode", 1) {
 		return 0
 	}
 
@@ -141,13 +139,7 @@ func b64Decode(vm *runtime.VM) int {
 	}
 
 	// Check validate flag (position 3)
-	validate := false
-	if vm.GetTop() >= 3 {
-		validateVal := vm.Get(3)
-		if !runtime.IsNone(validateVal) {
-			validate = vm.ToBool(3)
-		}
-	}
+	validate := vm.OptionalBool(3, false)
 
 	// If validate is true, check for non-base64 characters
 	if validate {
@@ -180,8 +172,7 @@ func isBase64Char(b byte) bool {
 // standardB64Encode encodes bytes using the standard base64 alphabet.
 // standard_b64encode(s) -> bytes
 func standardB64Encode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("standard_b64encode() missing required argument: 's'")
+	if !vm.RequireArgs("standard_b64encode", 1) {
 		return 0
 	}
 
@@ -198,8 +189,7 @@ func standardB64Encode(vm *runtime.VM) int {
 // standardB64Decode decodes bytes using the standard base64 alphabet.
 // standard_b64decode(s) -> bytes
 func standardB64Decode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("standard_b64decode() missing required argument: 's'")
+	if !vm.RequireArgs("standard_b64decode", 1) {
 		return 0
 	}
 
@@ -221,8 +211,7 @@ func standardB64Decode(vm *runtime.VM) int {
 // urlsafeB64Encode encodes bytes using the URL-safe base64 alphabet.
 // urlsafe_b64encode(s) -> bytes
 func urlsafeB64Encode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("urlsafe_b64encode() missing required argument: 's'")
+	if !vm.RequireArgs("urlsafe_b64encode", 1) {
 		return 0
 	}
 
@@ -239,8 +228,7 @@ func urlsafeB64Encode(vm *runtime.VM) int {
 // urlsafeB64Decode decodes bytes using the URL-safe base64 alphabet.
 // urlsafe_b64decode(s) -> bytes
 func urlsafeB64Decode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("urlsafe_b64decode() missing required argument: 's'")
+	if !vm.RequireArgs("urlsafe_b64decode", 1) {
 		return 0
 	}
 
@@ -262,8 +250,7 @@ func urlsafeB64Decode(vm *runtime.VM) int {
 // b32Encode encodes bytes using base32.
 // b32encode(s) -> bytes
 func b32Encode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b32encode() missing required argument: 's'")
+	if !vm.RequireArgs("b32encode", 1) {
 		return 0
 	}
 
@@ -280,8 +267,7 @@ func b32Encode(vm *runtime.VM) int {
 // b32Decode decodes base32 encoded bytes.
 // b32decode(s, casefold=False, map01=None) -> bytes
 func b32Decode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b32decode() missing required argument: 's'")
+	if !vm.RequireArgs("b32decode", 1) {
 		return 0
 	}
 
@@ -293,13 +279,7 @@ func b32Decode(vm *runtime.VM) int {
 	dataStr := string(data)
 
 	// Check casefold flag (position 2)
-	casefold := false
-	if vm.GetTop() >= 2 {
-		casefoldVal := vm.Get(2)
-		if !runtime.IsNone(casefoldVal) {
-			casefold = vm.ToBool(2)
-		}
-	}
+	casefold := vm.OptionalBool(2, false)
 
 	// Check map01 argument (position 3) - maps 0 and 1 to O and I/L
 	if vm.GetTop() >= 3 {
@@ -336,8 +316,7 @@ func b32Decode(vm *runtime.VM) int {
 // b32HexEncode encodes bytes using the Extended Hex base32 alphabet.
 // b32hexencode(s) -> bytes
 func b32HexEncode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b32hexencode() missing required argument: 's'")
+	if !vm.RequireArgs("b32hexencode", 1) {
 		return 0
 	}
 
@@ -354,8 +333,7 @@ func b32HexEncode(vm *runtime.VM) int {
 // b32HexDecode decodes Extended Hex base32 encoded bytes.
 // b32hexdecode(s, casefold=False) -> bytes
 func b32HexDecode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b32hexdecode() missing required argument: 's'")
+	if !vm.RequireArgs("b32hexdecode", 1) {
 		return 0
 	}
 
@@ -367,13 +345,7 @@ func b32HexDecode(vm *runtime.VM) int {
 	dataStr := string(data)
 
 	// Check casefold flag (position 2)
-	casefold := false
-	if vm.GetTop() >= 2 {
-		casefoldVal := vm.Get(2)
-		if !runtime.IsNone(casefoldVal) {
-			casefold = vm.ToBool(2)
-		}
-	}
+	casefold := vm.OptionalBool(2, false)
 
 	if casefold {
 		dataStr = strings.ToUpper(dataStr)
@@ -392,8 +364,7 @@ func b32HexDecode(vm *runtime.VM) int {
 // b16Encode encodes bytes using base16 (hexadecimal).
 // b16encode(s) -> bytes
 func b16Encode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b16encode() missing required argument: 's'")
+	if !vm.RequireArgs("b16encode", 1) {
 		return 0
 	}
 
@@ -410,8 +381,7 @@ func b16Encode(vm *runtime.VM) int {
 // b16Decode decodes base16 (hexadecimal) encoded bytes.
 // b16decode(s, casefold=False) -> bytes
 func b16Decode(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("b16decode() missing required argument: 's'")
+	if !vm.RequireArgs("b16decode", 1) {
 		return 0
 	}
 
@@ -423,13 +393,7 @@ func b16Decode(vm *runtime.VM) int {
 	dataStr := string(data)
 
 	// Check casefold flag (position 2)
-	casefold := false
-	if vm.GetTop() >= 2 {
-		casefoldVal := vm.Get(2)
-		if !runtime.IsNone(casefoldVal) {
-			casefold = vm.ToBool(2)
-		}
-	}
+	casefold := vm.OptionalBool(2, false)
 
 	if casefold {
 		dataStr = strings.ToUpper(dataStr)
@@ -456,8 +420,7 @@ func b16Decode(vm *runtime.VM) int {
 // encodeBytes encodes bytes using base64 with newlines every 76 characters.
 // encodebytes(s) -> bytes
 func encodeBytes(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("encodebytes() missing required argument: 's'")
+	if !vm.RequireArgs("encodebytes", 1) {
 		return 0
 	}
 
@@ -486,8 +449,7 @@ func encodeBytes(vm *runtime.VM) int {
 // decodeBytes decodes base64 encoded bytes (ignoring newlines).
 // decodebytes(s) -> bytes
 func decodeBytes(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("decodebytes() missing required argument: 's'")
+	if !vm.RequireArgs("decodebytes", 1) {
 		return 0
 	}
 

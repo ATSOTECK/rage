@@ -98,8 +98,7 @@ func (r *PyCSVReader) String() string { return "<csv.reader object>" }
 // csvReader creates a new CSV reader from an iterable of lines
 // csv.reader(iterable, delimiter=',', quotechar='"')
 func csvReader(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("reader() missing required argument: 'csvfile'")
+	if !vm.RequireArgs("reader", 1) {
 		return 0
 	}
 
@@ -194,8 +193,7 @@ func (r *PyCSVDictReader) String() string { return "<csv.DictReader object>" }
 // csvDictReader creates a new DictReader
 // csv.DictReader(f, fieldnames=None, restkey=None, restval=None, delimiter=',', quotechar='"')
 func csvDictReader(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("DictReader() missing required argument: 'f'")
+	if !vm.RequireArgs("DictReader", 1) {
 		return 0
 	}
 
@@ -421,8 +419,7 @@ func csvWriterWriterow(vm *runtime.VM) int {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("writerow() missing required argument: 'row'")
+	if !vm.RequireArgs("writerow", 2) {
 		return 0
 	}
 
@@ -448,8 +445,7 @@ func csvWriterWriterows(vm *runtime.VM) int {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("writerows() missing required argument: 'rows'")
+	if !vm.RequireArgs("writerows", 2) {
 		return 0
 	}
 
@@ -515,8 +511,7 @@ func (w *PyCSVDictWriter) String() string { return "<csv.DictWriter object>" }
 // csvDictWriter creates a new DictWriter
 // csv.DictWriter(fieldnames, delimiter=',', quotechar='"', quoting=QUOTE_MINIMAL, lineterminator='\n', restval='', extrasaction='raise')
 func csvDictWriter(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("DictWriter() missing required argument: 'fieldnames'")
+	if !vm.RequireArgs("DictWriter", 1) {
 		return 0
 	}
 
@@ -626,8 +621,7 @@ func csvDictWriterWriterow(vm *runtime.VM) int {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("writerow() missing required argument: 'rowdict'")
+	if !vm.RequireArgs("writerow", 2) {
 		return 0
 	}
 
@@ -685,8 +679,7 @@ func csvDictWriterWriterows(vm *runtime.VM) int {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("writerows() missing required argument: 'rowdicts'")
+	if !vm.RequireArgs("writerows", 2) {
 		return 0
 	}
 
@@ -771,8 +764,7 @@ func csvDictWriterGetvalue(vm *runtime.VM) int {
 // csvParseRow parses a single CSV line into a list
 // csv.parse_row(line, delimiter=',', quotechar='"')
 func csvParseRow(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("parse_row() missing required argument: 'line'")
+	if !vm.RequireArgs("parse_row", 1) {
 		return 0
 	}
 
@@ -800,8 +792,7 @@ func csvParseRow(vm *runtime.VM) int {
 // csvFormatRow formats a list as a CSV line
 // csv.format_row(row, delimiter=',', quotechar='"', quoting=QUOTE_MINIMAL)
 func csvFormatRow(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("format_row() missing required argument: 'row'")
+	if !vm.RequireArgs("format_row", 1) {
 		return 0
 	}
 

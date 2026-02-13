@@ -13,3 +13,13 @@ func rage()
 @task
 func integration()
     $go run ./test/integration/integration_test_runner.go
+
+@task
+func tests()
+    integration()
+    println("\nUnit tests:")
+    tst() # Unit tests
+
+@task
+func demo()
+    $go run demo/main.go

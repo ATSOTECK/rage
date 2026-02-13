@@ -181,8 +181,7 @@ func asyncioGather(vm *runtime.VM) int {
 // asyncio.create_task(coro) - Schedule a coroutine as a task
 // For now, this just returns the coroutine itself
 func asyncioCreateTask(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("create_task() requires a coroutine")
+	if !vm.RequireArgs("create_task", 1) {
 		return 0
 	}
 

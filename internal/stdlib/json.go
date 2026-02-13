@@ -25,8 +25,7 @@ func InitJSONModule() {
 // jsonDumps serializes a Python object to a JSON string.
 // dumps(obj, *, indent=None, separators=None, sort_keys=False) -> str
 func jsonDumps(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("dumps() missing required argument: 'obj'")
+	if !vm.RequireArgs("dumps", 1) {
 		return 0
 	}
 
@@ -76,12 +75,7 @@ func jsonDumps(vm *runtime.VM) int {
 	}
 
 	// Check for sort_keys argument (position 4)
-	if vm.GetTop() >= 4 {
-		sortKeysVal := vm.Get(4)
-		if !runtime.IsNone(sortKeysVal) {
-			sortKeys = vm.ToBool(4)
-		}
-	}
+	sortKeys = vm.OptionalBool(4, false)
 
 	result, err := encodeJSON(obj, indent, itemSep, keySep, sortKeys, 0)
 	if err != nil {
@@ -96,8 +90,7 @@ func jsonDumps(vm *runtime.VM) int {
 // jsonLoads deserializes a JSON string to a Python object.
 // loads(s) -> object
 func jsonLoads(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("loads() missing required argument: 's'")
+	if !vm.RequireArgs("loads", 1) {
 		return 0
 	}
 
@@ -116,8 +109,7 @@ func jsonLoads(vm *runtime.VM) int {
 // jsonDump writes JSON to a file object.
 // dump(obj, fp, *, indent=None, separators=None, sort_keys=False) -> None
 func jsonDump(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("dump() missing required arguments: 'obj' and 'fp'")
+	if !vm.RequireArgs("dump", 2) {
 		return 0
 	}
 
@@ -182,12 +174,7 @@ func jsonDump(vm *runtime.VM) int {
 	}
 
 	// Check for sort_keys argument (position 5)
-	if vm.GetTop() >= 5 {
-		sortKeysVal := vm.Get(5)
-		if !runtime.IsNone(sortKeysVal) {
-			sortKeys = vm.ToBool(5)
-		}
-	}
+	sortKeys = vm.OptionalBool(5, false)
 
 	result, err := encodeJSON(obj, indent, itemSep, keySep, sortKeys, 0)
 	if err != nil {
@@ -211,8 +198,7 @@ func jsonDump(vm *runtime.VM) int {
 // jsonLoad reads JSON from a file object.
 // load(fp) -> object
 func jsonLoad(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("load() missing required argument: 'fp'")
+	if !vm.RequireArgs("load", 1) {
 		return 0
 	}
 

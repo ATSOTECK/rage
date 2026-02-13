@@ -127,10 +127,7 @@ func counterMostCommon(vm *runtime.VM) int {
 	}
 
 	// Get n parameter (default: all)
-	n := int64(-1)
-	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		n = vm.CheckInt(2)
-	}
+	n := vm.OptionalInt(2, -1)
 
 	// Build list of (elem, count) pairs sorted by count
 	type elemCount struct {
@@ -540,10 +537,7 @@ func dequeRotate(vm *runtime.VM) int {
 		return 0
 	}
 
-	n := int64(1)
-	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		n = vm.CheckInt(2)
-	}
+	n := vm.OptionalInt(2, 1)
 
 	if len(deque.Items) == 0 {
 		return 0
@@ -597,7 +591,7 @@ func dequeCount(vm *runtime.VM) int {
 	x := vm.Get(2)
 	count := int64(0)
 	for _, item := range deque.Items {
-		if valuesEqual(item, x) {
+		if vm.Equal(item, x) {
 			count++
 		}
 	}
@@ -620,18 +614,11 @@ func dequeIndex(vm *runtime.VM) int {
 	}
 
 	x := vm.Get(2)
-	start := int64(0)
-	stop := int64(len(deque.Items))
-
-	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
-		start = vm.CheckInt(3)
-	}
-	if vm.GetTop() >= 4 && !runtime.IsNone(vm.Get(4)) {
-		stop = vm.CheckInt(4)
-	}
+	start := vm.OptionalInt(3, 0)
+	stop := vm.OptionalInt(4, int64(len(deque.Items)))
 
 	for i := start; i < stop && i < int64(len(deque.Items)); i++ {
-		if valuesEqual(deque.Items[i], x) {
+		if vm.Equal(deque.Items[i], x) {
 			vm.Push(runtime.NewInt(i))
 			return 1
 		}
@@ -694,7 +681,7 @@ func dequeRemove(vm *runtime.VM) int {
 
 	x := vm.Get(2)
 	for i, item := range deque.Items {
-		if valuesEqual(item, x) {
+		if vm.Equal(item, x) {
 			deque.Items = append(deque.Items[:i], deque.Items[i+1:]...)
 			return 0
 		}
@@ -927,32 +914,3 @@ func collectionsNamedtuple(vm *runtime.VM) int {
 	return 1
 }
 
-// =====================================
-// Helper functions
-// =====================================
-
-// valuesEqual compares two Values for equality
-func valuesEqual(a, b runtime.Value) bool {
-	switch va := a.(type) {
-	case *runtime.PyInt:
-		if vb, ok := b.(*runtime.PyInt); ok {
-			return va.Value == vb.Value
-		}
-	case *runtime.PyFloat:
-		if vb, ok := b.(*runtime.PyFloat); ok {
-			return va.Value == vb.Value
-		}
-	case *runtime.PyString:
-		if vb, ok := b.(*runtime.PyString); ok {
-			return va.Value == vb.Value
-		}
-	case *runtime.PyBool:
-		if vb, ok := b.(*runtime.PyBool); ok {
-			return va.Value == vb.Value
-		}
-	case *runtime.PyNone:
-		_, ok := b.(*runtime.PyNone)
-		return ok
-	}
-	return a == b
-}

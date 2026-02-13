@@ -66,6 +66,10 @@ func randomRandint(vm *runtime.VM) int {
 
 // randrange(stop) or randrange(start, stop[, step]) -> random int from range
 func randomRandrange(vm *runtime.VM) int {
+	if !vm.RequireArgs("randrange", 1) {
+		return 0
+	}
+
 	top := vm.GetTop()
 
 	var start, stop, step int64 = 0, 0, 1

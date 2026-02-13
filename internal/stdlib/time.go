@@ -163,29 +163,27 @@ func timeMktime(vm *runtime.VM) int {
 	return 1
 }
 
-// Python strftime format to Go format mapping
-var strftimeFormats = map[byte]string{
+// pythonToGoFormat maps Python strftime/strptime format codes to Go time layout strings.
+// Used by both convertStrftime and convertStrptimeFormat.
+var pythonToGoFormat = map[byte]string{
+	'Y': "2006",
+	'y': "06",
+	'm': "01",
+	'd': "02",
+	'H': "15",
+	'I': "03",
+	'M': "04",
+	'S': "05",
+	'p': "PM",
 	'a': "Mon",
 	'A': "Monday",
 	'b': "Jan",
 	'B': "January",
 	'c': "Mon Jan 2 15:04:05 2006",
-	'd': "02",
-	'H': "15",
-	'I': "03",
-	'j': "002", // Day of year (needs special handling)
-	'm': "01",
-	'M': "04",
-	'p': "PM",
-	'S': "05",
-	'U': "", // Week number (not directly supported)
-	'w': "", // Weekday as number (needs special handling)
-	'W': "", // Week number (not directly supported)
 	'x': "01/02/06",
 	'X': "15:04:05",
-	'y': "06",
-	'Y': "2006",
 	'Z': "MST",
+	'j': "002",
 	'%': "%",
 }
 
@@ -218,48 +216,12 @@ func convertStrftime(format string, t time.Time) string {
 	for i < len(format) {
 		if format[i] == '%' && i+1 < len(format) {
 			code := format[i+1]
-			switch code {
-			case 'Y':
-				result += t.Format("2006")
-			case 'y':
-				result += t.Format("06")
-			case 'm':
-				result += t.Format("01")
-			case 'd':
-				result += t.Format("02")
-			case 'H':
-				result += t.Format("15")
-			case 'I':
-				result += t.Format("03")
-			case 'M':
-				result += t.Format("04")
-			case 'S':
-				result += t.Format("05")
-			case 'p':
-				result += t.Format("PM")
-			case 'a':
-				result += t.Format("Mon")
-			case 'A':
-				result += t.Format("Monday")
-			case 'b':
-				result += t.Format("Jan")
-			case 'B':
-				result += t.Format("January")
-			case 'c':
-				result += t.Format("Mon Jan 2 15:04:05 2006")
-			case 'x':
-				result += t.Format("01/02/06")
-			case 'X':
-				result += t.Format("15:04:05")
-			case 'Z':
-				result += t.Format("MST")
-			case 'j':
-				result += t.Format("002")
-			case 'w':
+			// %w needs special handling: it computes a value, not a Go layout format.
+			if code == 'w' {
 				result += string('0' + byte(t.Weekday()))
-			case '%':
-				result += "%"
-			default:
+			} else if goLayout, ok := pythonToGoFormat[code]; ok {
+				result += t.Format(goLayout)
+			} else {
 				result += string(format[i : i+2])
 			}
 			i += 2
@@ -295,38 +257,9 @@ func convertStrptimeFormat(format string) string {
 	for i < len(format) {
 		if format[i] == '%' && i+1 < len(format) {
 			code := format[i+1]
-			switch code {
-			case 'Y':
-				result += "2006"
-			case 'y':
-				result += "06"
-			case 'm':
-				result += "01"
-			case 'd':
-				result += "02"
-			case 'H':
-				result += "15"
-			case 'I':
-				result += "03"
-			case 'M':
-				result += "04"
-			case 'S':
-				result += "05"
-			case 'p':
-				result += "PM"
-			case 'a':
-				result += "Mon"
-			case 'A':
-				result += "Monday"
-			case 'b':
-				result += "Jan"
-			case 'B':
-				result += "January"
-			case 'Z':
-				result += "MST"
-			case '%':
-				result += "%"
-			default:
+			if goLayout, ok := pythonToGoFormat[code]; ok {
+				result += goLayout
+			} else {
 				result += string(format[i : i+2])
 			}
 			i += 2

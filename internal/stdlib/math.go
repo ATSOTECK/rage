@@ -6,6 +6,25 @@ import (
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
+// mathUnaryFloat wraps a unary float64 -> float64 function as a GoFunction.
+func mathUnaryFloat(fn func(float64) float64) runtime.GoFunction {
+	return func(vm *runtime.VM) int {
+		x := vm.CheckFloat(1)
+		vm.Push(runtime.NewFloat(fn(x)))
+		return 1
+	}
+}
+
+// mathBinaryFloat wraps a binary (float64, float64) -> float64 function as a GoFunction.
+func mathBinaryFloat(fn func(float64, float64) float64) runtime.GoFunction {
+	return func(vm *runtime.VM) int {
+		x := vm.CheckFloat(1)
+		y := vm.CheckFloat(2)
+		vm.Push(runtime.NewFloat(fn(x, y)))
+		return 1
+	}
+}
+
 // InitMathModule registers the math module
 func InitMathModule() {
 	runtime.NewModuleBuilder("math").
@@ -17,30 +36,30 @@ func InitMathModule() {
 		Const("inf", runtime.NewFloat(math.Inf(1))).
 		Const("nan", runtime.NewFloat(math.NaN())).
 		// Basic functions
-		Func("sqrt", mathSqrt).
-		Func("pow", mathPow).
-		Func("exp", mathExp).
-		Func("log", mathLog).
-		Func("log10", mathLog10).
-		Func("log2", mathLog2).
+		Func("sqrt", mathUnaryFloat(math.Sqrt)).
+		Func("pow", mathBinaryFloat(math.Pow)).
+		Func("exp", mathUnaryFloat(math.Exp)).
+		Func("log", mathUnaryFloat(math.Log)).
+		Func("log10", mathUnaryFloat(math.Log10)).
+		Func("log2", mathUnaryFloat(math.Log2)).
 		// Trigonometric functions
-		Func("sin", mathSin).
-		Func("cos", mathCos).
-		Func("tan", mathTan).
-		Func("asin", mathAsin).
-		Func("acos", mathAcos).
-		Func("atan", mathAtan).
-		Func("atan2", mathAtan2).
+		Func("sin", mathUnaryFloat(math.Sin)).
+		Func("cos", mathUnaryFloat(math.Cos)).
+		Func("tan", mathUnaryFloat(math.Tan)).
+		Func("asin", mathUnaryFloat(math.Asin)).
+		Func("acos", mathUnaryFloat(math.Acos)).
+		Func("atan", mathUnaryFloat(math.Atan)).
+		Func("atan2", mathBinaryFloat(math.Atan2)).
 		// Hyperbolic functions
-		Func("sinh", mathSinh).
-		Func("cosh", mathCosh).
-		Func("tanh", mathTanh).
+		Func("sinh", mathUnaryFloat(math.Sinh)).
+		Func("cosh", mathUnaryFloat(math.Cosh)).
+		Func("tanh", mathUnaryFloat(math.Tanh)).
 		// Rounding and absolute value
-		Func("ceil", mathCeil).
-		Func("floor", mathFloor).
-		Func("trunc", mathTrunc).
-		Func("fabs", mathFabs).
-		Func("copysign", mathCopysign).
+		Func("ceil", mathUnaryFloat(math.Ceil)).
+		Func("floor", mathUnaryFloat(math.Floor)).
+		Func("trunc", mathUnaryFloat(math.Trunc)).
+		Func("fabs", mathUnaryFloat(math.Abs)).
+		Func("copysign", mathBinaryFloat(math.Copysign)).
 		// Special functions
 		Func("factorial", mathFactorial).
 		Func("gcd", mathGcd).
@@ -52,144 +71,7 @@ func InitMathModule() {
 		Register()
 }
 
-// Basic functions
-
-func mathSqrt(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Sqrt(x)))
-	return 1
-}
-
-func mathPow(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	y := vm.CheckFloat(2)
-	vm.Push(runtime.NewFloat(math.Pow(x, y)))
-	return 1
-}
-
-func mathExp(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Exp(x)))
-	return 1
-}
-
-func mathLog(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Log(x)))
-	return 1
-}
-
-func mathLog10(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Log10(x)))
-	return 1
-}
-
-func mathLog2(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Log2(x)))
-	return 1
-}
-
-// Trigonometric functions
-
-func mathSin(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Sin(x)))
-	return 1
-}
-
-func mathCos(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Cos(x)))
-	return 1
-}
-
-func mathTan(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Tan(x)))
-	return 1
-}
-
-func mathAsin(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Asin(x)))
-	return 1
-}
-
-func mathAcos(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Acos(x)))
-	return 1
-}
-
-func mathAtan(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Atan(x)))
-	return 1
-}
-
-func mathAtan2(vm *runtime.VM) int {
-	y := vm.CheckFloat(1)
-	x := vm.CheckFloat(2)
-	vm.Push(runtime.NewFloat(math.Atan2(y, x)))
-	return 1
-}
-
-// Hyperbolic functions
-
-func mathSinh(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Sinh(x)))
-	return 1
-}
-
-func mathCosh(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Cosh(x)))
-	return 1
-}
-
-func mathTanh(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Tanh(x)))
-	return 1
-}
-
-// Rounding functions
-
-func mathCeil(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Ceil(x)))
-	return 1
-}
-
-func mathFloor(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Floor(x)))
-	return 1
-}
-
-func mathTrunc(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Trunc(x)))
-	return 1
-}
-
-func mathFabs(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	vm.Push(runtime.NewFloat(math.Abs(x)))
-	return 1
-}
-
-func mathCopysign(vm *runtime.VM) int {
-	x := vm.CheckFloat(1)
-	y := vm.CheckFloat(2)
-	vm.Push(runtime.NewFloat(math.Copysign(x, y)))
-	return 1
-}
-
-// Special functions
+// Special functions that cannot use the generic wrappers.
 
 func mathFactorial(vm *runtime.VM) int {
 	n := vm.CheckInt(1)

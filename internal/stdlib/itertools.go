@@ -76,15 +76,8 @@ func (c *PyCountIter) String() string { return "count(...)" }
 
 // itertools.count(start=0, step=1)
 func itertoolsCount(vm *runtime.VM) int {
-	start := int64(0)
-	step := int64(1)
-
-	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
-		start = vm.ToInt(1)
-	}
-	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		step = vm.ToInt(2)
-	}
+	start := vm.OptionalInt(1, 0)
+	step := vm.OptionalInt(2, 1)
 
 	iter := &PyCountIter{
 		Start:   start,
@@ -191,17 +184,12 @@ func (r *PyRepeatIter) String() string { return "repeat(...)" }
 
 // itertools.repeat(object[, times])
 func itertoolsRepeat(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("repeat() requires at least 1 argument")
+	if !vm.RequireArgs("repeat", 1) {
 		return 0
 	}
 
 	obj := vm.Get(1)
-	times := int64(-1) // -1 means infinite
-
-	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		times = vm.ToInt(2)
-	}
+	times := vm.OptionalInt(2, -1) // -1 means infinite
 
 	// If times is specified, return a list directly for easy iteration
 	if times >= 0 {
@@ -352,7 +340,7 @@ func itertoolsCompress(vm *runtime.VM) int {
 	}
 
 	for i := 0; i < minLen; i++ {
-		if isTruthy(selectors[i]) {
+		if runtime.IsTrue(selectors[i]) {
 			result = append(result, data[i])
 		}
 	}
@@ -363,8 +351,7 @@ func itertoolsCompress(vm *runtime.VM) int {
 
 // itertools.dropwhile(predicate, iterable)
 func itertoolsDropwhile(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("dropwhile() requires 2 arguments")
+	if !vm.RequireArgs("dropwhile", 2) {
 		return 0
 	}
 
@@ -384,7 +371,7 @@ func itertoolsDropwhile(vm *runtime.VM) int {
 				vm.RaiseError("%v", err)
 				return 0
 			}
-			if !isTruthy(callResult) {
+			if !runtime.IsTrue(callResult) {
 				dropping = false
 				result = append(result, item)
 			}
@@ -399,8 +386,7 @@ func itertoolsDropwhile(vm *runtime.VM) int {
 
 // itertools.filterfalse(predicate, iterable)
 func itertoolsFilterfalse(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("filterfalse() requires 2 arguments")
+	if !vm.RequireArgs("filterfalse", 2) {
 		return 0
 	}
 
@@ -415,7 +401,7 @@ func itertoolsFilterfalse(vm *runtime.VM) int {
 	for _, item := range items {
 		if runtime.IsNone(predicate) {
 			// If predicate is None, filter items that are falsy
-			if !isTruthy(item) {
+			if !runtime.IsTrue(item) {
 				result = append(result, item)
 			}
 		} else {
@@ -424,7 +410,7 @@ func itertoolsFilterfalse(vm *runtime.VM) int {
 				vm.RaiseError("%v", err)
 				return 0
 			}
-			if !isTruthy(callResult) {
+			if !runtime.IsTrue(callResult) {
 				result = append(result, item)
 			}
 		}
@@ -471,7 +457,7 @@ func itertoolsGroupby(vm *runtime.VM) int {
 		if i == 0 {
 			currentKey = key
 			currentGroup = []runtime.Value{item}
-		} else if valuesEqual(key, currentKey) {
+		} else if vm.Equal(key, currentKey) {
 			currentGroup = append(currentGroup, item)
 		} else {
 			// Save current group and start new one
@@ -498,8 +484,7 @@ func itertoolsGroupby(vm *runtime.VM) int {
 
 // itertools.islice(iterable, stop) or islice(iterable, start, stop[, step])
 func itertoolsIslice(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("islice() requires at least 2 arguments")
+	if !vm.RequireArgs("islice", 2) {
 		return 0
 	}
 
@@ -707,8 +692,7 @@ func itertoolsPairwise(vm *runtime.VM) int {
 
 // itertools.starmap(function, iterable)
 func itertoolsStarmap(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("starmap() requires 2 arguments")
+	if !vm.RequireArgs("starmap", 2) {
 		return 0
 	}
 
@@ -721,7 +705,7 @@ func itertoolsStarmap(vm *runtime.VM) int {
 	result := make([]runtime.Value, len(items))
 	for i, item := range items {
 		// Each item should be an iterable that we unpack as arguments
-		args := getIterableItemsFromValue(item)
+		args := getIterableItemsFromValue(vm, item)
 		if args == nil {
 			vm.RaiseError("starmap() argument 2 must be an iterable of iterables")
 			return 0
@@ -741,8 +725,7 @@ func itertoolsStarmap(vm *runtime.VM) int {
 
 // itertools.takewhile(predicate, iterable)
 func itertoolsTakewhile(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("takewhile() requires 2 arguments")
+	if !vm.RequireArgs("takewhile", 2) {
 		return 0
 	}
 
@@ -760,7 +743,7 @@ func itertoolsTakewhile(vm *runtime.VM) int {
 			vm.RaiseError("%v", err)
 			return 0
 		}
-		if !isTruthy(callResult) {
+		if !runtime.IsTrue(callResult) {
 			break
 		}
 		result = append(result, item)
@@ -792,7 +775,7 @@ func itertoolsZipLongest(vm *runtime.VM) int {
 			}
 			continue
 		}
-		items := getIterableItemsFromValue(arg)
+		items := getIterableItemsFromValue(vm, arg)
 		if items == nil {
 			vm.RaiseError("zip_longest argument must be an iterable")
 			return 0
@@ -858,7 +841,7 @@ func itertoolsProduct(vm *runtime.VM) int {
 			}
 			continue
 		}
-		items := getIterableItemsFromValue(arg)
+		items := getIterableItemsFromValue(vm, arg)
 		if items == nil {
 			vm.RaiseError("product argument must be an iterable")
 			return 0
@@ -996,13 +979,12 @@ func itertoolsPermutations(vm *runtime.VM) int {
 
 // itertools.combinations(iterable, r)
 func itertoolsCombinations(vm *runtime.VM) int {
-	items := getIterableItems(vm, 1)
-	if items == nil {
+	if !vm.RequireArgs("combinations", 2) {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("combinations() requires 2 arguments")
+	items := getIterableItems(vm, 1)
+	if items == nil {
 		return 0
 	}
 
@@ -1060,13 +1042,12 @@ func itertoolsCombinations(vm *runtime.VM) int {
 
 // itertools.combinations_with_replacement(iterable, r)
 func itertoolsCombinationsWithReplacement(vm *runtime.VM) int {
-	items := getIterableItems(vm, 1)
-	if items == nil {
+	if !vm.RequireArgs("combinations_with_replacement", 2) {
 		return 0
 	}
 
-	if vm.GetTop() < 2 {
-		vm.RaiseError("combinations_with_replacement() requires 2 arguments")
+	items := getIterableItems(vm, 1)
+	if items == nil {
 		return 0
 	}
 
@@ -1131,68 +1112,28 @@ func itertoolsCombinationsWithReplacement(vm *runtime.VM) int {
 // =====================================
 
 // getIterableItems extracts items from an iterable at the given stack position
+// using the runtime's ToList method.
 func getIterableItems(vm *runtime.VM, pos int) []runtime.Value {
 	if pos > vm.GetTop() {
 		vm.RaiseError("missing required argument")
 		return nil
 	}
-	return getIterableItemsFromValue(vm.Get(pos))
+	items, err := vm.ToList(vm.Get(pos))
+	if err != nil {
+		vm.RaiseError("%v", err)
+		return nil
+	}
+	return items
 }
 
 // getIterableItemsFromValue extracts items from an iterable value
-func getIterableItemsFromValue(v runtime.Value) []runtime.Value {
-	switch val := v.(type) {
-	case *runtime.PyList:
-		return val.Items
-	case *runtime.PyTuple:
-		return val.Items
-	case *runtime.PyString:
-		items := make([]runtime.Value, len(val.Value))
-		for i, ch := range val.Value {
-			items[i] = runtime.NewString(string(ch))
-		}
-		return items
-	case *runtime.PyRange:
-		var items []runtime.Value
-		for i := val.Start; (val.Step > 0 && i < val.Stop) || (val.Step < 0 && i > val.Stop); i += val.Step {
-			items = append(items, runtime.NewInt(i))
-		}
-		return items
-	case *runtime.PyIterator:
-		return val.Items[val.Index:]
-	case *runtime.PyDict:
-		var items []runtime.Value
-		for k := range val.Items {
-			items = append(items, k)
-		}
-		return items
-	default:
+// using the runtime's ToList method.
+func getIterableItemsFromValue(vm *runtime.VM, v runtime.Value) []runtime.Value {
+	items, err := vm.ToList(v)
+	if err != nil {
 		return nil
 	}
-}
-
-// isTruthy checks if a value is truthy
-func isTruthy(v runtime.Value) bool {
-	switch val := v.(type) {
-	case *runtime.PyBool:
-		return val.Value
-	case *runtime.PyInt:
-		return val.Value != 0
-	case *runtime.PyFloat:
-		return val.Value != 0
-	case *runtime.PyString:
-		return val.Value != ""
-	case *runtime.PyList:
-		return len(val.Items) > 0
-	case *runtime.PyTuple:
-		return len(val.Items) > 0
-	case *runtime.PyDict:
-		return len(val.Items) > 0
-	case *runtime.PyNone:
-		return false
-	default:
-		return true
-	}
+	return items
 }
 
 // addValues adds two numeric values
