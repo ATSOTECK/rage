@@ -16,8 +16,9 @@ func integration()
 
 @task
 func tests()
-    tst() # Unit tests
     integration()
+    println("\nUnit tests:")
+    tst() # Unit tests
 
 @task
 func demo()
