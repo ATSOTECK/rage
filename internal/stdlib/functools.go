@@ -71,8 +71,7 @@ func (p *PyPartial) String() string { return fmt.Sprintf("functools.partial(%v)"
 
 // functools.partial(func, *args, **kwargs)
 func functoolsPartial(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("partial() missing required argument: 'func'")
+	if !vm.RequireArgs("partial", 1) {
 		return 0
 	}
 
@@ -148,8 +147,7 @@ func partialCall(vm *runtime.VM) int {
 
 // functools.reduce(function, iterable[, initializer])
 func functoolsReduce(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("reduce() requires at least 2 arguments")
+	if !vm.RequireArgs("reduce", 2) {
 		return 0
 	}
 
@@ -211,8 +209,7 @@ var wrapperUpdates = []string{"__dict__"}
 
 // functools.update_wrapper(wrapper, wrapped, assigned=..., updated=...)
 func functoolsUpdateWrapper(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("update_wrapper() requires at least 2 arguments")
+	if !vm.RequireArgs("update_wrapper", 2) {
 		return 0
 	}
 
@@ -236,8 +233,7 @@ func functoolsUpdateWrapper(vm *runtime.VM) int {
 // functools.wraps(wrapped, assigned=..., updated=...)
 // Returns a decorator that applies update_wrapper
 func functoolsWraps(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("wraps() requires at least 1 argument")
+	if !vm.RequireArgs("wraps", 1) {
 		return 0
 	}
 
@@ -301,8 +297,7 @@ func setFunctionAttr(fn runtime.Value, attr string, val runtime.Value) {
 // functools.cache
 // Same as lru_cache(maxsize=None)
 func functoolsCache(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("cache() requires a callable argument")
+	if !vm.RequireArgs("cache", 1) {
 		return 0
 	}
 
@@ -577,8 +572,7 @@ func (c *PyCmpKey) String() string { return fmt.Sprintf("<functools.KeyWrapper o
 
 // functools.cmp_to_key(mycmp)
 func functoolsCmpToKey(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("cmp_to_key() requires 1 argument")
+	if !vm.RequireArgs("cmp_to_key", 1) {
 		return 0
 	}
 

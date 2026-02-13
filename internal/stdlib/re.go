@@ -133,10 +133,7 @@ func compilePattern(pattern string, flags int) (*PyPattern, error) {
 // re.compile(pattern[, flags]) -> Pattern
 func reCompile(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
-	flags := 0
-	if vm.GetTop() >= 2 {
-		flags = int(vm.ToInt(2))
-	}
+	flags := int(vm.OptionalInt(2, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -175,10 +172,7 @@ func createMatch(pattern *PyPattern, str string, loc []int, groups []string) run
 func reMatch(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	str := vm.CheckString(2)
-	flags := 0
-	if vm.GetTop() >= 3 {
-		flags = int(vm.ToInt(3))
-	}
+	flags := int(vm.OptionalInt(3, 0))
 
 	compiled, err := compilePattern("^"+pattern, flags)
 	if err != nil {
@@ -201,10 +195,7 @@ func reMatch(vm *runtime.VM) int {
 func reSearch(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	str := vm.CheckString(2)
-	flags := 0
-	if vm.GetTop() >= 3 {
-		flags = int(vm.ToInt(3))
-	}
+	flags := int(vm.OptionalInt(3, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -227,10 +218,7 @@ func reSearch(vm *runtime.VM) int {
 func reFindall(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	str := vm.CheckString(2)
-	flags := 0
-	if vm.GetTop() >= 3 {
-		flags = int(vm.ToInt(3))
-	}
+	flags := int(vm.OptionalInt(3, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -266,10 +254,7 @@ func reFindall(vm *runtime.VM) int {
 func reFinditer(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	str := vm.CheckString(2)
-	flags := 0
-	if vm.GetTop() >= 3 {
-		flags = int(vm.ToInt(3))
-	}
+	flags := int(vm.OptionalInt(3, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -302,15 +287,8 @@ func reSub(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	repl := vm.CheckString(2)
 	str := vm.CheckString(3)
-	count := -1
-	flags := 0
-
-	if vm.GetTop() >= 4 {
-		count = int(vm.ToInt(4))
-	}
-	if vm.GetTop() >= 5 {
-		flags = int(vm.ToInt(5))
-	}
+	count := int(vm.OptionalInt(4, -1))
+	flags := int(vm.OptionalInt(5, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -334,15 +312,8 @@ func reSubn(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	repl := vm.CheckString(2)
 	str := vm.CheckString(3)
-	maxCount := -1
-	flags := 0
-
-	if vm.GetTop() >= 4 {
-		maxCount = int(vm.ToInt(4))
-	}
-	if vm.GetTop() >= 5 {
-		flags = int(vm.ToInt(5))
-	}
+	maxCount := int(vm.OptionalInt(4, -1))
+	flags := int(vm.OptionalInt(5, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -418,15 +389,8 @@ func replaceNCount(re *regexp.Regexp, str, repl string, n int) (string, int) {
 func reSplit(vm *runtime.VM) int {
 	pattern := vm.CheckString(1)
 	str := vm.CheckString(2)
-	maxsplit := -1
-	flags := 0
-
-	if vm.GetTop() >= 3 {
-		maxsplit = int(vm.ToInt(3))
-	}
-	if vm.GetTop() >= 4 {
-		flags = int(vm.ToInt(4))
-	}
+	maxsplit := int(vm.OptionalInt(3, -1))
+	flags := int(vm.OptionalInt(4, 0))
 
 	compiled, err := compilePattern(pattern, flags)
 	if err != nil {
@@ -592,10 +556,7 @@ func matchGroup(vm *runtime.VM) int {
 	ud := vm.CheckUserData(1, "re.Match")
 	match := ud.Value.(*PyMatch)
 
-	groupNum := 0
-	if vm.GetTop() >= 2 {
-		groupNum = int(vm.ToInt(2))
-	}
+	groupNum := int(vm.OptionalInt(2, 0))
 
 	if groupNum < 0 || groupNum >= len(match.Groups) {
 		vm.RaiseError("no such group")

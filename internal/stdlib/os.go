@@ -229,10 +229,7 @@ func osChdir(vm *gopherpy.VM) int {
 
 // os.listdir(path='.')
 func osListdir(vm *gopherpy.VM) int {
-	path := "."
-	if vm.GetTop() >= 1 {
-		path = vm.CheckString(1)
-	}
+	path := vm.OptionalString(1, ".")
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -250,10 +247,7 @@ func osListdir(vm *gopherpy.VM) int {
 
 // os.scandir(path='.') - returns list of DirEntry-like dicts
 func osScandir(vm *gopherpy.VM) int {
-	path := "."
-	if vm.GetTop() >= 1 {
-		path = vm.CheckString(1)
-	}
+	path := vm.OptionalString(1, ".")
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -1054,10 +1048,7 @@ func osPathCommonprefix(vm *gopherpy.VM) int {
 // os.path.relpath(path, start='.')
 func osPathRelpath(vm *gopherpy.VM) int {
 	path := vm.CheckString(1)
-	start := "."
-	if vm.GetTop() >= 2 {
-		start = vm.CheckString(2)
-	}
+	start := vm.OptionalString(2, ".")
 
 	rel, err := filepath.Rel(start, path)
 	if err != nil {

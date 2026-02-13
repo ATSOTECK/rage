@@ -99,7 +99,82 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
 }
 
-// sliceSequence handles slicing for lists, tuples, and strings
+// computeSliceIndices normalizes start/stop/step for a sequence of the given length.
+// It handles None defaults, negative indices, and bounds clamping.
+func computeSliceIndices(slice *PySlice, length int, getInt func(v Value, def int) int) (start, stop, step int, err error) {
+	step = getInt(slice.Step, 1)
+	if step == 0 {
+		return 0, 0, 0, fmt.Errorf("slice step cannot be zero")
+	}
+
+	// Compute start/stop with correct defaults based on step direction
+	if step > 0 {
+		if slice.Start == nil || slice.Start == None {
+			start = 0
+		} else {
+			start = getInt(slice.Start, 0)
+		}
+		if slice.Stop == nil || slice.Stop == None {
+			stop = length
+		} else {
+			stop = getInt(slice.Stop, length)
+		}
+	} else {
+		// For negative step, defaults are reversed
+		if slice.Start == nil || slice.Start == None {
+			start = length - 1
+		} else {
+			start = getInt(slice.Start, length-1)
+		}
+		if slice.Stop == nil || slice.Stop == None {
+			stop = -length - 1 // Sentinel to include index 0
+		} else {
+			stop = getInt(slice.Stop, -length-1)
+		}
+	}
+
+	// Handle negative indices
+	if start < 0 && start >= -length {
+		start = length + start
+	}
+	if stop < 0 && stop >= -length {
+		stop = length + stop
+	}
+
+	// Clamp to bounds
+	if step > 0 {
+		if start < 0 {
+			start = 0
+		}
+		if stop > length {
+			stop = length
+		}
+	} else {
+		if start >= length {
+			start = length - 1
+		}
+	}
+
+	return start, stop, step, nil
+}
+
+// collectSliceIndices returns the sequence of indices selected by a slice over a given length.
+func collectSliceIndices(start, stop, step int) []int {
+	var indices []int
+	if step > 0 {
+		for i := start; i < stop; i += step {
+			indices = append(indices, i)
+		}
+	} else {
+		// stop can be -1 to include index 0
+		for i := start; i > stop && i >= 0; i += step {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
+// sliceSequence handles slicing for lists, tuples, bytes, and strings
 func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 	// Helper to get int from slice component (None means use default)
 	getInt := func(v Value, def int) int {
@@ -111,270 +186,51 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 
 	switch o := obj.(type) {
 	case *PyList:
-		length := len(o.Items)
-		step := getInt(slice.Step, 1)
-
-		if step == 0 {
-			return nil, fmt.Errorf("slice step cannot be zero")
+		start, stop, step, err := computeSliceIndices(slice, len(o.Items), getInt)
+		if err != nil {
+			return nil, err
 		}
-
-		// Compute start/stop with correct defaults based on step direction
-		var start, stop int
-		if step > 0 {
-			if slice.Start == nil || slice.Start == None {
-				start = 0
-			} else {
-				start = getInt(slice.Start, 0)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = length
-			} else {
-				stop = getInt(slice.Stop, length)
-			}
-		} else {
-			// For negative step, defaults are reversed
-			if slice.Start == nil || slice.Start == None {
-				start = length - 1
-			} else {
-				start = getInt(slice.Start, length-1)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = -length - 1 // Sentinel to include index 0
-			} else {
-				stop = getInt(slice.Stop, -length-1)
-			}
-		}
-
-		// Handle negative indices
-		if start < 0 && start >= -length {
-			start = length + start
-		}
-		if stop < 0 && stop >= -length {
-			stop = length + stop
-		}
-
-		var result []Value
-		if step > 0 {
-			// Clamp to bounds for positive step
-			if start < 0 {
-				start = 0
-			}
-			if stop > length {
-				stop = length
-			}
-			for i := start; i < stop && i < length; i += step {
-				result = append(result, o.Items[i])
-			}
-		} else {
-			// Clamp to bounds for negative step
-			if start >= length {
-				start = length - 1
-			}
-			// stop can be -1 to include index 0
-			for i := start; i > stop && i >= 0; i += step {
-				result = append(result, o.Items[i])
-			}
+		indices := collectSliceIndices(start, stop, step)
+		result := make([]Value, len(indices))
+		for i, idx := range indices {
+			result[i] = o.Items[idx]
 		}
 		return &PyList{Items: result}, nil
 
 	case *PyTuple:
-		length := len(o.Items)
-		step := getInt(slice.Step, 1)
-
-		if step == 0 {
-			return nil, fmt.Errorf("slice step cannot be zero")
+		start, stop, step, err := computeSliceIndices(slice, len(o.Items), getInt)
+		if err != nil {
+			return nil, err
 		}
-
-		// Compute start/stop with correct defaults based on step direction
-		var start, stop int
-		if step > 0 {
-			if slice.Start == nil || slice.Start == None {
-				start = 0
-			} else {
-				start = getInt(slice.Start, 0)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = length
-			} else {
-				stop = getInt(slice.Stop, length)
-			}
-		} else {
-			// For negative step, defaults are reversed
-			if slice.Start == nil || slice.Start == None {
-				start = length - 1
-			} else {
-				start = getInt(slice.Start, length-1)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = -length - 1 // Sentinel to include index 0
-			} else {
-				stop = getInt(slice.Stop, -length-1)
-			}
-		}
-
-		// Handle negative indices
-		if start < 0 && start >= -length {
-			start = length + start
-		}
-		if stop < 0 && stop >= -length {
-			stop = length + stop
-		}
-
-		var result []Value
-		if step > 0 {
-			// Clamp to bounds for positive step
-			if start < 0 {
-				start = 0
-			}
-			if stop > length {
-				stop = length
-			}
-			for i := start; i < stop && i < length; i += step {
-				result = append(result, o.Items[i])
-			}
-		} else {
-			// Clamp to bounds for negative step
-			if start >= length {
-				start = length - 1
-			}
-			// stop can be -1 to include index 0
-			for i := start; i > stop && i >= 0; i += step {
-				result = append(result, o.Items[i])
-			}
+		indices := collectSliceIndices(start, stop, step)
+		result := make([]Value, len(indices))
+		for i, idx := range indices {
+			result[i] = o.Items[idx]
 		}
 		return &PyTuple{Items: result}, nil
 
 	case *PyBytes:
-		length := len(o.Value)
-		step := getInt(slice.Step, 1)
-
-		if step == 0 {
-			return nil, fmt.Errorf("slice step cannot be zero")
+		start, stop, step, err := computeSliceIndices(slice, len(o.Value), getInt)
+		if err != nil {
+			return nil, err
 		}
-
-		// Compute start/stop with correct defaults based on step direction
-		var start, stop int
-		if step > 0 {
-			if slice.Start == nil || slice.Start == None {
-				start = 0
-			} else {
-				start = getInt(slice.Start, 0)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = length
-			} else {
-				stop = getInt(slice.Stop, length)
-			}
-		} else {
-			if slice.Start == nil || slice.Start == None {
-				start = length - 1
-			} else {
-				start = getInt(slice.Start, length-1)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = -length - 1
-			} else {
-				stop = getInt(slice.Stop, -length-1)
-			}
-		}
-
-		// Handle negative indices
-		if start < 0 && start >= -length {
-			start = length + start
-		}
-		if stop < 0 && stop >= -length {
-			stop = length + stop
-		}
-
-		var result []byte
-		if step > 0 {
-			if start < 0 {
-				start = 0
-			}
-			if stop > length {
-				stop = length
-			}
-			for i := start; i < stop && i < length; i += step {
-				result = append(result, o.Value[i])
-			}
-		} else {
-			if start >= length {
-				start = length - 1
-			}
-			for i := start; i > stop && i >= 0; i += step {
-				result = append(result, o.Value[i])
-			}
-		}
-		if result == nil {
-			result = []byte{}
+		indices := collectSliceIndices(start, stop, step)
+		result := make([]byte, len(indices))
+		for i, idx := range indices {
+			result[i] = o.Value[idx]
 		}
 		return &PyBytes{Value: result}, nil
 
 	case *PyString:
 		runes := []rune(o.Value)
-		length := len(runes)
-		step := getInt(slice.Step, 1)
-
-		if step == 0 {
-			return nil, fmt.Errorf("slice step cannot be zero")
+		start, stop, step, err := computeSliceIndices(slice, len(runes), getInt)
+		if err != nil {
+			return nil, err
 		}
-
-		// Compute start/stop with correct defaults based on step direction
-		var start, stop int
-		if step > 0 {
-			if slice.Start == nil || slice.Start == None {
-				start = 0
-			} else {
-				start = getInt(slice.Start, 0)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = length
-			} else {
-				stop = getInt(slice.Stop, length)
-			}
-		} else {
-			// For negative step, defaults are reversed
-			if slice.Start == nil || slice.Start == None {
-				start = length - 1
-			} else {
-				start = getInt(slice.Start, length-1)
-			}
-			if slice.Stop == nil || slice.Stop == None {
-				stop = -length - 1 // Sentinel to include index 0
-			} else {
-				stop = getInt(slice.Stop, -length-1)
-			}
-		}
-
-		// Handle negative indices
-		if start < 0 && start >= -length {
-			start = length + start
-		}
-		if stop < 0 && stop >= -length {
-			stop = length + stop
-		}
-
-		var result []rune
-		if step > 0 {
-			// Clamp to bounds for positive step
-			if start < 0 {
-				start = 0
-			}
-			if stop > length {
-				stop = length
-			}
-			for i := start; i < stop && i < length; i += step {
-				result = append(result, runes[i])
-			}
-		} else {
-			// Clamp to bounds for negative step
-			if start >= length {
-				start = length - 1
-			}
-			// stop can be -1 to include index 0
-			for i := start; i > stop && i >= 0; i += step {
-				result = append(result, runes[i])
-			}
+		indices := collectSliceIndices(start, stop, step)
+		result := make([]rune, len(indices))
+		for i, idx := range indices {
+			result[i] = runes[idx]
 		}
 		return &PyString{Value: string(result)}, nil
 	}

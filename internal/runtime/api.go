@@ -141,6 +141,76 @@ func (vm *VM) Get(idx int) Value {
 }
 
 // =====================================
+// Argument Validation Helpers
+// =====================================
+
+// RequireArgs checks that at least min arguments were passed.
+// If not, it raises a TypeError with the function name and returns false.
+// Usage:
+//
+//	if !vm.RequireArgs("loads", 1) { return 0 }
+func (vm *VM) RequireArgs(name string, min int) bool {
+	if vm.GetTop() >= min {
+		return true
+	}
+	panic(&PyPanicError{
+		ExcType: "TypeError",
+		Message: fmt.Sprintf("%s() requires at least %d argument(s), got %d", name, min, vm.GetTop()),
+	})
+}
+
+// OptionalInt returns the int at stack position pos if present and not None,
+// otherwise returns def.
+func (vm *VM) OptionalInt(pos int, def int64) int64 {
+	if vm.GetTop() >= pos {
+		v := vm.Get(pos)
+		if _, ok := v.(*PyNone); !ok {
+			return vm.toInt(v)
+		}
+	}
+	return def
+}
+
+// OptionalFloat returns the float at stack position pos if present and not None,
+// otherwise returns def.
+func (vm *VM) OptionalFloat(pos int, def float64) float64 {
+	if vm.GetTop() >= pos {
+		v := vm.Get(pos)
+		if _, ok := v.(*PyNone); !ok {
+			return vm.toFloat(v)
+		}
+	}
+	return def
+}
+
+// OptionalString returns the string at stack position pos if present and not None,
+// otherwise returns def.
+func (vm *VM) OptionalString(pos int, def string) string {
+	if vm.GetTop() >= pos {
+		v := vm.Get(pos)
+		if _, ok := v.(*PyNone); !ok {
+			if s, ok := v.(*PyString); ok {
+				return s.Value
+			}
+			return vm.str(v)
+		}
+	}
+	return def
+}
+
+// OptionalBool returns the bool at stack position pos if present and not None,
+// otherwise returns def.
+func (vm *VM) OptionalBool(pos int, def bool) bool {
+	if vm.GetTop() >= pos {
+		v := vm.Get(pos)
+		if _, ok := v.(*PyNone); !ok {
+			return vm.truthy(v)
+		}
+	}
+	return def
+}
+
+// =====================================
 // Type Checking Methods
 // =====================================
 
@@ -652,6 +722,12 @@ func (vm *VM) CompareOp(op Opcode, a, b Value) Value {
 // HashValue returns the hash of a Python value (exported wrapper)
 func (vm *VM) HashValue(v Value) uint64 {
 	return vm.hashValueVM(v)
+}
+
+// ToList converts a Python iterable to a Go slice of Values (exported wrapper).
+// Handles lists, tuples, strings, ranges, sets, dicts, iterators, generators, etc.
+func (vm *VM) ToList(v Value) ([]Value, error) {
+	return vm.toList(v)
 }
 
 // =====================================

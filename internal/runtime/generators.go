@@ -581,11 +581,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpLoadFast:
 		val := frame.Locals[arg]
 		if val == nil {
-			varName := ""
-			if arg < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[arg]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, arg)
 		}
 		frame.Stack[frame.SP] = val
 		frame.SP++
@@ -934,41 +930,25 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpLoadFast0:
 		val := frame.Locals[0]
 		if val == nil {
-			varName := ""
-			if len(frame.Code.VarNames) > 0 {
-				varName = frame.Code.VarNames[0]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, 0)
 		}
 		vm.push(val)
 	case OpLoadFast1:
 		val := frame.Locals[1]
 		if val == nil {
-			varName := ""
-			if len(frame.Code.VarNames) > 1 {
-				varName = frame.Code.VarNames[1]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, 1)
 		}
 		vm.push(val)
 	case OpLoadFast2:
 		val := frame.Locals[2]
 		if val == nil {
-			varName := ""
-			if len(frame.Code.VarNames) > 2 {
-				varName = frame.Code.VarNames[2]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, 2)
 		}
 		vm.push(val)
 	case OpLoadFast3:
 		val := frame.Locals[3]
 		if val == nil {
-			varName := ""
-			if len(frame.Code.VarNames) > 3 {
-				varName = frame.Code.VarNames[3]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, 3)
 		}
 		vm.push(val)
 	case OpStoreFast0:
@@ -1162,11 +1142,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	// In-place fast opcodes
 	case OpIncrementFast:
 		if frame.Locals[arg] == nil {
-			varName := ""
-			if arg < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[arg]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, arg)
 		}
 		if v, ok := frame.Locals[arg].(*PyInt); ok {
 			frame.Locals[arg] = MakeInt(v.Value + 1)
@@ -1180,11 +1156,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	case OpDecrementFast:
 		if frame.Locals[arg] == nil {
-			varName := ""
-			if arg < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[arg]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, arg)
 		}
 		if v, ok := frame.Locals[arg].(*PyInt); ok {
 			frame.Locals[arg] = MakeInt(v.Value - 1)
@@ -1255,19 +1227,11 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		idx2 := (arg >> 8) & 0xFF
 		val1 := frame.Locals[idx1]
 		if val1 == nil {
-			varName := ""
-			if idx1 < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[idx1]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, idx1)
 		}
 		val2 := frame.Locals[idx2]
 		if val2 == nil {
-			varName := ""
-			if idx2 < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[idx2]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, idx2)
 		}
 		vm.push(val1)
 		vm.push(val2)
@@ -1277,11 +1241,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		constIdx := (arg >> 8) & 0xFF
 		val := frame.Locals[localIdx]
 		if val == nil {
-			varName := ""
-			if localIdx < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[localIdx]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, localIdx)
 		}
 		vm.push(val)
 		vm.push(vm.toValue(frame.Code.Constants[constIdx]))
@@ -1292,11 +1252,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		frame.Locals[storeIdx] = vm.pop()
 		val := frame.Locals[loadIdx]
 		if val == nil {
-			varName := ""
-			if loadIdx < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[loadIdx]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, loadIdx)
 		}
 		vm.push(val)
 
@@ -1305,11 +1261,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		localIdx := arg & 0xFF
 		val := frame.Locals[localIdx]
 		if val == nil {
-			varName := ""
-			if localIdx < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[localIdx]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, localIdx)
 		}
 		vm.push(vm.toValue(frame.Code.Constants[constIdx]))
 		vm.push(val)
@@ -1335,11 +1287,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		localVal := frame.Locals[localIdx]
 		if localVal == nil {
-			varName := ""
-			if localIdx < len(frame.Code.VarNames) {
-				varName = frame.Code.VarNames[localIdx]
-			}
-			return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			return nil, unboundLocalError(frame, localIdx)
 		}
 		vm.push(localVal)
 

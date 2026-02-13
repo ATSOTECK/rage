@@ -274,189 +274,16 @@ func classNeedsClassCell(stmts []model.Stmt) bool {
 // usesSuperOrClass checks if an AST node uses 'super' or '__class__' references.
 // This is used to determine if a method needs the implicit __class__ closure variable.
 func usesSuperOrClass(stmts []model.Stmt) bool {
-	for _, stmt := range stmts {
-		if usesSuperOrClassStmt(stmt) {
-			return true
-		}
+	w := astWalker{
+		exprMatch: func(expr model.Expr) bool {
+			if id, ok := expr.(*model.Identifier); ok {
+				return id.Name == "super" || id.Name == "__class__"
+			}
+			return false
+		},
+		enterComprehensionElts: true,
 	}
-	return false
-}
-
-func usesSuperOrClassStmt(stmt model.Stmt) bool {
-	switch s := stmt.(type) {
-	case *model.ExprStmt:
-		return usesSuperOrClassExpr(s.Value)
-	case *model.Return:
-		if s.Value != nil {
-			return usesSuperOrClassExpr(s.Value)
-		}
-	case *model.Assign:
-		for _, target := range s.Targets {
-			if usesSuperOrClassExpr(target) {
-				return true
-			}
-		}
-		return usesSuperOrClassExpr(s.Value)
-	case *model.AugAssign:
-		return usesSuperOrClassExpr(s.Target) || usesSuperOrClassExpr(s.Value)
-	case *model.AnnAssign:
-		if s.Value != nil && usesSuperOrClassExpr(s.Value) {
-			return true
-		}
-	case *model.If:
-		if usesSuperOrClassExpr(s.Test) {
-			return true
-		}
-		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
-			return true
-		}
-	case *model.While:
-		if usesSuperOrClassExpr(s.Test) {
-			return true
-		}
-		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
-			return true
-		}
-	case *model.For:
-		if usesSuperOrClassExpr(s.Iter) {
-			return true
-		}
-		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) {
-			return true
-		}
-	case *model.Try:
-		if usesSuperOrClass(s.Body) || usesSuperOrClass(s.OrElse) || usesSuperOrClass(s.FinalBody) {
-			return true
-		}
-		for _, handler := range s.Handlers {
-			if usesSuperOrClass(handler.Body) {
-				return true
-			}
-		}
-	case *model.With:
-		for _, item := range s.Items {
-			if usesSuperOrClassExpr(item.ContextExpr) {
-				return true
-			}
-		}
-		return usesSuperOrClass(s.Body)
-	case *model.Raise:
-		if s.Exc != nil && usesSuperOrClassExpr(s.Exc) {
-			return true
-		}
-		if s.Cause != nil && usesSuperOrClassExpr(s.Cause) {
-			return true
-		}
-	case *model.Assert:
-		if usesSuperOrClassExpr(s.Test) {
-			return true
-		}
-		if s.Msg != nil && usesSuperOrClassExpr(s.Msg) {
-			return true
-		}
-	}
-	return false
-}
-
-func usesSuperOrClassExpr(expr model.Expr) bool {
-	switch e := expr.(type) {
-	case *model.Identifier:
-		return e.Name == "super" || e.Name == "__class__"
-	case *model.Call:
-		if usesSuperOrClassExpr(e.Func) {
-			return true
-		}
-		for _, arg := range e.Args {
-			if usesSuperOrClassExpr(arg) {
-				return true
-			}
-		}
-		for _, kw := range e.Keywords {
-			if usesSuperOrClassExpr(kw.Value) {
-				return true
-			}
-		}
-	case *model.Attribute:
-		return usesSuperOrClassExpr(e.Value)
-	case *model.Subscript:
-		if usesSuperOrClassExpr(e.Value) {
-			return true
-		}
-		return usesSuperOrClassExpr(e.Slice)
-	case *model.BinaryOp:
-		return usesSuperOrClassExpr(e.Left) || usesSuperOrClassExpr(e.Right)
-	case *model.UnaryOp:
-		return usesSuperOrClassExpr(e.Operand)
-	case *model.BoolOp:
-		for _, v := range e.Values {
-			if usesSuperOrClassExpr(v) {
-				return true
-			}
-		}
-	case *model.Compare:
-		if usesSuperOrClassExpr(e.Left) {
-			return true
-		}
-		for _, comp := range e.Comparators {
-			if usesSuperOrClassExpr(comp) {
-				return true
-			}
-		}
-	case *model.IfExpr:
-		return usesSuperOrClassExpr(e.Test) || usesSuperOrClassExpr(e.Body) || usesSuperOrClassExpr(e.OrElse)
-	case *model.List:
-		for _, elt := range e.Elts {
-			if usesSuperOrClassExpr(elt) {
-				return true
-			}
-		}
-	case *model.Tuple:
-		for _, elt := range e.Elts {
-			if usesSuperOrClassExpr(elt) {
-				return true
-			}
-		}
-	case *model.Dict:
-		for _, k := range e.Keys {
-			if k != nil && usesSuperOrClassExpr(k) {
-				return true
-			}
-		}
-		for _, v := range e.Values {
-			if usesSuperOrClassExpr(v) {
-				return true
-			}
-		}
-	case *model.Set:
-		for _, elt := range e.Elts {
-			if usesSuperOrClassExpr(elt) {
-				return true
-			}
-		}
-	case *model.ListComp:
-		if usesSuperOrClassExpr(e.Elt) {
-			return true
-		}
-	case *model.DictComp:
-		if usesSuperOrClassExpr(e.Key) || usesSuperOrClassExpr(e.Value) {
-			return true
-		}
-	case *model.SetComp:
-		if usesSuperOrClassExpr(e.Elt) {
-			return true
-		}
-	case *model.GeneratorExpr:
-		if usesSuperOrClassExpr(e.Elt) {
-			return true
-		}
-	case *model.Starred:
-		return usesSuperOrClassExpr(e.Value)
-	case *model.Await:
-		return usesSuperOrClassExpr(e.Value)
-	case *model.NamedExpr:
-		return usesSuperOrClassExpr(e.Value)
-	}
-	return false
+	return w.walkStmts(stmts)
 }
 
 // Compiler compiles AST to bytecode
@@ -476,6 +303,31 @@ type loopInfo struct {
 	breakJumps    []int
 	continueJumps []int
 	isForLoop     bool // true for 'for' loops (iterator on stack), false for 'while' loops
+}
+
+// newChildCompiler creates a child compiler for compiling nested scopes
+// (functions, classes, lambdas, comprehensions).
+func (c *Compiler) newChildCompiler(name string, firstLine int, scopeType ScopeType, flags runtime.CodeFlags) *Compiler {
+	return &Compiler{
+		code: &runtime.CodeObject{
+			Name:      name,
+			Filename:  c.filename,
+			FirstLine: firstLine,
+			Flags:     flags,
+		},
+		symbolTable: NewSymbolTable(scopeType, c.symbolTable),
+		filename:    c.filename,
+		optimizer:   c.optimizer,
+	}
+}
+
+// finalizeAndOptimize finishes compilation of a child compiler's code object.
+func (c *Compiler) finalizeAndOptimize(child *Compiler) {
+	child.finishLineTable()
+	child.finalizeCode()
+	if c.optimizer != nil {
+		c.optimizer.PeepholeOptimize(child.code)
+	}
 }
 
 // NewCompiler creates a new compiler
@@ -1073,34 +925,43 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 	}
 }
 
+// opMapping maps binary operator token kinds to their binary and inplace opcodes.
+var opMapping = map[model.TokenKind]struct{ binary, inplace runtime.Opcode }{
+	model.TK_Plus:        {runtime.OpBinaryAdd, runtime.OpInplaceAdd},
+	model.TK_Minus:       {runtime.OpBinarySubtract, runtime.OpInplaceSubtract},
+	model.TK_Star:        {runtime.OpBinaryMultiply, runtime.OpInplaceMultiply},
+	model.TK_Slash:       {runtime.OpBinaryDivide, runtime.OpInplaceDivide},
+	model.TK_DoubleSlash: {runtime.OpBinaryFloorDiv, runtime.OpInplaceFloorDiv},
+	model.TK_Percent:     {runtime.OpBinaryModulo, runtime.OpInplaceModulo},
+	model.TK_DoubleStar:  {runtime.OpBinaryPower, runtime.OpInplacePower},
+	model.TK_At:          {runtime.OpBinaryMatMul, runtime.OpInplaceMatMul},
+	model.TK_LShift:      {runtime.OpBinaryLShift, runtime.OpInplaceLShift},
+	model.TK_RShift:      {runtime.OpBinaryRShift, runtime.OpInplaceRShift},
+	model.TK_Ampersand:   {runtime.OpBinaryAnd, runtime.OpInplaceAnd},
+	model.TK_Pipe:        {runtime.OpBinaryOr, runtime.OpInplaceOr},
+	model.TK_Caret:       {runtime.OpBinaryXor, runtime.OpInplaceXor},
+}
+
+// augAssignToOp maps augmented assignment token kinds to their corresponding binary operator token kind.
+var augAssignToOp = map[model.TokenKind]model.TokenKind{
+	model.TK_PlusAssign:        model.TK_Plus,
+	model.TK_MinusAssign:       model.TK_Minus,
+	model.TK_StarAssign:        model.TK_Star,
+	model.TK_SlashAssign:       model.TK_Slash,
+	model.TK_DoubleSlashAssign: model.TK_DoubleSlash,
+	model.TK_PercentAssign:     model.TK_Percent,
+	model.TK_DoubleStarAssign:  model.TK_DoubleStar,
+	model.TK_AtAssign:          model.TK_At,
+	model.TK_LShiftAssign:      model.TK_LShift,
+	model.TK_RShiftAssign:      model.TK_RShift,
+	model.TK_AmpersandAssign:   model.TK_Ampersand,
+	model.TK_PipeAssign:        model.TK_Pipe,
+	model.TK_CaretAssign:       model.TK_Caret,
+}
+
 func (c *Compiler) emitBinaryOp(op model.TokenKind) {
-	switch op {
-	case model.TK_Plus:
-		c.emit(runtime.OpBinaryAdd)
-	case model.TK_Minus:
-		c.emit(runtime.OpBinarySubtract)
-	case model.TK_Star:
-		c.emit(runtime.OpBinaryMultiply)
-	case model.TK_Slash:
-		c.emit(runtime.OpBinaryDivide)
-	case model.TK_DoubleSlash:
-		c.emit(runtime.OpBinaryFloorDiv)
-	case model.TK_Percent:
-		c.emit(runtime.OpBinaryModulo)
-	case model.TK_DoubleStar:
-		c.emit(runtime.OpBinaryPower)
-	case model.TK_At:
-		c.emit(runtime.OpBinaryMatMul)
-	case model.TK_LShift:
-		c.emit(runtime.OpBinaryLShift)
-	case model.TK_RShift:
-		c.emit(runtime.OpBinaryRShift)
-	case model.TK_Ampersand:
-		c.emit(runtime.OpBinaryAnd)
-	case model.TK_Pipe:
-		c.emit(runtime.OpBinaryOr)
-	case model.TK_Caret:
-		c.emit(runtime.OpBinaryXor)
+	if entry, ok := opMapping[op]; ok {
+		c.emit(entry.binary)
 	}
 }
 
@@ -1406,33 +1267,10 @@ func (c *Compiler) compileAugAssign(s *model.AugAssign) {
 	c.compileExpr(s.Value)
 
 	// Emit inplace operation
-	switch s.Op {
-	case model.TK_PlusAssign:
-		c.emit(runtime.OpInplaceAdd)
-	case model.TK_MinusAssign:
-		c.emit(runtime.OpInplaceSubtract)
-	case model.TK_StarAssign:
-		c.emit(runtime.OpInplaceMultiply)
-	case model.TK_SlashAssign:
-		c.emit(runtime.OpInplaceDivide)
-	case model.TK_DoubleSlashAssign:
-		c.emit(runtime.OpInplaceFloorDiv)
-	case model.TK_PercentAssign:
-		c.emit(runtime.OpInplaceModulo)
-	case model.TK_DoubleStarAssign:
-		c.emit(runtime.OpInplacePower)
-	case model.TK_AtAssign:
-		c.emit(runtime.OpInplaceMatMul)
-	case model.TK_LShiftAssign:
-		c.emit(runtime.OpInplaceLShift)
-	case model.TK_RShiftAssign:
-		c.emit(runtime.OpInplaceRShift)
-	case model.TK_AmpersandAssign:
-		c.emit(runtime.OpInplaceAnd)
-	case model.TK_PipeAssign:
-		c.emit(runtime.OpInplaceOr)
-	case model.TK_CaretAssign:
-		c.emit(runtime.OpInplaceXor)
+	if binOp, ok := augAssignToOp[s.Op]; ok {
+		if entry, ok := opMapping[binOp]; ok {
+			c.emit(entry.inplace)
+		}
 	}
 
 	// Store result
@@ -1912,160 +1750,21 @@ func collectNamesFromExpr(expr model.Expr, names map[string]bool) {
 	// Attribute, Subscript — not simple names, skip
 }
 
-// containsYield checks if statements contain yield or yield from expressions
+// containsYield checks if statements contain yield or yield from expressions.
+// Does not descend into comprehensions or nested function/class definitions,
+// as those create their own scope.
 func containsYield(stmts []model.Stmt) bool {
-	for _, stmt := range stmts {
-		if containsYieldInStmt(stmt) {
-			return true
-		}
+	w := astWalker{
+		exprMatch: func(expr model.Expr) bool {
+			switch expr.(type) {
+			case *model.Yield, *model.YieldFrom:
+				return true
+			}
+			return false
+		},
+		enterComprehensionElts: false,
 	}
-	return false
-}
-
-func containsYieldInStmt(stmt model.Stmt) bool {
-	switch s := stmt.(type) {
-	case *model.ExprStmt:
-		return containsYieldInExpr(s.Value)
-	case *model.Assign:
-		return containsYieldInExpr(s.Value)
-	case *model.AugAssign:
-		return containsYieldInExpr(s.Value)
-	case *model.AnnAssign:
-		if s.Value != nil {
-			return containsYieldInExpr(s.Value)
-		}
-	case *model.Return:
-		if s.Value != nil {
-			return containsYieldInExpr(s.Value)
-		}
-	case *model.If:
-		if containsYieldInExpr(s.Test) || containsYield(s.Body) || containsYield(s.OrElse) {
-			return true
-		}
-	case *model.While:
-		if containsYieldInExpr(s.Test) || containsYield(s.Body) || containsYield(s.OrElse) {
-			return true
-		}
-	case *model.For:
-		if containsYieldInExpr(s.Iter) || containsYield(s.Body) || containsYield(s.OrElse) {
-			return true
-		}
-	case *model.With:
-		for _, item := range s.Items {
-			if containsYieldInExpr(item.ContextExpr) {
-				return true
-			}
-		}
-		return containsYield(s.Body)
-	case *model.Try:
-		if containsYield(s.Body) || containsYield(s.OrElse) || containsYield(s.FinalBody) {
-			return true
-		}
-		for _, handler := range s.Handlers {
-			if containsYield(handler.Body) {
-				return true
-			}
-		}
-	case *model.Match:
-		if containsYieldInExpr(s.Subject) {
-			return true
-		}
-		for _, c := range s.Cases {
-			if containsYield(c.Body) {
-				return true
-			}
-		}
-		// Note: Don't descend into nested FunctionDef or ClassDef
-	}
-	return false
-}
-
-func containsYieldInExpr(expr model.Expr) bool {
-	if expr == nil {
-		return false
-	}
-	switch e := expr.(type) {
-	case *model.Yield, *model.YieldFrom:
-		return true
-	case *model.BinaryOp:
-		return containsYieldInExpr(e.Left) || containsYieldInExpr(e.Right)
-	case *model.UnaryOp:
-		return containsYieldInExpr(e.Operand)
-	case *model.BoolOp:
-		for _, v := range e.Values {
-			if containsYieldInExpr(v) {
-				return true
-			}
-		}
-	case *model.Compare:
-		if containsYieldInExpr(e.Left) {
-			return true
-		}
-		for _, c := range e.Comparators {
-			if containsYieldInExpr(c) {
-				return true
-			}
-		}
-	case *model.Call:
-		if containsYieldInExpr(e.Func) {
-			return true
-		}
-		for _, arg := range e.Args {
-			if containsYieldInExpr(arg) {
-				return true
-			}
-		}
-		for _, kw := range e.Keywords {
-			if containsYieldInExpr(kw.Value) {
-				return true
-			}
-		}
-	case *model.IfExpr:
-		return containsYieldInExpr(e.Test) || containsYieldInExpr(e.Body) || containsYieldInExpr(e.OrElse)
-	case *model.Attribute:
-		return containsYieldInExpr(e.Value)
-	case *model.Subscript:
-		return containsYieldInExpr(e.Value) || containsYieldInExpr(e.Slice)
-	case *model.Slice:
-		return containsYieldInExpr(e.Lower) || containsYieldInExpr(e.Upper) || containsYieldInExpr(e.Step)
-	case *model.List:
-		for _, el := range e.Elts {
-			if containsYieldInExpr(el) {
-				return true
-			}
-		}
-	case *model.Tuple:
-		for _, el := range e.Elts {
-			if containsYieldInExpr(el) {
-				return true
-			}
-		}
-	case *model.Dict:
-		for _, k := range e.Keys {
-			if containsYieldInExpr(k) {
-				return true
-			}
-		}
-		for _, v := range e.Values {
-			if containsYieldInExpr(v) {
-				return true
-			}
-		}
-	case *model.Set:
-		for _, el := range e.Elts {
-			if containsYieldInExpr(el) {
-				return true
-			}
-		}
-	case *model.Starred:
-		return containsYieldInExpr(e.Value)
-	case *model.NamedExpr:
-		return containsYieldInExpr(e.Value)
-	case *model.Await:
-		return containsYieldInExpr(e.Value)
-		// ListComp, SetComp, DictComp, GeneratorExpr create their own scope, don't check
-	}
-	return false
+	return w.walkStmts(stmts)
 }
 
 func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
@@ -2075,16 +1774,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	}
 
 	// Create a new compiler for the function body
-	funcCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      s.Name.Name,
-			Filename:  c.filename,
-			FirstLine: s.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeFunction, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
+	funcCompiler := c.newChildCompiler(s.Name.Name, s.StartPos.Line, ScopeFunction, 0)
 
 	// Check if we're inside a class and this method uses super() or __class__
 	// If so, we need to capture __class__ as a free variable
@@ -2131,13 +1821,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	// Add implicit return None
 	funcCompiler.emitLoadConst(nil)
 	funcCompiler.emit(runtime.OpReturn)
-	funcCompiler.finishLineTable()
-	funcCompiler.finalizeCode()
-
-	// Apply peephole optimizations to function body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(funcCompiler.code)
-	}
+	c.finalizeAndOptimize(funcCompiler)
 
 	// Set up code object
 	funcCode := funcCompiler.code
@@ -2204,16 +1888,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 	needsClassCell := classNeedsClassCell(s.Body)
 
 	// Create class body function
-	classCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      s.Name.Name,
-			Filename:  c.filename,
-			FirstLine: s.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeClass, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
+	classCompiler := c.newChildCompiler(s.Name.Name, s.StartPos.Line, ScopeClass, 0)
 
 	// If any method uses super(), define __class__ as a cell in the class scope
 	if needsClassCell {
@@ -2235,13 +1910,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 	}
 	classCompiler.emit(runtime.OpLoadLocals)
 	classCompiler.emit(runtime.OpReturn)
-	classCompiler.finishLineTable()
-	classCompiler.finalizeCode()
-
-	// Apply peephole optimizations to class body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(classCompiler.code)
-	}
+	c.finalizeAndOptimize(classCompiler)
 
 	c.emitLoadConst(classCompiler.code)
 	c.emitLoadConst(s.Name.Name)
@@ -2281,16 +1950,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 
 func (c *Compiler) compileLambda(e *model.Lambda) {
 	// Create lambda function code
-	lambdaCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      "<lambda>",
-			Filename:  c.filename,
-			FirstLine: e.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeFunction, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
+	lambdaCompiler := c.newChildCompiler("<lambda>", e.StartPos.Line, ScopeFunction, 0)
 
 	// Define parameters
 	if e.Args != nil {
@@ -2303,13 +1963,7 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 	lambdaCompiler.setLine(e.Body.Pos().Line)
 	lambdaCompiler.compileExpr(e.Body)
 	lambdaCompiler.emit(runtime.OpReturn)
-	lambdaCompiler.finishLineTable()
-	lambdaCompiler.finalizeCode()
-
-	// Apply peephole optimizations to lambda body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(lambdaCompiler.code)
-	}
+	c.finalizeAndOptimize(lambdaCompiler)
 
 	lambdaCode := lambdaCompiler.code
 	if e.Args != nil {
@@ -2336,175 +1990,84 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 
 // Comprehension compilation
 
-func (c *Compiler) compileListComp(e *model.ListComp) {
-	// Create comprehension function
-	compCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      "<listcomp>",
-			Filename:  c.filename,
-			FirstLine: e.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
+// compileComprehension is the shared implementation for list/set/dict comprehensions
+// and generator expressions. It creates a child compiler, compiles the comprehension
+// body, finalizes the code, and emits the function call.
+func (c *Compiler) compileComprehension(
+	name string,
+	firstLine int,
+	flags runtime.CodeFlags,
+	generators []*model.Comprehension,
+	firstIter model.Expr,
+	setupBody func(cc *Compiler, stackOffset int),
+) {
+	cc := c.newChildCompiler(name, firstLine, ScopeComprehension, flags)
+	cc.symbolTable.Define(".0")
+
+	stackOffset := len(generators)
+	setupBody(cc, stackOffset)
+
+	if flags&runtime.FlagGenerator != 0 {
+		cc.emitLoadConst(nil)
 	}
+	cc.emit(runtime.OpReturn)
 
-	// The outermost iterable is passed as argument
-	compCompiler.symbolTable.Define(".0")
-
-	// Build empty list
-	compCompiler.emitArg(runtime.OpBuildList, 0)
-
-	// The stack offset for LIST_APPEND is the number of generators
-	// because after the loops, stack is [list, iter1, iter2, ..., iterN, element]
-	// After popping element: [list, iter1, iter2, ..., iterN]
-	// peek(N) finds the list at the correct position
-	stackOffset := len(e.Generators)
-	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
-		compCompiler.compileExpr(e.Elt)
-		compCompiler.emitArg(runtime.OpListAppend, stackOffset)
-	}, 0)
-
-	compCompiler.emit(runtime.OpReturn)
-	compCompiler.finishLineTable()
-	compCompiler.finalizeCode()
-	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
-
-	// Apply peephole optimizations to comprehension body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(compCompiler.code)
-	}
+	c.finalizeAndOptimize(cc)
+	cc.code.ArgCount = 1
 
 	// Make function and call with iterator
-	c.compileExpr(e.Generators[0].Iter)
+	c.compileExpr(firstIter)
 	c.emit(runtime.OpGetIter)
-	c.emitLoadConst(compCompiler.code)
-	c.emitLoadConst("<listcomp>")
+	c.emitLoadConst(cc.code)
+	c.emitLoadConst(name)
 	c.emitArg(runtime.OpMakeFunction, 0)
 	c.emit(runtime.OpRot2)
 	c.emitArg(runtime.OpCall, 1)
+}
+
+func (c *Compiler) compileListComp(e *model.ListComp) {
+	c.compileComprehension("<listcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		func(cc *Compiler, stackOffset int) {
+			cc.emitArg(runtime.OpBuildList, 0)
+			c.compileComprehensionGenerators(cc, e.Generators, func() {
+				cc.compileExpr(e.Elt)
+				cc.emitArg(runtime.OpListAppend, stackOffset)
+			}, 0)
+		})
 }
 
 func (c *Compiler) compileSetComp(e *model.SetComp) {
-	compCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      "<setcomp>",
-			Filename:  c.filename,
-			FirstLine: e.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
-
-	compCompiler.symbolTable.Define(".0")
-	compCompiler.emitArg(runtime.OpBuildSet, 0)
-
-	stackOffset := len(e.Generators)
-	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
-		compCompiler.compileExpr(e.Elt)
-		compCompiler.emitArg(runtime.OpSetAdd, stackOffset)
-	}, 0)
-
-	compCompiler.emit(runtime.OpReturn)
-	compCompiler.finishLineTable()
-	compCompiler.finalizeCode()
-	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
-
-	// Apply peephole optimizations to comprehension body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(compCompiler.code)
-	}
-
-	c.compileExpr(e.Generators[0].Iter)
-	c.emit(runtime.OpGetIter)
-	c.emitLoadConst(compCompiler.code)
-	c.emitLoadConst("<setcomp>")
-	c.emitArg(runtime.OpMakeFunction, 0)
-	c.emit(runtime.OpRot2)
-	c.emitArg(runtime.OpCall, 1)
+	c.compileComprehension("<setcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		func(cc *Compiler, stackOffset int) {
+			cc.emitArg(runtime.OpBuildSet, 0)
+			c.compileComprehensionGenerators(cc, e.Generators, func() {
+				cc.compileExpr(e.Elt)
+				cc.emitArg(runtime.OpSetAdd, stackOffset)
+			}, 0)
+		})
 }
 
 func (c *Compiler) compileDictComp(e *model.DictComp) {
-	compCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      "<dictcomp>",
-			Filename:  c.filename,
-			FirstLine: e.StartPos.Line,
-		},
-		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
-
-	compCompiler.symbolTable.Define(".0")
-	compCompiler.emitArg(runtime.OpBuildMap, 0)
-
-	stackOffset := len(e.Generators)
-	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
-		compCompiler.compileExpr(e.Key)
-		compCompiler.compileExpr(e.Value)
-		compCompiler.emitArg(runtime.OpMapAdd, stackOffset)
-	}, 0)
-
-	compCompiler.emit(runtime.OpReturn)
-	compCompiler.finishLineTable()
-	compCompiler.finalizeCode()
-	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
-
-	// Apply peephole optimizations to comprehension body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(compCompiler.code)
-	}
-
-	c.compileExpr(e.Generators[0].Iter)
-	c.emit(runtime.OpGetIter)
-	c.emitLoadConst(compCompiler.code)
-	c.emitLoadConst("<dictcomp>")
-	c.emitArg(runtime.OpMakeFunction, 0)
-	c.emit(runtime.OpRot2)
-	c.emitArg(runtime.OpCall, 1)
+	c.compileComprehension("<dictcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		func(cc *Compiler, stackOffset int) {
+			cc.emitArg(runtime.OpBuildMap, 0)
+			c.compileComprehensionGenerators(cc, e.Generators, func() {
+				cc.compileExpr(e.Key)
+				cc.compileExpr(e.Value)
+				cc.emitArg(runtime.OpMapAdd, stackOffset)
+			}, 0)
+		})
 }
 
 func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
-	compCompiler := &Compiler{
-		code: &runtime.CodeObject{
-			Name:      "<genexpr>",
-			Filename:  c.filename,
-			FirstLine: e.StartPos.Line,
-			Flags:     runtime.FlagGenerator,
-		},
-		symbolTable: NewSymbolTable(ScopeComprehension, c.symbolTable),
-		filename:    c.filename,
-		optimizer:   c.optimizer,
-	}
-
-	compCompiler.symbolTable.Define(".0")
-
-	c.compileComprehensionGenerators(compCompiler, e.Generators, func() {
-		compCompiler.compileExpr(e.Elt)
-		compCompiler.emit(runtime.OpYieldValue)
-		compCompiler.emit(runtime.OpPop) // Discard send value on resume
-	}, 0)
-
-	compCompiler.emitLoadConst(nil)
-	compCompiler.emit(runtime.OpReturn)
-	compCompiler.finishLineTable()
-	compCompiler.finalizeCode()
-	compCompiler.code.ArgCount = 1 // .0 is a positional argument (the iterator)
-
-	// Apply peephole optimizations to comprehension body
-	if c.optimizer != nil {
-		c.optimizer.PeepholeOptimize(compCompiler.code)
-	}
-
-	c.compileExpr(e.Generators[0].Iter)
-	c.emit(runtime.OpGetIter)
-	c.emitLoadConst(compCompiler.code)
-	c.emitLoadConst("<genexpr>")
-	c.emitArg(runtime.OpMakeFunction, 0)
-	c.emit(runtime.OpRot2)
-	c.emitArg(runtime.OpCall, 1)
+	c.compileComprehension("<genexpr>", e.StartPos.Line, runtime.FlagGenerator, e.Generators, e.Generators[0].Iter,
+		func(cc *Compiler, stackOffset int) {
+			c.compileComprehensionGenerators(cc, e.Generators, func() {
+				cc.compileExpr(e.Elt)
+				cc.emit(runtime.OpYieldValue)
+				cc.emit(runtime.OpPop)
+			}, 0)
+		})
 }
 
 func (c *Compiler) compileComprehensionGenerators(

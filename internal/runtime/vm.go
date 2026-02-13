@@ -273,11 +273,7 @@ func (vm *VM) run() (Value, error) {
 			// Inline push for local variable load
 			val := frame.Locals[arg]
 			if val == nil {
-				varName := ""
-				if arg < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[arg]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, arg)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -332,11 +328,7 @@ func (vm *VM) run() (Value, error) {
 		case OpLoadFast0:
 			val := frame.Locals[0]
 			if val == nil {
-				varName := ""
-				if len(frame.Code.VarNames) > 0 {
-					varName = frame.Code.VarNames[0]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, 0)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -344,11 +336,7 @@ func (vm *VM) run() (Value, error) {
 		case OpLoadFast1:
 			val := frame.Locals[1]
 			if val == nil {
-				varName := ""
-				if len(frame.Code.VarNames) > 1 {
-					varName = frame.Code.VarNames[1]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, 1)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -356,11 +344,7 @@ func (vm *VM) run() (Value, error) {
 		case OpLoadFast2:
 			val := frame.Locals[2]
 			if val == nil {
-				varName := ""
-				if len(frame.Code.VarNames) > 2 {
-					varName = frame.Code.VarNames[2]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, 2)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -368,11 +352,7 @@ func (vm *VM) run() (Value, error) {
 		case OpLoadFast3:
 			val := frame.Locals[3]
 			if val == nil {
-				varName := ""
-				if len(frame.Code.VarNames) > 3 {
-					varName = frame.Code.VarNames[3]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, 3)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -416,11 +396,7 @@ func (vm *VM) run() (Value, error) {
 		case OpIncrementFast:
 			// Increment local variable by 1
 			if frame.Locals[arg] == nil {
-				varName := ""
-				if arg < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[arg]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(v.Value + 1)
@@ -436,11 +412,7 @@ func (vm *VM) run() (Value, error) {
 		case OpDecrementFast:
 			// Decrement local variable by 1
 			if frame.Locals[arg] == nil {
-				varName := ""
-				if arg < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[arg]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(v.Value - 1)
@@ -527,19 +499,11 @@ func (vm *VM) run() (Value, error) {
 			idx2 := (arg >> 8) & 0xFF
 			val1 := frame.Locals[idx1]
 			if val1 == nil {
-				varName := ""
-				if idx1 < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[idx1]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, idx1)
 			}
 			val2 := frame.Locals[idx2]
 			if val2 == nil {
-				varName := ""
-				if idx2 < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[idx2]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, idx2)
 			}
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = val1
@@ -553,11 +517,7 @@ func (vm *VM) run() (Value, error) {
 			constIdx := (arg >> 8) & 0xFF
 			val := frame.Locals[localIdx]
 			if val == nil {
-				varName := ""
-				if localIdx < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[localIdx]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, localIdx)
 			}
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = val
@@ -573,11 +533,7 @@ func (vm *VM) run() (Value, error) {
 			frame.Locals[storeIdx] = frame.Stack[frame.SP]
 			val := frame.Locals[loadIdx]
 			if val == nil {
-				varName := ""
-				if loadIdx < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[loadIdx]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, loadIdx)
 			}
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -749,14 +705,29 @@ func (vm *VM) run() (Value, error) {
 			frame.Stack[frame.SP] = result
 			frame.SP++
 
-		case OpCompareLtInt:
+		case OpCompareLtInt, OpCompareLeInt, OpCompareGtInt, OpCompareGeInt, OpCompareEqInt, OpCompareNeInt:
 			frame.SP--
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
-					if ai.Value < bi.Value {
+					var cmp bool
+					switch op {
+					case OpCompareLtInt:
+						cmp = ai.Value < bi.Value
+					case OpCompareLeInt:
+						cmp = ai.Value <= bi.Value
+					case OpCompareGtInt:
+						cmp = ai.Value > bi.Value
+					case OpCompareGeInt:
+						cmp = ai.Value >= bi.Value
+					case OpCompareEqInt:
+						cmp = ai.Value == bi.Value
+					case OpCompareNeInt:
+						cmp = ai.Value != bi.Value
+					}
+					if cmp {
 						frame.Stack[frame.SP] = True
 					} else {
 						frame.Stack[frame.SP] = False
@@ -765,11 +736,24 @@ func (vm *VM) run() (Value, error) {
 					break
 				}
 			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareLt, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
+			// Map specialized opcode back to base compare opcode
+			var baseOp Opcode
+			switch op {
+			case OpCompareLtInt:
+				baseOp = OpCompareLt
+			case OpCompareLeInt:
+				baseOp = OpCompareLe
+			case OpCompareGtInt:
+				baseOp = OpCompareGt
+			case OpCompareGeInt:
+				baseOp = OpCompareGe
+			case OpCompareEqInt:
+				baseOp = OpCompareEq
+			case OpCompareNeInt:
+				baseOp = OpCompareNe
+			}
+			frame.Stack[frame.SP] = vm.compareOp(baseOp, a, b)
+			if handled, result, err := vm.checkCurrentException(); handled {
 				if err != nil {
 					return nil, err
 				}
@@ -778,137 +762,6 @@ func (vm *VM) run() (Value, error) {
 				}
 				break
 			}
-			frame.SP++
-
-		case OpCompareLeInt:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					if ai.Value <= bi.Value {
-						frame.Stack[frame.SP] = True
-					} else {
-						frame.Stack[frame.SP] = False
-					}
-					frame.SP++
-					break
-				}
-			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareLe, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
-				if err != nil {
-					return nil, err
-				}
-				if result != nil {
-					return result, nil
-				}
-				break
-			}
-			frame.SP++
-
-		case OpCompareGtInt:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					if ai.Value > bi.Value {
-						frame.Stack[frame.SP] = True
-					} else {
-						frame.Stack[frame.SP] = False
-					}
-					frame.SP++
-					break
-				}
-			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareGt, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
-				if err != nil {
-					return nil, err
-				}
-				if result != nil {
-					return result, nil
-				}
-				break
-			}
-			frame.SP++
-
-		case OpCompareGeInt:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					if ai.Value >= bi.Value {
-						frame.Stack[frame.SP] = True
-					} else {
-						frame.Stack[frame.SP] = False
-					}
-					frame.SP++
-					break
-				}
-			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareGe, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
-				if err != nil {
-					return nil, err
-				}
-				if result != nil {
-					return result, nil
-				}
-				break
-			}
-			frame.SP++
-
-		case OpCompareEqInt:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					if ai.Value == bi.Value {
-						frame.Stack[frame.SP] = True
-					} else {
-						frame.Stack[frame.SP] = False
-					}
-					frame.SP++
-					break
-				}
-			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareEq, a, b)
-			frame.SP++
-
-		case OpCompareNeInt:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					if ai.Value != bi.Value {
-						frame.Stack[frame.SP] = True
-					} else {
-						frame.Stack[frame.SP] = False
-					}
-					frame.SP++
-					break
-				}
-			}
-			frame.Stack[frame.SP] = vm.compareOp(OpCompareNe, a, b)
 			frame.SP++
 
 		// ==========================================
@@ -931,183 +784,43 @@ func (vm *VM) run() (Value, error) {
 		// Combined compare+jump opcodes
 		// ==========================================
 
-		case OpCompareLtJump:
+		case OpCompareLtJump, OpCompareLeJump, OpCompareGtJump, OpCompareGeJump:
 			frame.SP--
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			result := false
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
-					result = ai.Value < bi.Value
-				} else {
-					cmpResult := vm.compareOp(OpCompareLt, a, b)
-					if vm.currentException != nil {
-						exc := vm.currentException
-						vm.currentException = nil
-						r, err := vm.handleException(exc)
-						if err != nil {
-							return nil, err
-						}
-						if r != nil {
-							return r, nil
-						}
-						break
+					var cmp bool
+					switch op {
+					case OpCompareLtJump:
+						cmp = ai.Value < bi.Value
+					case OpCompareLeJump:
+						cmp = ai.Value <= bi.Value
+					case OpCompareGtJump:
+						cmp = ai.Value > bi.Value
+					case OpCompareGeJump:
+						cmp = ai.Value >= bi.Value
 					}
-					result = vm.truthy(cmpResult)
-				}
-			} else {
-				cmpResult := vm.compareOp(OpCompareLt, a, b)
-				if vm.currentException != nil {
-					exc := vm.currentException
-					vm.currentException = nil
-					r, err := vm.handleException(exc)
-					if err != nil {
-						return nil, err
-					}
-					if r != nil {
-						return r, nil
+					if !cmp {
+						frame.IP = arg
 					}
 					break
 				}
-				result = vm.truthy(cmpResult)
 			}
-			if !result {
-				frame.IP = arg
-			}
-
-		case OpCompareLeJump:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			result := false
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					result = ai.Value <= bi.Value
-				} else {
-					cmpResult := vm.compareOp(OpCompareLe, a, b)
-					if vm.currentException != nil {
-						exc := vm.currentException
-						vm.currentException = nil
-						r, err := vm.handleException(exc)
-						if err != nil {
-							return nil, err
-						}
-						if r != nil {
-							return r, nil
-						}
-						break
-					}
-					result = vm.truthy(cmpResult)
+			// Fallback: map jump opcode to base compare opcode
+			baseOp := OpCompareLt + Opcode(op-OpCompareLtJump)
+			cmpResult := vm.compareOp(baseOp, a, b)
+			if handled, r, err := vm.checkCurrentException(); handled {
+				if err != nil {
+					return nil, err
 				}
-			} else {
-				cmpResult := vm.compareOp(OpCompareLe, a, b)
-				if vm.currentException != nil {
-					exc := vm.currentException
-					vm.currentException = nil
-					r, err := vm.handleException(exc)
-					if err != nil {
-						return nil, err
-					}
-					if r != nil {
-						return r, nil
-					}
-					break
+				if r != nil {
+					return r, nil
 				}
-				result = vm.truthy(cmpResult)
+				break
 			}
-			if !result {
-				frame.IP = arg
-			}
-
-		case OpCompareGtJump:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			result := false
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					result = ai.Value > bi.Value
-				} else {
-					cmpResult := vm.compareOp(OpCompareGt, a, b)
-					if vm.currentException != nil {
-						exc := vm.currentException
-						vm.currentException = nil
-						r, err := vm.handleException(exc)
-						if err != nil {
-							return nil, err
-						}
-						if r != nil {
-							return r, nil
-						}
-						break
-					}
-					result = vm.truthy(cmpResult)
-				}
-			} else {
-				cmpResult := vm.compareOp(OpCompareGt, a, b)
-				if vm.currentException != nil {
-					exc := vm.currentException
-					vm.currentException = nil
-					r, err := vm.handleException(exc)
-					if err != nil {
-						return nil, err
-					}
-					if r != nil {
-						return r, nil
-					}
-					break
-				}
-				result = vm.truthy(cmpResult)
-			}
-			if !result {
-				frame.IP = arg
-			}
-
-		case OpCompareGeJump:
-			frame.SP--
-			b := frame.Stack[frame.SP]
-			frame.SP--
-			a := frame.Stack[frame.SP]
-			result := false
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					result = ai.Value >= bi.Value
-				} else {
-					cmpResult := vm.compareOp(OpCompareGe, a, b)
-					if vm.currentException != nil {
-						exc := vm.currentException
-						vm.currentException = nil
-						r, err := vm.handleException(exc)
-						if err != nil {
-							return nil, err
-						}
-						if r != nil {
-							return r, nil
-						}
-						break
-					}
-					result = vm.truthy(cmpResult)
-				}
-			} else {
-				cmpResult := vm.compareOp(OpCompareGe, a, b)
-				if vm.currentException != nil {
-					exc := vm.currentException
-					vm.currentException = nil
-					r, err := vm.handleException(exc)
-					if err != nil {
-						return nil, err
-					}
-					if r != nil {
-						return r, nil
-					}
-					break
-				}
-				result = vm.truthy(cmpResult)
-			}
-			if !result {
+			if !vm.truthy(cmpResult) {
 				frame.IP = arg
 			}
 
@@ -1116,8 +829,7 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			result := vm.equal(a, b)
-			if !result {
+			if !vm.equal(a, b) {
 				frame.IP = arg
 			}
 
@@ -1126,8 +838,7 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			result := !vm.equal(a, b)
-			if !result {
+			if vm.equal(a, b) {
 				frame.IP = arg
 			}
 
@@ -1139,19 +850,11 @@ func (vm *VM) run() (Value, error) {
 			jumpOffset := arg >> 16
 			a := frame.Locals[local1]
 			if a == nil {
-				varName := ""
-				if local1 < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[local1]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, local1)
 			}
 			b := frame.Locals[local2]
 			if b == nil {
-				varName := ""
-				if local2 < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[local2]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, local2)
 			}
 			// Fast path for ints
 			if ai, ok := a.(*PyInt); ok {
@@ -1164,10 +867,7 @@ func (vm *VM) run() (Value, error) {
 			}
 			// Fallback to generic comparison
 			cmp := vm.compareOp(OpCompareLt, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				r, err := vm.handleException(exc)
+			if handled, r, err := vm.checkCurrentException(); handled {
 				if err != nil {
 					return nil, err
 				}
@@ -1273,11 +973,7 @@ func (vm *VM) run() (Value, error) {
 			localIdx := arg & 0xFF
 			val := frame.Locals[localIdx]
 			if val == nil {
-				varName := ""
-				if localIdx < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[localIdx]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, localIdx)
 			}
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
@@ -1300,11 +996,7 @@ func (vm *VM) run() (Value, error) {
 			frame.SP++
 			localVal := frame.Locals[localIdx]
 			if localVal == nil {
-				varName := ""
-				if localIdx < len(frame.Code.VarNames) {
-					varName = frame.Code.VarNames[localIdx]
-				}
-				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+				return nil, unboundLocalError(frame, localIdx)
 			}
 			frame.Stack[frame.SP] = localVal
 			frame.SP++
@@ -1567,15 +1259,12 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			result := vm.compareOp(op, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
+			if handled, r, err := vm.checkCurrentException(); handled {
 				if err != nil {
 					return nil, err
 				}
-				if result != nil {
-					return result, nil
+				if r != nil {
+					return r, nil
 				}
 				break
 			}
@@ -1588,15 +1277,12 @@ func (vm *VM) run() (Value, error) {
 			b := vm.pop()
 			a := vm.pop()
 			result := vm.compareOp(op, a, b)
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				result, err := vm.handleException(exc)
+			if handled, r, err := vm.checkCurrentException(); handled {
 				if err != nil {
 					return nil, err
 				}
-				if result != nil {
-					return result, nil
+				if r != nil {
+					return r, nil
 				}
 				break
 			}
@@ -2521,17 +2207,8 @@ func (vm *VM) run() (Value, error) {
 
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
-			if vm.currentException != nil {
-				exc := vm.currentException
-				vm.currentException = nil
-				// Try to find an exception handler
-				result, err := vm.handleException(exc)
-				if err != nil {
-					// No handler found, propagate exception
-					return nil, err
-				}
-				// Handler found, continue execution
-				_ = result
+			if _, _, err := vm.checkCurrentException(); err != nil {
+				return nil, err
 			}
 
 		case OpExceptionMatch:
@@ -2761,6 +2438,34 @@ func (vm *VM) peek(n int) Value {
 		panic("stack underflow: invalid peek index")
 	}
 	return vm.frame.Stack[idx]
+}
+
+// unboundLocalError returns an UnboundLocalError for the given local variable index.
+func unboundLocalError(frame *Frame, index int) error {
+	varName := ""
+	if index < len(frame.Code.VarNames) {
+		varName = frame.Code.VarNames[index]
+	}
+	return fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+}
+
+// checkCurrentException handles the current exception if present.
+// Returns (handled, result, err):
+//   - handled=false: no exception was pending, continue normally
+//   - handled=true, err!=nil: exception not caught, caller should return nil, err
+//   - handled=true, result!=nil: exception caught in outer frame, caller should return result, nil
+//   - handled=true, result==nil, err==nil: exception caught in current frame, caller should break
+func (vm *VM) checkCurrentException() (bool, Value, error) {
+	if vm.currentException == nil {
+		return false, nil, nil
+	}
+	exc := vm.currentException
+	vm.currentException = nil
+	result, err := vm.handleException(exc)
+	if err != nil {
+		return true, nil, err
+	}
+	return true, result, nil
 }
 
 // Run executes Python source code

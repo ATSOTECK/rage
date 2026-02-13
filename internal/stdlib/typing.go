@@ -424,8 +424,7 @@ func (t *PyTypeVar) String() string { return fmt.Sprintf("~%s", t.Name) }
 
 // typing.TypeVar(name, *constraints, bound=None, covariant=False, contravariant=False)
 func typingTypeVar(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("TypeVar() requires at least 1 argument")
+	if !vm.RequireArgs("TypeVar", 1) {
 		return 0
 	}
 
@@ -483,8 +482,7 @@ func (p *PyParamSpec) Type() string   { return "ParamSpec" }
 func (p *PyParamSpec) String() string { return fmt.Sprintf("~%s", p.Name) }
 
 func typingParamSpec(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("ParamSpec() requires at least 1 argument")
+	if !vm.RequireArgs("ParamSpec", 1) {
 		return 0
 	}
 
@@ -529,8 +527,7 @@ func (t *PyTypeVarTuple) Type() string   { return "TypeVarTuple" }
 func (t *PyTypeVarTuple) String() string { return fmt.Sprintf("*%s", t.Name) }
 
 func typingTypeVarTuple(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("TypeVarTuple() requires at least 1 argument")
+	if !vm.RequireArgs("TypeVarTuple", 1) {
 		return 0
 	}
 
@@ -595,8 +592,7 @@ func typingProtocol(vm *runtime.VM) int {
 
 // typing.NewType(name, tp) - creates a distinct type
 func typingNewType(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("NewType() requires 2 arguments")
+	if !vm.RequireArgs("NewType", 2) {
 		return 0
 	}
 
@@ -605,8 +601,7 @@ func typingNewType(vm *runtime.VM) int {
 
 	// Create a callable that just returns its argument (NewType is a no-op at runtime)
 	newType := runtime.NewGoFunction(name, func(vm *runtime.VM) int {
-		if vm.GetTop() < 1 {
-			vm.RaiseError("%s() requires 1 argument", name)
+		if !vm.RequireArgs(name, 1) {
 			return 0
 		}
 		vm.Push(vm.Get(1))
@@ -626,8 +621,7 @@ func typingNewType(vm *runtime.VM) int {
 
 // typing.NamedTuple(typename, fields) - creates a named tuple type
 func typingNamedTuple(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("NamedTuple() requires at least 1 argument")
+	if !vm.RequireArgs("NamedTuple", 1) {
 		return 0
 	}
 
@@ -696,8 +690,7 @@ func typingNamedTuple(vm *runtime.VM) int {
 
 // typing.TypedDict(typename, fields) - creates a typed dictionary class
 func typingTypedDict(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("TypedDict() requires at least 1 argument")
+	if !vm.RequireArgs("TypedDict", 1) {
 		return 0
 	}
 
@@ -730,8 +723,7 @@ func typingTypedDict(vm *runtime.VM) int {
 
 // typing.cast(typ, val) - cast a value to a type (no-op at runtime)
 func typingCast(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("cast() requires 2 arguments")
+	if !vm.RequireArgs("cast", 2) {
 		return 0
 	}
 
@@ -798,8 +790,7 @@ func typingIsTypedDict(vm *runtime.VM) int {
 
 // typing.overload - decorator for overloaded functions (no-op at runtime)
 func typingOverload(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("overload() requires 1 argument")
+	if !vm.RequireArgs("overload", 1) {
 		return 0
 	}
 	// Return the function unchanged
@@ -809,8 +800,7 @@ func typingOverload(vm *runtime.VM) int {
 
 // typing.final - decorator marking a method/class as final
 func typingFinal(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("final() requires 1 argument")
+	if !vm.RequireArgs("final", 1) {
 		return 0
 	}
 	// Return the argument unchanged
@@ -820,8 +810,7 @@ func typingFinal(vm *runtime.VM) int {
 
 // typing.no_type_check - decorator to skip type checking
 func typingNoTypeCheck(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("no_type_check() requires 1 argument")
+	if !vm.RequireArgs("no_type_check", 1) {
 		return 0
 	}
 	// Return the argument unchanged
@@ -831,8 +820,7 @@ func typingNoTypeCheck(vm *runtime.VM) int {
 
 // typing.no_type_check_decorator - decorator factory
 func typingNoTypeCheckDecorator(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("no_type_check_decorator() requires 1 argument")
+	if !vm.RequireArgs("no_type_check_decorator", 1) {
 		return 0
 	}
 	// Return the argument unchanged
@@ -842,8 +830,7 @@ func typingNoTypeCheckDecorator(vm *runtime.VM) int {
 
 // typing.runtime_checkable - decorator for runtime-checkable protocols
 func typingRuntimeCheckable(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("runtime_checkable() requires 1 argument")
+	if !vm.RequireArgs("runtime_checkable", 1) {
 		return 0
 	}
 	// Return the argument unchanged
@@ -855,8 +842,7 @@ func typingRuntimeCheckable(vm *runtime.VM) int {
 func typingDataclassTransform(vm *runtime.VM) int {
 	// Return an identity decorator
 	decorator := runtime.NewGoFunction("dataclass_transform", func(vm *runtime.VM) int {
-		if vm.GetTop() < 1 {
-			vm.RaiseError("dataclass_transform() decorator requires 1 argument")
+		if !vm.RequireArgs("dataclass_transform", 1) {
 			return 0
 		}
 		vm.Push(vm.Get(1))
@@ -868,8 +854,7 @@ func typingDataclassTransform(vm *runtime.VM) int {
 
 // typing.override - decorator marking a method as an override
 func typingOverride(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("override() requires 1 argument")
+	if !vm.RequireArgs("override", 1) {
 		return 0
 	}
 	// Return the argument unchanged
@@ -879,8 +864,7 @@ func typingOverride(vm *runtime.VM) int {
 
 // typing.reveal_type(obj) - reveal the inferred type of an expression
 func typingRevealType(vm *runtime.VM) int {
-	if vm.GetTop() < 1 {
-		vm.RaiseError("reveal_type() requires 1 argument")
+	if !vm.RequireArgs("reveal_type", 1) {
 		return 0
 	}
 	// At runtime, just return the value
@@ -890,8 +874,7 @@ func typingRevealType(vm *runtime.VM) int {
 
 // typing.assert_type(val, typ) - assert that val has the specified type
 func typingAssertType(vm *runtime.VM) int {
-	if vm.GetTop() < 2 {
-		vm.RaiseError("assert_type() requires 2 arguments")
+	if !vm.RequireArgs("assert_type", 2) {
 		return 0
 	}
 	// At runtime, just return the value
