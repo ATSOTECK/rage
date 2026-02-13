@@ -23,14 +23,13 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 
 	case *PyClass:
 		// Check for custom metaclass __call__ override
-		if fn.Metaclass != nil {
+		typeClass, _ := vm.builtins["type"].(*PyClass)
+		if fn.Metaclass != nil && fn.Metaclass != typeClass {
 			for _, cls := range fn.Metaclass.Mro {
+				if cls == typeClass {
+					break
+				}
 				if callMethod, ok := cls.Dict["__call__"]; ok {
-					// Skip if this is the base 'type' class (default behavior)
-					if cls.Name == "type" {
-						break
-					}
-					// Invoke metaclass __call__ with (cls, *args, **kwargs)
 					mcArgs := append([]Value{fn}, args...)
 					switch cm := callMethod.(type) {
 					case *PyFunction:
@@ -42,91 +41,7 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 			}
 		}
 
-		// Check for abstract methods - prevent instantiation
-		if abstractMethods, ok := fn.Dict["__abstractmethods__"]; ok {
-			if absList, ok := abstractMethods.(*PyList); ok && len(absList.Items) > 0 {
-				names := make([]string, len(absList.Items))
-				for i, item := range absList.Items {
-					if s, ok := item.(*PyString); ok {
-						names[i] = s.Value
-					}
-				}
-				// Sort for consistent error messages
-				for i := 0; i < len(names); i++ {
-					for j := i + 1; j < len(names); j++ {
-						if names[i] > names[j] {
-							names[i], names[j] = names[j], names[i]
-						}
-					}
-				}
-				plural := ""
-				if len(names) > 1 {
-					plural = "s"
-				}
-				methodList := names[0]
-				for k := 1; k < len(names); k++ {
-					if k == len(names)-1 {
-						methodList += " and " + names[k]
-					} else {
-						methodList += ", " + names[k]
-					}
-				}
-				return nil, fmt.Errorf("TypeError: Can't instantiate abstract class %s with abstract method%s %s", fn.Name, plural, methodList)
-			}
-		}
-
-		// Step 1: Call __new__ to create the instance
-		var instance Value
-		newFound := false
-		for _, cls := range fn.Mro {
-			if newMethod, ok := cls.Dict["__new__"]; ok {
-				newArgs := append([]Value{fn}, args...)
-				var err error
-				switch nm := newMethod.(type) {
-				case *PyFunction:
-					instance, err = vm.callFunction(nm, newArgs, kwargs)
-				case *PyBuiltinFunc:
-					instance, err = nm.Fn(newArgs, kwargs)
-				case *PyStaticMethod:
-					// __new__ may be explicitly decorated with @staticmethod
-					instance, err = vm.call(nm.Func, newArgs, kwargs)
-				}
-				if err != nil {
-					return nil, err
-				}
-				newFound = true
-				break
-			}
-		}
-		if !newFound {
-			// Fallback (shouldn't happen if object is always in MRO)
-			instance = &PyInstance{Class: fn, Dict: make(map[string]Value)}
-		}
-
-		// Step 2: If __new__ returned an instance of this class, call __init__
-		if inst, ok := instance.(*PyInstance); ok && inst.Class == fn {
-			// Special handling for exception classes - set args attribute
-			if vm.isExceptionClass(fn) {
-				tupleItems := make([]Value, len(args))
-				copy(tupleItems, args)
-				inst.Dict["args"] = &PyTuple{Items: tupleItems}
-			}
-
-			// Look for __init__ in class MRO
-			for _, cls := range fn.Mro {
-				if init, ok := cls.Dict["__init__"]; ok {
-					if initFn, ok := init.(*PyFunction); ok {
-						allArgs := append([]Value{inst}, args...)
-						_, err := vm.callFunction(initFn, allArgs, kwargs)
-						if err != nil {
-							return nil, err
-						}
-					}
-					break
-				}
-			}
-		}
-		return instance, nil
+		return vm.defaultClassCall(fn, args, kwargs)
 
 	case *PyUserData:
 		// Check for __call__ method in metatable
@@ -279,6 +194,96 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	}
 
 	return result, err
+}
+
+// defaultClassCall implements the default class instantiation logic:
+// abstract check → __new__ → __init__
+func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Value) (Value, error) {
+	// Check for abstract methods - prevent instantiation
+	if abstractMethods, ok := fn.Dict["__abstractmethods__"]; ok {
+		if absList, ok := abstractMethods.(*PyList); ok && len(absList.Items) > 0 {
+			names := make([]string, len(absList.Items))
+			for i, item := range absList.Items {
+				if s, ok := item.(*PyString); ok {
+					names[i] = s.Value
+				}
+			}
+			// Sort for consistent error messages
+			for i := 0; i < len(names); i++ {
+				for j := i + 1; j < len(names); j++ {
+					if names[i] > names[j] {
+						names[i], names[j] = names[j], names[i]
+					}
+				}
+			}
+			plural := ""
+			if len(names) > 1 {
+				plural = "s"
+			}
+			methodList := names[0]
+			for k := 1; k < len(names); k++ {
+				if k == len(names)-1 {
+					methodList += " and " + names[k]
+				} else {
+					methodList += ", " + names[k]
+				}
+			}
+			return nil, fmt.Errorf("TypeError: Can't instantiate abstract class %s with abstract method%s %s", fn.Name, plural, methodList)
+		}
+	}
+
+	// Step 1: Call __new__ to create the instance
+	var instance Value
+	newFound := false
+	for _, cls := range fn.Mro {
+		if newMethod, ok := cls.Dict["__new__"]; ok {
+			newArgs := append([]Value{fn}, args...)
+			var err error
+			switch nm := newMethod.(type) {
+			case *PyFunction:
+				instance, err = vm.callFunction(nm, newArgs, kwargs)
+			case *PyBuiltinFunc:
+				instance, err = nm.Fn(newArgs, kwargs)
+			case *PyStaticMethod:
+				// __new__ may be explicitly decorated with @staticmethod
+				instance, err = vm.call(nm.Func, newArgs, kwargs)
+			}
+			if err != nil {
+				return nil, err
+			}
+			newFound = true
+			break
+		}
+	}
+	if !newFound {
+		// Fallback (shouldn't happen if object is always in MRO)
+		instance = &PyInstance{Class: fn, Dict: make(map[string]Value)}
+	}
+
+	// Step 2: If __new__ returned an instance of this class, call __init__
+	if inst, ok := instance.(*PyInstance); ok && inst.Class == fn {
+		// Special handling for exception classes - set args attribute
+		if vm.isExceptionClass(fn) {
+			tupleItems := make([]Value, len(args))
+			copy(tupleItems, args)
+			inst.Dict["args"] = &PyTuple{Items: tupleItems}
+		}
+
+		// Look for __init__ in class MRO
+		for _, cls := range fn.Mro {
+			if init, ok := cls.Dict["__init__"]; ok {
+				if initFn, ok := init.(*PyFunction); ok {
+					allArgs := append([]Value{inst}, args...)
+					_, err := vm.callFunction(initFn, allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
+				}
+				break
+			}
+		}
+	}
+	return instance, nil
 }
 
 // createFunctionFrame creates a new frame for a function call without executing it

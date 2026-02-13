@@ -35,11 +35,12 @@ func makeRegisterMethod(owner *runtime.PyClass) *runtime.PyBuiltinFunc {
 func InitAbcModule() {
 	runtime.RegisterModule("abc", func(vm *runtime.VM) *runtime.PyModule {
 		objectClass := vm.GetBuiltin("object").(*runtime.PyClass)
+		typeClass := vm.GetBuiltin("type").(*runtime.PyClass)
 
-		// Create ABCMeta class (marker for metaclass=ABCMeta usage)
+		// Create ABCMeta class inheriting from type (the metaclass)
 		abcMetaClass := &runtime.PyClass{
 			Name:  "ABCMeta",
-			Bases: []*runtime.PyClass{objectClass},
+			Bases: []*runtime.PyClass{typeClass},
 			Dict:  make(map[string]runtime.Value),
 			IsABC: true,
 		}
