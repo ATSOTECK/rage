@@ -76,6 +76,19 @@ func (v FloatValue) GoValue() any             { return v.value }
 func (v FloatValue) Float() float64           { return v.value }
 func (v FloatValue) toRuntime() runtime.Value { return runtime.NewFloat(v.value) }
 
+// ComplexValue represents a Python complex
+type ComplexValue struct {
+	real float64
+	imag float64
+}
+
+func (v ComplexValue) Type() string             { return "complex" }
+func (v ComplexValue) String() string           { return runtime.MakeComplex(v.real, v.imag).String() }
+func (v ComplexValue) GoValue() any             { return complex(v.real, v.imag) }
+func (v ComplexValue) Real() float64            { return v.real }
+func (v ComplexValue) Imag() float64            { return v.imag }
+func (v ComplexValue) toRuntime() runtime.Value { return runtime.NewComplex(v.real, v.imag) }
+
 // StringValue represents a Python str
 type StringValue struct {
 	value string
@@ -227,6 +240,11 @@ func Float(v float64) Value {
 	return FloatValue{value: v}
 }
 
+// Complex creates a Python complex value
+func Complex(real, imag float64) Value {
+	return ComplexValue{real: real, imag: imag}
+}
+
 // String creates a Python str value
 func String(v string) Value {
 	return StringValue{value: v}
@@ -297,6 +315,10 @@ func FromGo(v any) Value {
 		return Float(float64(val))
 	case float64:
 		return Float(val)
+	case complex64:
+		return ComplexValue{real: float64(real(val)), imag: float64(imag(val))}
+	case complex128:
+		return ComplexValue{real: real(val), imag: imag(val)}
 	case string:
 		return String(val)
 	case []any:
@@ -341,6 +363,12 @@ func IsInt(v Value) bool {
 // IsFloat returns true if the value is a float
 func IsFloat(v Value) bool {
 	_, ok := v.(FloatValue)
+	return ok
+}
+
+// IsComplex returns true if the value is a complex
+func IsComplex(v Value) bool {
+	_, ok := v.(ComplexValue)
 	return ok
 }
 
@@ -404,6 +432,14 @@ func AsFloat(v Value) (float64, bool) {
 		return float64(iv.value), true
 	}
 	return 0, false
+}
+
+// AsComplex returns the complex value or (0,0) if not a complex
+func AsComplex(v Value) (real, imag float64, ok bool) {
+	if cv, cOk := v.(ComplexValue); cOk {
+		return cv.real, cv.imag, true
+	}
+	return 0, 0, false
 }
 
 // AsString returns the string value or "" if not a string
@@ -473,6 +509,8 @@ func fromRuntime(v runtime.Value) Value {
 		return Int(val.Value)
 	case *runtime.PyFloat:
 		return Float(val.Value)
+	case *runtime.PyComplex:
+		return ComplexValue{real: val.Real, imag: val.Imag}
 	case *runtime.PyString:
 		return String(val.Value)
 	case *runtime.PyList:

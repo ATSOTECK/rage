@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -194,6 +196,73 @@ func (vm *VM) initBuiltins() {
 				return nil, err
 			}
 			return &PyFloat{Value: f}, nil
+		},
+	}
+
+	vm.builtins["complex"] = &PyBuiltinFunc{
+		Name: "complex",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) == 0 {
+				return MakeComplex(0, 0), nil
+			}
+
+			// Single string argument: parse complex from string
+			if len(args) == 1 {
+				if s, ok := args[0].(*PyString); ok {
+					return parseComplexString(s.Value)
+				}
+			}
+
+			// String not allowed with 2 args
+			if len(args) == 2 {
+				if _, ok := args[0].(*PyString); ok {
+					return nil, fmt.Errorf("TypeError: complex() can't take second arg if first is a string")
+				}
+				if _, ok := args[1].(*PyString); ok {
+					return nil, fmt.Errorf("TypeError: complex() second arg can't be a string")
+				}
+			}
+
+			// Convert real part
+			realPart := 0.0
+			imagPart := 0.0
+			if len(args) >= 1 {
+				switch v := args[0].(type) {
+				case *PyInt:
+					realPart = float64(v.Value)
+				case *PyFloat:
+					realPart = v.Value
+				case *PyBool:
+					if v.Value {
+						realPart = 1
+					}
+				case *PyComplex:
+					realPart = v.Real
+					imagPart = v.Imag
+				default:
+					return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
+				}
+			}
+			// Convert imag part
+			if len(args) >= 2 {
+				switch v := args[1].(type) {
+				case *PyInt:
+					imagPart += float64(v.Value)
+				case *PyFloat:
+					imagPart += v.Value
+				case *PyBool:
+					if v.Value {
+						imagPart += 1
+					}
+				case *PyComplex:
+					// complex(a, b) where b is complex: real += -b.Imag, imag += b.Real
+					realPart -= v.Imag
+					imagPart += v.Real
+				default:
+					return nil, fmt.Errorf("TypeError: complex() second argument must be a number, not '%s'", vm.typeName(args[1]))
+				}
+			}
+			return MakeComplex(realPart, imagPart), nil
 		},
 	}
 
@@ -430,6 +499,8 @@ func (vm *VM) initBuiltins() {
 					return typeName == "int" || typeName == "object"
 				case *PyFloat:
 					return typeName == "float" || typeName == "object"
+				case *PyComplex:
+					return typeName == "complex" || typeName == "object"
 				case *PyString:
 					return typeName == "str" || typeName == "object"
 				case *PyList:
@@ -529,6 +600,8 @@ func (vm *VM) initBuiltins() {
 				return v, nil
 			case *PyFloat:
 				return &PyFloat{Value: math.Abs(v.Value)}, nil
+			case *PyComplex:
+				return &PyFloat{Value: math.Sqrt(v.Real*v.Real + v.Imag*v.Imag)}, nil
 			case *PyInstance:
 				// Check for __abs__ method
 				if result, found, err := vm.callDunder(v, "__abs__"); found {
@@ -2039,6 +2112,76 @@ func (vm *VM) initBuiltins() {
 
 	// Initialize exception class hierarchy
 	vm.initExceptionClasses()
+}
+
+// parseComplexString parses a string like "1+2j", "3j", "-1-2j", "1", etc. into a PyComplex
+func parseComplexString(s string) (*PyComplex, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("ValueError: complex() arg is a malformed string")
+	}
+
+	// Remove surrounding parens if present
+	if len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
+		s = s[1 : len(s)-1]
+		s = strings.TrimSpace(s)
+	}
+
+	// Pure imaginary: ends with 'j' or 'J'
+	if s[len(s)-1] == 'j' || s[len(s)-1] == 'J' {
+		body := s[:len(s)-1]
+		if body == "" || body == "+" {
+			return MakeComplex(0, 1), nil
+		}
+		if body == "-" {
+			return MakeComplex(0, -1), nil
+		}
+
+		// Find the split point between real and imaginary parts
+		// Look for + or - that is NOT after e/E (scientific notation)
+		splitIdx := -1
+		for i := len(body) - 1; i > 0; i-- {
+			if (body[i] == '+' || body[i] == '-') && body[i-1] != 'e' && body[i-1] != 'E' {
+				splitIdx = i
+				break
+			}
+		}
+
+		if splitIdx == -1 {
+			// Pure imaginary like "3j" or "-3j"
+			imag, err := strconv.ParseFloat(body, 64)
+			if err != nil {
+				return nil, fmt.Errorf("ValueError: complex() arg is a malformed string")
+			}
+			return MakeComplex(0, imag), nil
+		}
+
+		// Has both real and imaginary: "1+2j" or "1-2j"
+		realStr := body[:splitIdx]
+		imagStr := body[splitIdx:]
+		if imagStr == "+" {
+			imagStr = "+1"
+		} else if imagStr == "-" {
+			imagStr = "-1"
+		}
+
+		real, err := strconv.ParseFloat(realStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ValueError: complex() arg is a malformed string")
+		}
+		imag, err := strconv.ParseFloat(imagStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ValueError: complex() arg is a malformed string")
+		}
+		return MakeComplex(real, imag), nil
+	}
+
+	// No 'j' — pure real
+	real, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, fmt.Errorf("ValueError: complex() arg is a malformed string")
+	}
+	return MakeComplex(real, 0), nil
 }
 
 // extractSlots checks classDict for __slots__ and returns the slot names.

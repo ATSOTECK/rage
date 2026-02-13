@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/ATSOTECK/rage/internal/model"
 	"github.com/ATSOTECK/rage/internal/runtime"
@@ -877,6 +878,11 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 	case *model.FloatLit:
 		val, _ := strconv.ParseFloat(e.Value, 64)
 		c.emitLoadConst(val)
+
+	case *model.ImaginaryLit:
+		s := strings.TrimRight(e.Value, "jJ")
+		imag, _ := strconv.ParseFloat(s, 64)
+		c.emitLoadConst(runtime.MakeComplex(0, imag))
 
 	case *model.StringLit:
 		c.emitLoadConst(e.Value)
