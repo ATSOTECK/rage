@@ -5,6 +5,10 @@
 RAGE is an embeddable Python 3.14 runtime written in Go. It allows you to run Python code directly from your Go
 applications without any external dependencies or CGO.
 
+RAGE comes with optional batteries included. If you wan't some of the python standard library there are many modules you can use.
+If you don't want to use the python standard library at all you don't have to. If you only want to use a few modules from the
+standard library you can pick and choose which modules are made available to scripts.
+
 ## Features
 
 - Pure Go implementation - no CGO, no external Python installation required
@@ -19,6 +23,11 @@ applications without any external dependencies or CGO.
 ```bash
 go get github.com/ATSOTECK/rage
 ```
+
+## Tests
+- **Unit tests**: `go test ./...`
+- **Integration tests**: 89 scripts with 1876 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, and more
+  - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
 
@@ -317,7 +326,7 @@ RAGE is under active development. Currently supported:
 
 ### Implemented
 - Data types: None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set, frozenset, range, slice
-- Operators: arithmetic, comparison, logical, bitwise, in-place operations
+- Operators: arithmetic, comparison, logical, bitwise, matrix multiplication (`@`), in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
 - Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`
@@ -331,12 +340,11 @@ RAGE is under active development. Currently supported:
 - Walrus operator: assignment expressions (`:=`)
 - Extended unpacking: `a, *rest, b = [1, 2, 3, 4]`
 - Descriptor protocol: `__get__`, `__set__`, `__delete__` (data descriptors, non-data descriptors, class-level access)
-- Dunder methods for custom classes: `__new__`, `__init__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__eq__`, `__lt__`, etc. including reflected variants)
+- Dunder methods for custom classes: `__new__`, `__init__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__matmul__`, `__eq__`, `__lt__`, etc. including reflected variants)
 - Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
 - Full async/await - async generators, async context managers (basic support via asyncio module)
-- Matrix multiplication `@` operator
 
 ### Security Notes
 Reflection builtins (`globals`, `locals`, `compile`, `exec`, `eval`) are opt-in and disabled by default. Enable them explicitly if needed:

@@ -147,6 +147,7 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		OpBinaryFloorDiv: {"__floordiv__", "__rfloordiv__"},
 		OpBinaryModulo:   {"__mod__", "__rmod__"},
 		OpBinaryPower:    {"__pow__", "__rpow__"},
+		OpBinaryMatMul:   {"__matmul__", "__rmatmul__"},
 		OpBinaryAnd:      {"__and__", "__rand__"},
 		OpBinaryOr:       {"__or__", "__ror__"},
 		OpBinaryXor:      {"__xor__", "__rxor__"},
