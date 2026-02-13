@@ -20,4 +20,5 @@ func InitAllModules() {
 	InitItertoolsModule()
 	InitFunctoolsModule()
 	InitBase64Module()
+	InitAbcModule()
 }

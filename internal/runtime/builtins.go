@@ -469,7 +469,18 @@ func (vm *VM) initBuiltins() {
 			checkClass := func(cls *PyClass) bool {
 				switch o := obj.(type) {
 				case *PyInstance:
-					return vm.isInstanceOf(o, cls)
+					if vm.isInstanceOf(o, cls) {
+						return true
+					}
+					// Check registered virtual subclasses
+					if len(cls.RegisteredSubclasses) > 0 {
+						for _, reg := range cls.RegisteredSubclasses {
+							if vm.isInstanceOf(o, reg) {
+								return true
+							}
+						}
+					}
+					return false
 				case *PyException:
 					if vm.isExceptionClass(cls) {
 						return vm.exceptionMatches(o, cls)
@@ -1322,6 +1333,16 @@ func (vm *VM) initBuiltins() {
 							return True, nil
 						}
 					}
+					// Check registered virtual subclasses
+					if len(target.RegisteredSubclasses) > 0 {
+						for _, reg := range target.RegisteredSubclasses {
+							for _, mroClass := range cls.Mro {
+								if mroClass == reg {
+									return True, nil
+								}
+							}
+						}
+					}
 					return False, nil
 				case *PyBuiltinFunc:
 					return vm.toValue(builtinSubclass(clsName, target.Name)), nil
@@ -1415,11 +1436,80 @@ func (vm *VM) initBuiltins() {
 			}
 
 			// Build MRO using C3 linearization for proper multiple inheritance
-			mro, err := vm.computeC3MRO(class, bases)
+			mro, err := vm.ComputeC3MRO(class, bases)
 			if err != nil {
 				return nil, err
 			}
 			class.Mro = mro
+
+			// Check if this class should use ABC abstract method checking
+			// via metaclass=ABCMeta kwarg or inheriting from an ABC class
+			if mc, ok := kwargs["metaclass"]; ok {
+				if mcClass, ok := mc.(*PyClass); ok && mcClass.IsABC {
+					class.IsABC = true
+				}
+			}
+			if !class.IsABC {
+				for _, base := range bases {
+					if base.IsABC {
+						class.IsABC = true
+						break
+					}
+				}
+			}
+
+			// Collect abstract methods if this is an ABC class
+			if class.IsABC {
+				abstractMethods := make(map[string]bool)
+				// Scan MRO (excluding current class) for abstract methods
+				for _, cls := range mro[1:] {
+					for name, val := range cls.Dict {
+						if isAbstractValue(val) {
+							abstractMethods[name] = true
+						}
+					}
+				}
+				// Scan current class: abstract methods add, concrete methods remove
+				for name, val := range classDict {
+					if isAbstractValue(val) {
+						abstractMethods[name] = true
+					} else {
+						delete(abstractMethods, name)
+					}
+				}
+				// Store as a PySet of strings for the instantiation guard
+				if len(abstractMethods) > 0 {
+					items := make([]Value, 0, len(abstractMethods))
+					for name := range abstractMethods {
+						items = append(items, &PyString{Value: name})
+					}
+					class.Dict["__abstractmethods__"] = &PyList{Items: items}
+				}
+
+				// Inject register() method for ABC classes (if not already defined)
+				if _, hasRegister := class.Dict["register"]; !hasRegister {
+					thisClass := class // capture for closure
+					class.Dict["register"] = &PyBuiltinFunc{
+						Name: "register",
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							if len(args) != 1 {
+								return nil, fmt.Errorf("TypeError: register() takes exactly 1 argument (%d given)", len(args))
+							}
+							subcls, ok := args[0].(*PyClass)
+							if !ok {
+								return nil, fmt.Errorf("TypeError: register() argument must be a class")
+							}
+							for _, existing := range thisClass.RegisteredSubclasses {
+								if existing == subcls {
+									return subcls, nil
+								}
+							}
+							thisClass.RegisteredSubclasses = append(thisClass.RegisteredSubclasses, subcls)
+							return subcls, nil
+						},
+					}
+				}
+			}
 
 			// Populate the __class__ cell if present (for zero-argument super() support)
 			// The __class__ cell is created by the compiler when methods use super()
@@ -1760,9 +1850,9 @@ func (vm *VM) initExceptionClasses() {
 	_ = arithmeticError // We already created ZeroDivisionError above
 }
 
-// computeC3MRO computes the Method Resolution Order using C3 linearization algorithm.
+// ComputeC3MRO computes the Method Resolution Order using C3 linearization algorithm.
 // This properly handles multiple inheritance and detects inconsistent hierarchies.
-func (vm *VM) computeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error) {
+func (vm *VM) ComputeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error) {
 	// Base case: no bases
 	if len(bases) == 0 {
 		return []*PyClass{class}, nil
@@ -1847,6 +1937,27 @@ func (vm *VM) computeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error)
 	}
 
 	return result, nil
+}
+
+// isAbstractValue checks if a value is marked as abstract
+func isAbstractValue(v Value) bool {
+	switch val := v.(type) {
+	case *PyFunction:
+		return val.IsAbstract
+	case *PyProperty:
+		if fn, ok := val.Fget.(*PyFunction); ok {
+			return fn.IsAbstract
+		}
+	case *PyClassMethod:
+		if fn, ok := val.Func.(*PyFunction); ok {
+			return fn.IsAbstract
+		}
+	case *PyStaticMethod:
+		if fn, ok := val.Func.(*PyFunction); ok {
+			return fn.IsAbstract
+		}
+	}
+	return false
 }
 
 // formatBases formats a list of base classes for error messages

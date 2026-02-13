@@ -1243,7 +1243,13 @@ func (c *Compiler) compileLoad(name string) {
 		c.emitArg(runtime.OpLoadFast, sym.Index)
 	case ScopeGlobal, ScopeBuiltin:
 		idx := c.addName(name)
-		c.emitArg(runtime.OpLoadGlobal, idx)
+		// In class scope, use OpLoadName so EnclosingGlobals is checked
+		// (class body's Globals is the class namespace, not module globals)
+		if c.symbolTable.scopeType == ScopeClass {
+			c.emitArg(runtime.OpLoadName, idx)
+		} else {
+			c.emitArg(runtime.OpLoadGlobal, idx)
+		}
 	case ScopeFree:
 		c.emitArg(runtime.OpLoadDeref, sym.Index)
 	case ScopeCell:
@@ -2225,19 +2231,19 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 		c.compileExpr(base)
 	}
 
-	// Compile keywords
-	for _, kw := range s.Keywords {
-		if kw.Arg != nil {
-			c.emitLoadConst(kw.Arg.Name)
-		}
-		c.compileExpr(kw.Value)
-	}
-
-	argc := 2 + len(s.Bases) + len(s.Keywords)*2
+	// Compile keywords (values only, then keyword names tuple)
 	if len(s.Keywords) > 0 {
-		c.emitArg(runtime.OpCallKw, argc)
+		kwNames := make([]string, 0, len(s.Keywords))
+		for _, kw := range s.Keywords {
+			c.compileExpr(kw.Value)
+			if kw.Arg != nil {
+				kwNames = append(kwNames, kw.Arg.Name)
+			}
+		}
+		c.emitLoadConst(kwNames)
+		c.emitArg(runtime.OpCallKw, 2+len(s.Bases)+len(s.Keywords))
 	} else {
-		c.emitArg(runtime.OpCall, argc)
+		c.emitArg(runtime.OpCall, 2+len(s.Bases))
 	}
 
 	// Apply decorators

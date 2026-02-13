@@ -2587,6 +2587,8 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return &PyString{Value: o.Name}, nil
 		case "__doc__":
 			return None, nil
+		case "__isabstractmethod__":
+			return &PyBool{Value: o.IsAbstract}, nil
 		case "__wrapped__":
 			// Check if we have __wrapped__ stored in closure
 			if o.Closure != nil {
