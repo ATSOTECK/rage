@@ -272,9 +272,15 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 		// Look for __init__ in class MRO
 		for _, cls := range fn.Mro {
 			if init, ok := cls.Dict["__init__"]; ok {
-				if initFn, ok := init.(*PyFunction); ok {
-					allArgs := append([]Value{inst}, args...)
+				allArgs := append([]Value{inst}, args...)
+				switch initFn := init.(type) {
+				case *PyFunction:
 					_, err := vm.callFunction(initFn, allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
+				case *PyBuiltinFunc:
+					_, err := initFn.Fn(allArgs, kwargs)
 					if err != nil {
 						return nil, err
 					}

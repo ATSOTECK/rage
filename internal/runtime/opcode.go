@@ -248,6 +248,9 @@ const (
 	// More superinstructions
 	OpLoadConstLoadFast  // Load const then local (arg: packed indices)
 	OpLoadGlobalLoadFast // Load global then local (arg: packed indices)
+
+	// Annotations
+	OpSetupAnnotations // Ensure __annotations__ dict exists in current namespace
 )
 
 // OpcodeNames maps opcodes to their string names for debugging
@@ -427,6 +430,7 @@ var OpcodeNames = map[Opcode]string{
 	OpLenGeneric:         "LEN_GENERIC",
 	OpLoadConstLoadFast:  "LOAD_CONST_LOAD_FAST",
 	OpLoadGlobalLoadFast: "LOAD_GLOBAL_LOAD_FAST",
+	OpSetupAnnotations:   "SETUP_ANNOTATIONS",
 }
 
 func (op Opcode) String() string {
@@ -478,6 +482,8 @@ func init() {
 		OpLoadEmptyList, OpLoadEmptyTuple, OpLoadEmptyDict,
 		// Inline len opcodes (no args - operate on TOS)
 		OpLenList, OpLenString, OpLenTuple, OpLenDict, OpLenGeneric,
+		// Annotations
+		OpSetupAnnotations,
 	}
 	for _, op := range noArgOpcodes {
 		hasArgTable[op] = false

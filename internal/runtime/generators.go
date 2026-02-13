@@ -983,6 +983,11 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpNop:
 		// No operation
 
+	case OpSetupAnnotations:
+		if _, ok := frame.Globals["__annotations__"]; !ok {
+			frame.Globals["__annotations__"] = &PyDict{Items: make(map[Value]Value)}
+		}
+
 	case OpListAppend:
 		val := vm.pop()
 		listIdx := frame.SP - arg

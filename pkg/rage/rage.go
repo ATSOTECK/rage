@@ -49,6 +49,7 @@ const (
 	ModuleFunctools
 	ModuleBase64
 	ModuleAbc
+	ModuleDataclasses
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -71,6 +72,7 @@ var AllModules = []Module{
 	ModuleFunctools,
 	ModuleBase64,
 	ModuleAbc,
+	ModuleDataclasses,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -358,6 +360,8 @@ func initModule(m Module) {
 		stdlib.InitBase64Module()
 	case ModuleAbc:
 		stdlib.InitAbcModule()
+	case ModuleDataclasses:
+		stdlib.InitDataclassesModule()
 	}
 }
 

@@ -667,7 +667,17 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.compileExpr(s.Value)
 			c.compileStore(s.Target)
 		}
-		// Type annotations are not emitted at runtime
+		// In class scope, store annotation in __annotations__ dict
+		if c.symbolTable.scopeType == ScopeClass {
+			if ident, ok := s.Target.(*model.Identifier); ok {
+				// Stack order for STORE_SUBSCR: val, obj, index
+				c.compileExpr(s.Annotation)         // val: the annotation type
+				annIdx := c.addName("__annotations__")
+				c.emitArg(runtime.OpLoadName, annIdx) // obj: __annotations__ dict
+				c.emitLoadConst(ident.Name)           // index: field name string
+				c.emit(runtime.OpStoreSubscr)
+			}
+		}
 
 	case *model.If:
 		c.compileIf(s)
@@ -2203,6 +2213,14 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 	if needsClassCell {
 		classCompiler.symbolTable.Define("__class__")
 		classCompiler.symbolTable.MarkAsCell("__class__")
+	}
+
+	// Check if any statement is an annotated assignment and emit SETUP_ANNOTATIONS
+	for _, stmt := range s.Body {
+		if _, ok := stmt.(*model.AnnAssign); ok {
+			classCompiler.emit(runtime.OpSetupAnnotations)
+			break
+		}
 	}
 
 	// Compile class body
