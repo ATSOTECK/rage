@@ -1799,7 +1799,7 @@ func (vm *VM) initBuiltins() {
 			if !ok {
 				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
 			}
-			// Respect property deleters in MRO
+			// Respect property deleters and custom descriptor __delete__ in MRO
 			for _, cls := range inst.Class.Mro {
 				if clsVal, ok := cls.Dict[name.Value]; ok {
 					if prop, ok := clsVal.(*PyProperty); ok {
@@ -1811,6 +1811,15 @@ func (vm *VM) initBuiltins() {
 							return nil, err
 						}
 						return None, nil
+					}
+					// Check for custom descriptor with __delete__
+					if descInst, ok := clsVal.(*PyInstance); ok {
+						if _, found, err := vm.callDunder(descInst, "__delete__", inst); found {
+							if err != nil {
+								return nil, err
+							}
+							return None, nil
+						}
 					}
 					break
 				}

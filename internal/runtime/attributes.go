@@ -509,6 +509,17 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					return val, nil
 				}
 
+				// Check for custom descriptor with __get__ on class access
+				// Invokes descriptor.__get__(None, owner_class)
+				if inst, ok := val.(*PyInstance); ok {
+					if getResult, found, err := vm.callDunder(inst, "__get__", None, o); found {
+						if err != nil {
+							return nil, err
+						}
+						return getResult, nil
+					}
+				}
+
 				return val, nil
 			}
 		}
@@ -2755,7 +2766,7 @@ func (vm *VM) delAttr(obj Value, name string) error {
 				return err
 			}
 		}
-		// Check for property with deleter in class MRO
+		// Check for property with deleter or custom descriptor __delete__ in class MRO
 		for _, cls := range o.Class.Mro {
 			if clsVal, ok := cls.Dict[name]; ok {
 				if prop, ok := clsVal.(*PyProperty); ok {
@@ -2764,6 +2775,12 @@ func (vm *VM) delAttr(obj Value, name string) error {
 					}
 					_, err := vm.call(prop.Fdel, []Value{o}, nil)
 					return err
+				}
+				// Check for custom descriptor with __delete__
+				if inst, ok := clsVal.(*PyInstance); ok {
+					if _, found, err := vm.callDunder(inst, "__delete__", o); found {
+						return err
+					}
 				}
 				break
 			}
