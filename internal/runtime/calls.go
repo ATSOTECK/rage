@@ -22,6 +22,59 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 		return vm.callFunction(fn.Func, allArgs, kwargs)
 
 	case *PyClass:
+		// Check for custom metaclass __call__ override
+		if fn.Metaclass != nil {
+			for _, cls := range fn.Metaclass.Mro {
+				if callMethod, ok := cls.Dict["__call__"]; ok {
+					// Skip if this is the base 'type' class (default behavior)
+					if cls.Name == "type" {
+						break
+					}
+					// Invoke metaclass __call__ with (cls, *args, **kwargs)
+					mcArgs := append([]Value{fn}, args...)
+					switch cm := callMethod.(type) {
+					case *PyFunction:
+						return vm.callFunction(cm, mcArgs, kwargs)
+					case *PyBuiltinFunc:
+						return cm.Fn(mcArgs, kwargs)
+					}
+				}
+			}
+		}
+
+		// Check for abstract methods - prevent instantiation
+		if abstractMethods, ok := fn.Dict["__abstractmethods__"]; ok {
+			if absList, ok := abstractMethods.(*PyList); ok && len(absList.Items) > 0 {
+				names := make([]string, len(absList.Items))
+				for i, item := range absList.Items {
+					if s, ok := item.(*PyString); ok {
+						names[i] = s.Value
+					}
+				}
+				// Sort for consistent error messages
+				for i := 0; i < len(names); i++ {
+					for j := i + 1; j < len(names); j++ {
+						if names[i] > names[j] {
+							names[i], names[j] = names[j], names[i]
+						}
+					}
+				}
+				plural := ""
+				if len(names) > 1 {
+					plural = "s"
+				}
+				methodList := names[0]
+				for k := 1; k < len(names); k++ {
+					if k == len(names)-1 {
+						methodList += " and " + names[k]
+					} else {
+						methodList += ", " + names[k]
+					}
+				}
+				return nil, fmt.Errorf("TypeError: Can't instantiate abstract class %s with abstract method%s %s", fn.Name, plural, methodList)
+			}
+		}
+
 		// Step 1: Call __new__ to create the instance
 		var instance Value
 		newFound := false

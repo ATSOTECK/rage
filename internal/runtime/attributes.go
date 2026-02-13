@@ -329,8 +329,8 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
 
 	case *PyInstance:
-		// Descriptor protocol: First check class MRO for data descriptors (property with setter)
-		// Data descriptors take precedence over instance dict
+		// Descriptor protocol: First check class MRO for data descriptors
+		// Data descriptors (those with __set__ or __delete__) take precedence over instance dict
 		for _, cls := range o.Class.Mro {
 			if val, ok := cls.Dict[name]; ok {
 				if prop, ok := val.(*PyProperty); ok {
@@ -339,6 +339,18 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 						return nil, fmt.Errorf("property '%s' has no getter", name)
 					}
 					return vm.call(prop.Fget, []Value{obj}, nil)
+				}
+				// Check for custom data descriptors (instances with __get__ and __set__)
+				if inst, ok := val.(*PyInstance); ok {
+					if vm.hasMethod(inst, "__set__") || vm.hasMethod(inst, "__delete__") {
+						// It's a data descriptor - invoke __get__
+						if getResult, found, err := vm.callDunder(inst, "__get__", obj, o.Class); found {
+							if err != nil {
+								return nil, err
+							}
+							return getResult, nil
+						}
+					}
 				}
 			}
 		}
@@ -377,6 +389,17 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				if fn, ok := val.(*PyFunction); ok {
 					return &PyMethod{Func: fn, Instance: obj}, nil
 				}
+
+				// Check for non-data descriptor (instance with __get__ but not __set__)
+				if inst, ok := val.(*PyInstance); ok {
+					if getResult, found, err := vm.callDunder(inst, "__get__", obj, o.Class); found {
+						if err != nil {
+							return nil, err
+						}
+						return getResult, nil
+					}
+				}
+
 				return val, nil
 			}
 		}
@@ -2587,6 +2610,8 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return &PyString{Value: o.Name}, nil
 		case "__doc__":
 			return None, nil
+		case "__isabstractmethod__":
+			return &PyBool{Value: o.IsAbstract}, nil
 		case "__wrapped__":
 			// Check if we have __wrapped__ stored in closure
 			if o.Closure != nil {
@@ -2639,7 +2664,7 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 				return err
 			}
 		}
-		// Check for property with setter in class MRO
+		// Check for data descriptors (property or custom __set__) in class MRO
 		for _, cls := range o.Class.Mro {
 			if clsVal, ok := cls.Dict[name]; ok {
 				if prop, ok := clsVal.(*PyProperty); ok {
@@ -2650,10 +2675,16 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 					_, err := vm.call(prop.Fset, []Value{obj, val}, nil)
 					return err
 				}
-				break // Found in class dict but not a property, fall through to instance assignment
+				// Check for custom data descriptor (instance with __set__)
+				if inst, ok := clsVal.(*PyInstance); ok {
+					if _, found, err := vm.callDunder(inst, "__set__", o, val); found {
+						return err
+					}
+				}
+				break // Found in class dict but not a descriptor, fall through to instance assignment
 			}
 		}
-		// Not a property, set on instance dict
+		// Not a descriptor, set on instance dict
 		o.Dict[name] = val
 		return nil
 	case *PyClass:

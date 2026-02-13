@@ -1,17 +1,17 @@
-github.com/AlDanial/cloc v 2.06  T=0.15 s (1015.5 files/s, 502302.1 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.16 s (1002.7 files/s, 478625.5 lines/s)
 ---------------------------------------------------------------------------------------------------------------
 File                                                                        blank        comment           code
 ---------------------------------------------------------------------------------------------------------------
-./internal/runtime/attributes.go                                               57             98           3061
-./internal/compiler/compiler.go                                               370            342           2320
+./internal/runtime/attributes.go                                               58             98           3084
+./internal/compiler/compiler.go                                               369            344           2325
 ./internal/compiler/parser.go                                                 396             78           2131
 ./internal/runtime/vm.go                                                      222            230           2123
+./internal/runtime/builtins.go                                                119            145           1713
 ./internal/compiler/optimizer.go                                              217            260           1705
-./internal/runtime/builtins.go                                                115            135           1616
 ./internal/runtime/generators.go                                              154            113           1418
 ./internal/runtime/operations.go                                               48             79           1289
 ./internal/stdlib/datetime.go                                                 143             74           1103
-./test/advanced_oop_test.go                                                   159             60           1049
+./test/advanced_oop_test.go                                                   161             59           1048
 ./test/parser_edge_cases_test.go                                              120             66           1013
 ./internal/stdlib/itertools.go                                                163             80            986
 ./test/vm_edge_cases_test.go                                                  132             57            893
@@ -21,20 +21,19 @@ File                                                                        blan
 ./internal/stdlib/csv.go                                                      145             79            837
 ./internal/compiler/optimizer_test.go                                         271             67            832
 ./test/unicode_encoding_test.go                                                89             65            804
-./internal/runtime/types.go                                                   114            110            766
+./internal/runtime/types.go                                                   114            110            769
 ./internal/stdlib/collections.go                                              120             77            761
 ./internal/stdlib/typing.go                                                   120            112            731
-./test/stdlib_test.go                                                         225             26            714
 ./test/file_io_test.go                                                         58             62            684
 ./internal/model/ast.go                                                       154             86            655
 ./internal/runtime/conversions.go                                              28             44            648
+./pkg/rage/rage.go                                                             93            153            640
 ./test/inheritance_test.go                                                    195             61            639
 ./internal/runtime/builtins_reflection.go                                      85             97            638
-./pkg/rage/rage.go                                                             93            153            636
 ./internal/compiler/parser_test.go                                            135              0            629
 ./internal/stdlib/io.go                                                       104             63            614
-./test/error_path_test.go                                                     133             94            603
 ./test/stress_performance_test.go                                              88             64            602
+./test/error_path_test.go                                                     131             87            574
 ./test/integration_test.go                                                    114              0            564
 ./internal/stdlib/functools.go                                                 94             75            540
 ./internal/stdlib/re.go                                                       100             34            522
@@ -45,27 +44,27 @@ File                                                                        blan
 ./test/integration/scripts/66_cpython_property_descriptor.py                  137             59            460
 ./internal/stdlib/json.go                                                      78             36            454
 ./internal/runtime/api.go                                                      97            141            435
+./test/stdlib_test.go                                                          62             20            424
 ./internal/stdlib/base64.go                                                    72             45            398
 ./test/integration/scripts/67_cpython_magic_methods.py                        141             60            394
 ./pkg/rage/value.go                                                            63             63            386
 ./test/integration/scripts/06_exceptions.py                                    49             15            365
 ./test/integration/scripts/74_cpython_class_advanced.py                       125             65            365
 ./internal/compiler/lexer_test.go                                              70              0            362
-./test/bugfix_test.go                                                          71             59            360
 ./test/integration/scripts/64_cpython_inheritance.py                           99             44            353
 ./internal/stdlib/time.go                                                      36             27            351
+./test/bugfix_test.go                                                          69             56            334
 ./test/integration/scripts/65_cpython_generators_advanced.py                  118            112            324
+./internal/runtime/calls.go                                                    39             54            315
 ./test/descriptor_test.go                                                      78             12            307
 ./test/integration/scripts/70_cpython_global_builtins.py                       88             65            294
-./test/integration/integration_test_runner.go                                  51             39            290
-./test/module_test.go                                                          71             20            289
 ./test/exception_test.go                                                       62             15            288
 ./internal/model/token.go                                                      20             10            286
-./internal/runtime/calls.go                                                    38             52            285
 ./test/integration/scripts/61_cpython_list_methods.py                          41             20            278
 ./test/integration/scripts/62_cpython_decorators.py                            75             39            275
 ./test/integration/scripts/69_cpython_tuple_methods.py                         74             57            273
 ./test/integration/scripts/68_cpython_set_methods.py                           69             61            270
+./test/module_test.go                                                          60             18            265
 ./test/integration/scripts/42_cpython_classes.py                               23             22            261
 ./test/integration/scripts/39_cpython_builtins.py                              28             32            260
 ./test/integration/scripts/15_match_statements.py                              42              3            257
@@ -73,8 +72,9 @@ File                                                                        blan
 ./internal/stdlib/random.go                                                    42             24            254
 ./test/integration/scripts/24_multiple_inheritance.py                          82             63            250
 ./test/integration/scripts/60_cpython_dict_methods.py                          37             22            249
+./test/integration/integration_test_runner.go                                  49             38            248
 ./test/integration/scripts/19_typing.py                                        39              2            242
-./test/io_test.go                                                              66              8            239
+./test/io_test.go                                                              66              8            240
 ./test/integration/scripts/56_cpython_exception_edge.py                        26             13            232
 ./test/integration/scripts/08_builtins.py                                      41              3            228
 ./test/integration/scripts/37_cpython_generators.py                            28              4            226
@@ -89,6 +89,7 @@ File                                                                        blan
 ./test/integration/scripts/52_cpython_del.py                                   28             24            198
 ./internal/runtime/module.go                                                   48             56            197
 ./test/integration/scripts/58_cpython_sequence_ops.py                          38             17            194
+./test/integration/scripts/85_abc_module.py                                    76             18            193
 ./internal/stdlib/sys.go                                                       24             32            190
 ./test/integration/scripts/28_cpython_int.py                                   28             13            189
 ./test/integration/scripts/78_class_in_function_scope.py                       17             17            186
@@ -105,6 +106,7 @@ File                                                                        blan
 ./test/integration/scripts/22_reflection_builtins.py                           43             21            167
 ./test/integration/scripts/16_json.py                                          45             13            163
 ./test/integration/scripts/18_datetime.py                                      35              3            162
+./test/integration/scripts/84_operator_overloading.py                          49             12            161
 ./test/integration/scripts/26_frozenset.py                                     27             11            160
 ./test/integration/scripts/57_cpython_numeric_edge.py                          37             18            160
 ./test/integration/scripts/63_cpython_comprehensions.py                        36             21            158
@@ -118,6 +120,7 @@ File                                                                        blan
 ./test/integration/scripts/09_strings.py                                       31              8            135
 ./test/integration/scripts/35_cpython_bool.py                                  20              4            131
 ./test/integration/scripts/36_cpython_range.py                                 23              3            129
+./internal/stdlib/abc.go                                                       11             11            127
 ./test/integration/scripts/14_file_io.py                                       27              3            127
 ./test/integration/scripts/49_cpython_assert.py                                18             14            127
 ./test/integration/scripts/02_operators.py                                     24              2            126
@@ -131,7 +134,10 @@ File                                                                        blan
 ./test/integration/scripts/40_cpython_format.py                                21              9            111
 ./test/integration/scripts/33_cpython_tuple.py                                 18              7            109
 ./test/integration/scripts/54_cpython_membership.py                            22             15            104
+./test/integration/scripts/83_property_descriptor.py                           29              8            104
 ./test/integration/scripts/79_dunder_attrs.py                                  26              9             97
+./test/helpers_test.go                                                          9             11             91
+./test/integration/scripts/82_yield_from.py                                    27             13             91
 ./test/integration/scripts/03_control_flow.py                                  16             13             90
 ./test/integration/scripts/80_extended_unpacking.py                            16              2             89
 ./test/integration/scripts/04_functions.py                                     18              3             85
@@ -139,6 +145,7 @@ File                                                                        blan
 ./test/integration/scripts/78_closure_scoping.py                               20             10             82
 ./test/integration/scripts/01_data_types.py                                    13              2             77
 ./test/integration/scripts/75_tuple_unpacking.py                               13              2             76
+./test/integration/scripts/81_exception_args.py                                20              8             73
 ./internal/runtime/iteration.go                                                 9              9             72
 ./test/integration/scripts/11_stdlib.py                                        17              2             68
 ./test/integration/scripts/dunder_new.py                                       23              8             66
@@ -151,9 +158,9 @@ File                                                                        blan
 ./test/integration/scripts/test_framework.py                                    8              2             36
 ./.github/workflows/ci.yml                                                      8              0             23
 ./test/bench/calc_pi.py                                                         7              5             22
-./internal/stdlib/init.go                                                       1              3             19
+./internal/stdlib/init.go                                                       1              3             20
 ./pkg/rage/doc.go                                                              47            128              1
 ./test/integration/scripts/basic/hello.py                                       0              0              1
 ---------------------------------------------------------------------------------------------------------------
-SUM:                                                                         9676           5910          59599
+SUM:                                                                         9724           5985          60191
 ---------------------------------------------------------------------------------------------------------------

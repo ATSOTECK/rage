@@ -35,3 +35,5 @@ bin
 
 # OS
 .DS_Store
+
+integration_test_runner

@@ -305,21 +305,33 @@ class Circle(Shape):
 c = Circle(2)
 result = c.area()
 `
-	vm := runtime.NewVM()
-	code, errs, panicked := tryCompile(source)
-	if panicked || len(errs) > 0 {
-		t.Skip("ABC not supported")
-		return
-	}
-	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("ABC not implemented: " + err.Error())
-		return
-	}
+	vm := runCodeWithStdlib(t, source)
 	result := vm.GetGlobal("result")
-	if f, ok := result.(*runtime.PyFloat); ok {
-		assert.InDelta(t, 12.566, f.Value, 0.01)
-	}
+	f, ok := result.(*runtime.PyFloat)
+	require.True(t, ok, "expected PyFloat, got %T", result)
+	assert.InDelta(t, 12.566, f.Value, 0.01)
+}
+
+func TestAbstractMethodCannotInstantiate(t *testing.T) {
+	source := `
+from abc import ABC, abstractmethod
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self):
+        pass
+
+try:
+    s = Shape()
+    result = "no error"
+except TypeError as e:
+    result = str(e)
+`
+	vm := runCodeWithStdlib(t, source)
+	result := vm.GetGlobal("result")
+	s, ok := result.(*runtime.PyString)
+	require.True(t, ok)
+	assert.Contains(t, s.Value, "Can't instantiate abstract class Shape")
 }
 
 // =============================================================================
