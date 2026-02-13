@@ -200,7 +200,7 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int) {
 		fmt.Println()
 		for _, r := range passingTests {
 			status := color(colorGreen+colorBold, "✓ PASS")
-			duration := color(colorDim, fmt.Sprintf("%.2fs", r.Duration.Seconds()))
+			duration := color(colorDim, formatDuration(r.Duration))
 			fmt.Printf("%s %s %s (%d tests)\n", status, r.Script, duration, r.Passed)
 		}
 	}
@@ -212,7 +212,7 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int) {
 
 		for _, r := range failingTests {
 			status := color(colorRed+colorBold, "✗ FAIL")
-			duration := color(colorDim, fmt.Sprintf("%.2fs", r.Duration.Seconds()))
+			duration := color(colorDim, formatDuration(r.Duration))
 
 			// Show different info depending on whether script crashed or tests failed
 			if r.Error != "" {
@@ -261,6 +261,17 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int) {
 		failed,
 		color(colorDim, "("+scripts+")"))
 	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
+}
+
+// formatDuration formats a duration as seconds, milliseconds, or microseconds depending on magnitude
+func formatDuration(d time.Duration) string {
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%.0fms", float64(d.Microseconds())/1000.0)
+	}
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
 // formatErrorMessage improves error message readability
