@@ -178,7 +178,7 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 	return results, totalPassed, totalFailed
 }
 
-func printResults(results []ScriptResult, totalPassed, totalFailed int) {
+func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDuration time.Duration) {
 	fmt.Println("\n" + color(colorDim, strings.Repeat("═", 70)))
 	fmt.Println(color(colorBold, "TEST RESULTS"))
 	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
@@ -254,12 +254,15 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int) {
 	failed := color(colorRed, fmt.Sprintf("%d failed", totalFailed))
 	scripts := fmt.Sprintf("%d scripts", len(results))
 
-	fmt.Printf("%s %s  %s, %s  %s\n",
+	totalTime := color(colorDim, fmt.Sprintf("in %s", formatDuration(totalDuration)))
+
+	fmt.Printf("%s %s  %s, %s  %s  %s\n",
 		color(summaryColor, summaryIcon),
 		color(summaryColor, "TOTAL:"),
 		passed,
 		failed,
-		color(colorDim, "("+scripts+")"))
+		color(colorDim, "("+scripts+")"),
+		totalTime)
 	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
 }
 
@@ -337,8 +340,10 @@ func main() {
 
 	// Run tests
 	fmt.Printf("%s Running Python integration tests...\n", color(colorBlue+colorBold, "▶"))
+	totalStart := time.Now()
 	results, totalPassed, totalFailed := runAllTests(scriptsDir)
-	printResults(results, totalPassed, totalFailed)
+	totalDuration := time.Since(totalStart)
+	printResults(results, totalPassed, totalFailed, totalDuration)
 
 	if totalFailed > 0 {
 		os.Exit(1)
