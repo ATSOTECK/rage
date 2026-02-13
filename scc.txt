@@ -1,15 +1,15 @@
-github.com/AlDanial/cloc v 2.06  T=0.16 s (1002.7 files/s, 478625.5 lines/s)
+github.com/AlDanial/cloc v 2.06  T=0.18 s (903.7 files/s, 429711.7 lines/s)
 ---------------------------------------------------------------------------------------------------------------
 File                                                                        blank        comment           code
 ---------------------------------------------------------------------------------------------------------------
-./internal/runtime/attributes.go                                               58             98           3084
+./internal/runtime/attributes.go                                               63            105           3155
 ./internal/compiler/compiler.go                                               369            344           2325
 ./internal/compiler/parser.go                                                 396             78           2131
 ./internal/runtime/vm.go                                                      222            230           2123
-./internal/runtime/builtins.go                                                119            145           1713
+./internal/runtime/builtins.go                                                140            167           1948
 ./internal/compiler/optimizer.go                                              217            260           1705
 ./internal/runtime/generators.go                                              154            113           1418
-./internal/runtime/operations.go                                               48             79           1289
+./internal/runtime/operations.go                                               49             80           1297
 ./internal/stdlib/datetime.go                                                 143             74           1103
 ./test/advanced_oop_test.go                                                   161             59           1048
 ./test/parser_edge_cases_test.go                                              120             66           1013
@@ -21,7 +21,7 @@ File                                                                        blan
 ./internal/stdlib/csv.go                                                      145             79            837
 ./internal/compiler/optimizer_test.go                                         271             67            832
 ./test/unicode_encoding_test.go                                                89             65            804
-./internal/runtime/types.go                                                   114            110            769
+./internal/runtime/types.go                                                   114            111            788
 ./internal/stdlib/collections.go                                              120             77            761
 ./internal/stdlib/typing.go                                                   120            112            731
 ./test/file_io_test.go                                                         58             62            684
@@ -53,9 +53,9 @@ File                                                                        blan
 ./internal/compiler/lexer_test.go                                              70              0            362
 ./test/integration/scripts/64_cpython_inheritance.py                           99             44            353
 ./internal/stdlib/time.go                                                      36             27            351
+./internal/runtime/calls.go                                                    41             57            335
 ./test/bugfix_test.go                                                          69             56            334
 ./test/integration/scripts/65_cpython_generators_advanced.py                  118            112            324
-./internal/runtime/calls.go                                                    39             54            315
 ./test/descriptor_test.go                                                      78             12            307
 ./test/integration/scripts/70_cpython_global_builtins.py                       88             65            294
 ./test/exception_test.go                                                       62             15            288
@@ -120,7 +120,7 @@ File                                                                        blan
 ./test/integration/scripts/09_strings.py                                       31              8            135
 ./test/integration/scripts/35_cpython_bool.py                                  20              4            131
 ./test/integration/scripts/36_cpython_range.py                                 23              3            129
-./internal/stdlib/abc.go                                                       11             11            127
+./internal/stdlib/abc.go                                                       11             11            128
 ./test/integration/scripts/14_file_io.py                                       27              3            127
 ./test/integration/scripts/49_cpython_assert.py                                18             14            127
 ./test/integration/scripts/02_operators.py                                     24              2            126
@@ -135,6 +135,7 @@ File                                                                        blan
 ./test/integration/scripts/33_cpython_tuple.py                                 18              7            109
 ./test/integration/scripts/54_cpython_membership.py                            22             15            104
 ./test/integration/scripts/83_property_descriptor.py                           29              8            104
+./test/integration/scripts/87_slots.py                                         33              9            100
 ./test/integration/scripts/79_dunder_attrs.py                                  26              9             97
 ./test/helpers_test.go                                                          9             11             91
 ./test/integration/scripts/82_yield_from.py                                    27             13             91
@@ -149,6 +150,7 @@ File                                                                        blan
 ./internal/runtime/iteration.go                                                 9              9             72
 ./test/integration/scripts/11_stdlib.py                                        17              2             68
 ./test/integration/scripts/dunder_new.py                                       23              8             66
+./test/integration/scripts/86_metaclass.py                                     25              8             65
 ./test/integration/scripts/10_collections.py                                   16              4             60
 ./internal/utils/ast.go                                                         4              0             58
 ./test/integration/scripts/76_varargs_kwargs.py                                26             13             54
@@ -162,5 +164,5 @@ File                                                                        blan
 ./pkg/rage/doc.go                                                              47            128              1
 ./test/integration/scripts/basic/hello.py                                       0              0              1
 ---------------------------------------------------------------------------------------------------------------
-SUM:                                                                         9724           5985          60191
+SUM:                                                                         9811           6036          60710
 ---------------------------------------------------------------------------------------------------------------
