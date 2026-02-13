@@ -15,7 +15,7 @@ standard library you can pick and choose which modules are made available to scr
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, base64
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, base64, abc, dataclasses
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -26,7 +26,7 @@ go get github.com/ATSOTECK/rage
 
 ## Tests
 - **Unit tests**: `go test ./...`
-- **Integration tests**: 92 scripts with 1909 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, and more
+- **Integration tests**: 93 scripts with 1934 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
