@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/cmplx"
 	"strconv"
 	"strings"
 )
@@ -112,6 +113,17 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 			return MakeInt(-v.Value), nil
 		case *PyFloat:
 			return &PyFloat{Value: -v.Value}, nil
+		case *PyComplex:
+			return MakeComplex(-v.Real, -v.Imag), nil
+		}
+	case OpUnaryPositive:
+		switch v := a.(type) {
+		case *PyInt:
+			return v, nil
+		case *PyFloat:
+			return v, nil
+		case *PyComplex:
+			return MakeComplex(v.Real, v.Imag), nil
 		}
 	case OpUnaryInvert:
 		if v, ok := a.(*PyInt); ok {
@@ -614,6 +626,78 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		}
 	}
 
+	// Complex operations (including promotion from int/float)
+	{
+		var ac, bc *PyComplex
+		aIsComplex := false
+		bIsComplex := false
+
+		if c, ok := a.(*PyComplex); ok {
+			ac = c
+			aIsComplex = true
+		}
+		if c, ok := b.(*PyComplex); ok {
+			bc = c
+			bIsComplex = true
+		}
+
+		// Promote non-complex operand if the other is complex
+		if aIsComplex && !bIsComplex {
+			switch v := b.(type) {
+			case *PyInt:
+				bc = MakeComplex(float64(v.Value), 0)
+				bIsComplex = true
+			case *PyFloat:
+				bc = MakeComplex(v.Value, 0)
+				bIsComplex = true
+			}
+		}
+		if bIsComplex && !aIsComplex {
+			switch v := a.(type) {
+			case *PyInt:
+				ac = MakeComplex(float64(v.Value), 0)
+				aIsComplex = true
+			case *PyFloat:
+				ac = MakeComplex(v.Value, 0)
+				aIsComplex = true
+			}
+		}
+
+		if aIsComplex && bIsComplex {
+			switch op {
+			case OpBinaryAdd:
+				return MakeComplex(ac.Real+bc.Real, ac.Imag+bc.Imag), nil
+			case OpBinarySubtract:
+				return MakeComplex(ac.Real-bc.Real, ac.Imag-bc.Imag), nil
+			case OpBinaryMultiply:
+				return MakeComplex(
+					ac.Real*bc.Real-ac.Imag*bc.Imag,
+					ac.Real*bc.Imag+ac.Imag*bc.Real,
+				), nil
+			case OpBinaryDivide:
+				denom := bc.Real*bc.Real + bc.Imag*bc.Imag
+				if denom == 0 {
+					return nil, fmt.Errorf("ZeroDivisionError: complex division by zero")
+				}
+				return MakeComplex(
+					(ac.Real*bc.Real+ac.Imag*bc.Imag)/denom,
+					(ac.Imag*bc.Real-ac.Real*bc.Imag)/denom,
+				), nil
+			case OpBinaryPower:
+				ca := complex(ac.Real, ac.Imag)
+				cb := complex(bc.Real, bc.Imag)
+				result := cmplx.Pow(ca, cb)
+				return MakeComplex(real(result), imag(result)), nil
+			case OpBinaryFloorDiv:
+				return nil, fmt.Errorf("TypeError: can't take floor of complex number.")
+			case OpBinaryModulo:
+				return nil, fmt.Errorf("TypeError: can't mod complex numbers.")
+			case OpBinaryLShift, OpBinaryRShift, OpBinaryAnd, OpBinaryOr, OpBinaryXor:
+				return nil, fmt.Errorf("TypeError: unsupported operand type(s) for %s: 'complex' and 'complex'", op.String())
+			}
+		}
+	}
+
 	// Float operations (including int+float and float+int)
 	af, aIsFloat := a.(*PyFloat)
 	bf, bIsFloat := b.(*PyFloat)
@@ -758,6 +842,10 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		}
 	}
 
+	// Complex numbers support == and != but not ordering
+	_, aIsComplex := a.(*PyComplex)
+	_, bIsComplex := b.(*PyComplex)
+
 	switch op {
 	case OpCompareEq:
 		if vm.equal(a, b) {
@@ -770,21 +858,37 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		}
 		return False
 	case OpCompareLt:
+		if aIsComplex || bIsComplex {
+			vm.currentException = &PyException{TypeName: "TypeError", Message: "'<' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
+			return nil
+		}
 		if vm.compare(a, b) < 0 {
 			return True
 		}
 		return False
 	case OpCompareLe:
+		if aIsComplex || bIsComplex {
+			vm.currentException = &PyException{TypeName: "TypeError", Message: "'<=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
+			return nil
+		}
 		if vm.compare(a, b) <= 0 {
 			return True
 		}
 		return False
 	case OpCompareGt:
+		if aIsComplex || bIsComplex {
+			vm.currentException = &PyException{TypeName: "TypeError", Message: "'>' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
+			return nil
+		}
 		if vm.compare(a, b) > 0 {
 			return True
 		}
 		return False
 	case OpCompareGe:
+		if aIsComplex || bIsComplex {
+			vm.currentException = &PyException{TypeName: "TypeError", Message: "'>=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
+			return nil
+		}
 		if vm.compare(a, b) >= 0 {
 			return True
 		}
@@ -859,6 +963,8 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 				bi = 1
 			}
 			return av.Value == bi
+		case *PyComplex:
+			return bv.Imag == 0 && float64(av.Value) == bv.Real
 		}
 	case *PyFloat:
 		switch bv := b.(type) {
@@ -866,6 +972,23 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			return av.Value == bv.Value
 		case *PyInt:
 			return av.Value == float64(bv.Value)
+		case *PyComplex:
+			return bv.Imag == 0 && av.Value == bv.Real
+		}
+	case *PyComplex:
+		switch bv := b.(type) {
+		case *PyComplex:
+			return av.Real == bv.Real && av.Imag == bv.Imag
+		case *PyInt:
+			return av.Imag == 0 && av.Real == float64(bv.Value)
+		case *PyFloat:
+			return av.Imag == 0 && av.Real == bv.Value
+		case *PyBool:
+			bi := int64(0)
+			if bv.Value {
+				bi = 1
+			}
+			return av.Imag == 0 && av.Real == float64(bi)
 		}
 	case *PyString:
 		if bv, ok := b.(*PyString); ok {

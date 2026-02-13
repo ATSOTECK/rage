@@ -62,6 +62,9 @@ func (vm *VM) tryToInt(v Value) (int64, error) {
 			return 0, fmt.Errorf("OverflowError: Python int too large to convert to int64")
 		}
 		return val.Value, nil
+	case *PyComplex:
+		_ = val
+		return 0, fmt.Errorf("TypeError: int() argument must be a string, a bytes-like object or a real number, not 'complex'")
 	case *PyFloat:
 		return int64(val.Value), nil
 	case *PyBool:
@@ -252,6 +255,9 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 	switch val := v.(type) {
 	case *PyInt:
 		return float64(val.Value), nil
+	case *PyComplex:
+		_ = val
+		return 0, fmt.Errorf("TypeError: float() argument must be a string or a real number, not 'complex'")
 	case *PyFloat:
 		return val.Value, nil
 	case *PyBool:
@@ -400,6 +406,8 @@ func (vm *VM) truthy(v Value) bool {
 		return val.Value != 0
 	case *PyFloat:
 		return val.Value != 0.0
+	case *PyComplex:
+		return val.Real != 0 || val.Imag != 0
 	case *PyString:
 		return len(val.Value) > 0
 	case *PyList:
@@ -454,6 +462,8 @@ func (vm *VM) str(v Value) string {
 			s += ".0"
 		}
 		return s
+	case *PyComplex:
+		return formatComplex(val.Real, val.Imag)
 	case *PyString:
 		return val.Value
 	case *PyBytes:
@@ -616,6 +626,8 @@ func (vm *VM) typeName(v Value) string {
 		return "int"
 	case *PyFloat:
 		return "float"
+	case *PyComplex:
+		return "complex"
 	case *PyString:
 		return "str"
 	case *PyBytes:
@@ -663,6 +675,8 @@ func (vm *VM) typeName(v Value) string {
 
 func (vm *VM) repr(v Value) string {
 	switch val := v.(type) {
+	case *PyComplex:
+		return formatComplex(val.Real, val.Imag)
 	case *PyString:
 		return fmt.Sprintf("'%s'", val.Value)
 	case *PyBytes:

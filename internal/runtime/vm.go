@@ -766,6 +766,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			frame.Stack[frame.SP] = vm.compareOp(OpCompareLt, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			frame.SP++
 
 		case OpCompareLeInt:
@@ -785,6 +797,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			frame.Stack[frame.SP] = vm.compareOp(OpCompareLe, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			frame.SP++
 
 		case OpCompareGtInt:
@@ -804,6 +828,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			frame.Stack[frame.SP] = vm.compareOp(OpCompareGt, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			frame.SP++
 
 		case OpCompareGeInt:
@@ -823,6 +859,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			frame.Stack[frame.SP] = vm.compareOp(OpCompareGe, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			frame.SP++
 
 		case OpCompareEqInt:
@@ -893,10 +941,36 @@ func (vm *VM) run() (Value, error) {
 				if bi, ok := b.(*PyInt); ok {
 					result = ai.Value < bi.Value
 				} else {
-					result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+					cmpResult := vm.compareOp(OpCompareLt, a, b)
+					if vm.currentException != nil {
+						exc := vm.currentException
+						vm.currentException = nil
+						r, err := vm.handleException(exc)
+						if err != nil {
+							return nil, err
+						}
+						if r != nil {
+							return r, nil
+						}
+						break
+					}
+					result = vm.truthy(cmpResult)
 				}
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+				cmpResult := vm.compareOp(OpCompareLt, a, b)
+				if vm.currentException != nil {
+					exc := vm.currentException
+					vm.currentException = nil
+					r, err := vm.handleException(exc)
+					if err != nil {
+						return nil, err
+					}
+					if r != nil {
+						return r, nil
+					}
+					break
+				}
+				result = vm.truthy(cmpResult)
 			}
 			if !result {
 				frame.IP = arg
@@ -912,10 +986,36 @@ func (vm *VM) run() (Value, error) {
 				if bi, ok := b.(*PyInt); ok {
 					result = ai.Value <= bi.Value
 				} else {
-					result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+					cmpResult := vm.compareOp(OpCompareLe, a, b)
+					if vm.currentException != nil {
+						exc := vm.currentException
+						vm.currentException = nil
+						r, err := vm.handleException(exc)
+						if err != nil {
+							return nil, err
+						}
+						if r != nil {
+							return r, nil
+						}
+						break
+					}
+					result = vm.truthy(cmpResult)
 				}
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+				cmpResult := vm.compareOp(OpCompareLe, a, b)
+				if vm.currentException != nil {
+					exc := vm.currentException
+					vm.currentException = nil
+					r, err := vm.handleException(exc)
+					if err != nil {
+						return nil, err
+					}
+					if r != nil {
+						return r, nil
+					}
+					break
+				}
+				result = vm.truthy(cmpResult)
 			}
 			if !result {
 				frame.IP = arg
@@ -931,10 +1031,36 @@ func (vm *VM) run() (Value, error) {
 				if bi, ok := b.(*PyInt); ok {
 					result = ai.Value > bi.Value
 				} else {
-					result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+					cmpResult := vm.compareOp(OpCompareGt, a, b)
+					if vm.currentException != nil {
+						exc := vm.currentException
+						vm.currentException = nil
+						r, err := vm.handleException(exc)
+						if err != nil {
+							return nil, err
+						}
+						if r != nil {
+							return r, nil
+						}
+						break
+					}
+					result = vm.truthy(cmpResult)
 				}
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+				cmpResult := vm.compareOp(OpCompareGt, a, b)
+				if vm.currentException != nil {
+					exc := vm.currentException
+					vm.currentException = nil
+					r, err := vm.handleException(exc)
+					if err != nil {
+						return nil, err
+					}
+					if r != nil {
+						return r, nil
+					}
+					break
+				}
+				result = vm.truthy(cmpResult)
 			}
 			if !result {
 				frame.IP = arg
@@ -950,10 +1076,36 @@ func (vm *VM) run() (Value, error) {
 				if bi, ok := b.(*PyInt); ok {
 					result = ai.Value >= bi.Value
 				} else {
-					result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+					cmpResult := vm.compareOp(OpCompareGe, a, b)
+					if vm.currentException != nil {
+						exc := vm.currentException
+						vm.currentException = nil
+						r, err := vm.handleException(exc)
+						if err != nil {
+							return nil, err
+						}
+						if r != nil {
+							return r, nil
+						}
+						break
+					}
+					result = vm.truthy(cmpResult)
 				}
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+				cmpResult := vm.compareOp(OpCompareGe, a, b)
+				if vm.currentException != nil {
+					exc := vm.currentException
+					vm.currentException = nil
+					r, err := vm.handleException(exc)
+					if err != nil {
+						return nil, err
+					}
+					if r != nil {
+						return r, nil
+					}
+					break
+				}
+				result = vm.truthy(cmpResult)
 			}
 			if !result {
 				frame.IP = arg
@@ -1012,6 +1164,18 @@ func (vm *VM) run() (Value, error) {
 			}
 			// Fallback to generic comparison
 			cmp := vm.compareOp(OpCompareLt, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				r, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if r != nil {
+					return r, nil
+				}
+				break
+			}
 			if cmp == False || cmp == nil {
 				frame.IP = jumpOffset
 			}
@@ -1403,6 +1567,18 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			result := vm.compareOp(op, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
 
@@ -1412,6 +1588,18 @@ func (vm *VM) run() (Value, error) {
 			b := vm.pop()
 			a := vm.pop()
 			result := vm.compareOp(op, a, b)
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				result, err := vm.handleException(exc)
+				if err != nil {
+					return nil, err
+				}
+				if result != nil {
+					return result, nil
+				}
+				break
+			}
 			vm.push(result)
 
 		case OpJump:

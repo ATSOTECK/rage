@@ -231,6 +231,18 @@ func hashValue(v Value) uint64 {
 		h *= 0xff51afd7ed558ccd
 		h ^= h >> 33
 		return h
+	case *PyComplex:
+		// hash(complex(x, 0)) must equal hash(x) for real numbers
+		if val.Imag == 0 {
+			if val.Real == math.Trunc(val.Real) && !math.IsInf(val.Real, 0) && !math.IsNaN(val.Real) {
+				return hashValue(MakeInt(int64(val.Real)))
+			}
+			return hashValue(&PyFloat{Value: val.Real})
+		}
+		// Combine real and imag hashes
+		hr := hashValue(&PyFloat{Value: val.Real})
+		hi := hashValue(&PyFloat{Value: val.Imag})
+		return hr ^ (hi * 1000003)
 	case *PyString:
 		// FNV-1a hash for strings
 		h := uint64(0xcbf29ce484222325)
@@ -300,6 +312,40 @@ type PyFloat struct {
 
 func (f *PyFloat) Type() string   { return "float" }
 func (f *PyFloat) String() string { return fmt.Sprintf("%g", f.Value) }
+
+// PyComplex represents a Python complex number
+type PyComplex struct {
+	Real float64
+	Imag float64
+}
+
+func (c *PyComplex) Type() string   { return "complex" }
+func (c *PyComplex) String() string { return formatComplex(c.Real, c.Imag) }
+
+// MakeComplex creates a PyComplex value
+func MakeComplex(real, imag float64) *PyComplex {
+	return &PyComplex{Real: real, Imag: imag}
+}
+
+// formatComplex formats a complex number matching CPython output
+func formatComplex(real, imag float64) string {
+	formatPart := func(v float64) string {
+		s := fmt.Sprintf("%g", v)
+		return s
+	}
+
+	if real == 0 && !math.Signbit(real) {
+		// Pure imaginary: just show the imaginary part
+		return formatPart(imag) + "j"
+	}
+	// Full form with parens: (real+imagj)
+	imagStr := formatPart(imag)
+	sign := "+"
+	if imag < 0 || math.IsNaN(imag) {
+		sign = ""
+	}
+	return "(" + formatPart(real) + sign + imagStr + "j)"
+}
 
 // PyString represents a Python string
 type PyString struct {

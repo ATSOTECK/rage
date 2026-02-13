@@ -43,6 +43,11 @@ func NewFloat(v float64) *PyFloat {
 	return &PyFloat{Value: v}
 }
 
+// NewComplex creates a Python complex from two Go float64s (real, imag)
+func NewComplex(real, imag float64) *PyComplex {
+	return MakeComplex(real, imag)
+}
+
 // NewString creates a Python str from a Go string, using interning for short strings
 func NewString(v string) *PyString {
 	return InternString(v)

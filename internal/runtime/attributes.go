@@ -122,6 +122,20 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("'coroutine' object has no attribute '%s'", name)
 
+	case *PyComplex:
+		switch name {
+		case "real":
+			return &PyFloat{Value: o.Real}, nil
+		case "imag":
+			return &PyFloat{Value: o.Imag}, nil
+		case "conjugate":
+			c := o
+			return &PyBuiltinFunc{Name: "complex.conjugate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return MakeComplex(c.Real, -c.Imag), nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("'complex' object has no attribute '%s'", name)
+
 	case *PyException:
 		switch name {
 		case "args":
