@@ -678,12 +678,13 @@ func (b *PyBuiltinFunc) String() string { return fmt.Sprintf("<built-in function
 
 // PyClass represents a Python class
 type PyClass struct {
-	Name                string
-	Bases               []*PyClass
-	Dict                map[string]Value
-	Mro                 []*PyClass // Method Resolution Order
-	IsABC               bool       // True if class uses ABC abstract method checking
+	Name                 string
+	Bases                []*PyClass
+	Dict                 map[string]Value
+	Mro                  []*PyClass // Method Resolution Order
+	IsABC                bool       // True if class uses ABC abstract method checking
 	RegisteredSubclasses []*PyClass // Virtual subclasses registered via ABC.register()
+	Metaclass            *PyClass   // Custom metaclass (if any)
 }
 
 func (c *PyClass) Type() string   { return "type" }

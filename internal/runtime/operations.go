@@ -33,6 +33,16 @@ func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
 
 // Operations
 
+// hasMethod checks if an instance has a method via MRO lookup.
+func (vm *VM) hasMethod(instance *PyInstance, name string) bool {
+	for _, cls := range instance.Class.Mro {
+		if _, ok := cls.Dict[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // callDunder looks up and calls a dunder method on an instance via MRO.
 // Returns (result, found, error) - found is true if the method exists.
 func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Value, bool, error) {

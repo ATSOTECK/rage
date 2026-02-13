@@ -22,6 +22,26 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 		return vm.callFunction(fn.Func, allArgs, kwargs)
 
 	case *PyClass:
+		// Check for custom metaclass __call__ override
+		if fn.Metaclass != nil {
+			for _, cls := range fn.Metaclass.Mro {
+				if callMethod, ok := cls.Dict["__call__"]; ok {
+					// Skip if this is the base 'type' class (default behavior)
+					if cls.Name == "type" {
+						break
+					}
+					// Invoke metaclass __call__ with (cls, *args, **kwargs)
+					mcArgs := append([]Value{fn}, args...)
+					switch cm := callMethod.(type) {
+					case *PyFunction:
+						return vm.callFunction(cm, mcArgs, kwargs)
+					case *PyBuiltinFunc:
+						return cm.Fn(mcArgs, kwargs)
+					}
+				}
+			}
+		}
+
 		// Check for abstract methods - prevent instantiation
 		if abstractMethods, ok := fn.Dict["__abstractmethods__"]; ok {
 			if absList, ok := abstractMethods.(*PyList); ok && len(absList.Items) > 0 {

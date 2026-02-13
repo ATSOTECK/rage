@@ -1445,8 +1445,11 @@ func (vm *VM) initBuiltins() {
 			// Check if this class should use ABC abstract method checking
 			// via metaclass=ABCMeta kwarg or inheriting from an ABC class
 			if mc, ok := kwargs["metaclass"]; ok {
-				if mcClass, ok := mc.(*PyClass); ok && mcClass.IsABC {
-					class.IsABC = true
+				if mcClass, ok := mc.(*PyClass); ok {
+					class.Metaclass = mcClass
+					if mcClass.IsABC {
+						class.IsABC = true
+					}
 				}
 			}
 			if !class.IsABC {
