@@ -319,9 +319,9 @@ RAGE is under active development. Currently supported:
 - Data types: None, bool, int, float, str, bytes, bytearray, list, tuple, dict, set, frozenset, range, slice
 - Operators: arithmetic, comparison, logical, bitwise, in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
-- Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments
-- Classes: class definitions, `__init__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods
-- Exception handling: try/except/else/finally, raise, custom exception types
+- Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
+- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods
+- Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`)
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
 - Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
@@ -329,17 +329,16 @@ RAGE is under active development. Currently supported:
 - Context managers: with statement support
 - F-strings: formatted string literals with format specs
 - Walrus operator: assignment expressions (`:=`)
+- Extended unpacking: `a, *rest, b = [1, 2, 3, 4]`
+- Dunder methods for custom classes: `__new__`, `__init__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__eq__`, `__lt__`, etc. including reflected variants)
 - Built-in functions: print, len, range, str, int, float, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
 - Full async/await - async generators, async context managers (basic support via asyncio module)
-- Most dunder methods for custom classes - `__new__`, `__del__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__call__`, `__contains__`, `__hash__`, operator overloading (`__add__`, `__lt__`, etc.)
 - Metaclasses - `class Foo(metaclass=...)`
 - `__slots__`
-- Full descriptor protocol
+- Full descriptor protocol - `__get__`, `__set__`, `__delete__`
 - Matrix multiplication `@` operator
-- `nonlocal` statement
-- Extended unpacking - `a, *rest, b = seq`
 
 ### Security Notes
 Reflection builtins (`globals`, `locals`, `compile`, `exec`, `eval`) are opt-in and disabled by default. Enable them explicitly if needed:

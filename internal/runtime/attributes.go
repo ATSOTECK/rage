@@ -122,6 +122,28 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 		return nil, fmt.Errorf("'coroutine' object has no attribute '%s'", name)
 
+	case *PyException:
+		switch name {
+		case "args":
+			if o.Args != nil {
+				return o.Args, nil
+			}
+			return &PyTuple{Items: []Value{}}, nil
+		case "__cause__":
+			if o.Cause != nil {
+				return o.Cause, nil
+			}
+			return None, nil
+		case "__context__":
+			if o.Context != nil {
+				return o.Context, nil
+			}
+			return None, nil
+		case "__traceback__":
+			return None, nil
+		}
+		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Type(), name)
+
 	case *PyModule:
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
