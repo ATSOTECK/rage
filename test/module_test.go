@@ -6,23 +6,13 @@ import (
 
 	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
-	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	// Initialize standard library modules for testing
-	stdlib.InitAllModules()
-}
-
 // TestImportModule tests basic module import
 func TestImportModule(t *testing.T) {
-	// Reset modules for clean test
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 import math
@@ -41,10 +31,7 @@ result = math.pi
 
 // TestFromImport tests "from module import name"
 func TestFromImport(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 from math import pi, e
@@ -65,10 +52,7 @@ result_e = e
 
 // TestFromImportStar tests "from module import *"
 func TestFromImportStar(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 from math import *
@@ -87,10 +71,7 @@ result = pi + e
 
 // TestImportModuleFunction tests calling functions from imported module
 func TestImportModuleFunction(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 import math
@@ -108,10 +89,7 @@ result = math.sqrt(16)
 
 // TestFromImportFunction tests calling function imported with "from"
 func TestFromImportFunction(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 from math import sqrt, cos
@@ -132,9 +110,6 @@ result_cos = cos(0)
 
 // TestMathModuleFunctions tests various math module functions
 func TestMathModuleFunctions(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
 	tests := []struct {
 		name     string
 		source   string
@@ -154,10 +129,7 @@ func TestMathModuleFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime.ResetModules()
-			stdlib.InitAllModules()
-
-			vm := runtime.NewVM()
+			vm := newStdlibVM(t)
 			code, errs := compiler.CompileSource(tt.source, "<test>")
 			require.Empty(t, errs)
 
@@ -258,10 +230,7 @@ func TestModuleNotFound(t *testing.T) {
 
 // TestImportNameNotFound tests error handling for non-existent names in module
 func TestImportNameNotFound(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `from math import nonexistent_function`
 	code, errs := compiler.CompileSource(source, "<test>")
@@ -339,10 +308,7 @@ final = c.get()
 
 // TestImportAlias tests "import module as alias"
 func TestImportAlias(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 import math as m
@@ -360,10 +326,7 @@ result = m.sqrt(16)
 
 // TestFromImportAlias tests "from module import name as alias"
 func TestFromImportAlias(t *testing.T) {
-	runtime.ResetModules()
-	stdlib.InitAllModules()
-
-	vm := runtime.NewVM()
+	vm := newStdlibVM(t)
 
 	source := `
 from math import sqrt as square_root

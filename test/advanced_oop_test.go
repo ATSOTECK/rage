@@ -3,22 +3,10 @@ package test
 import (
 	"testing"
 
-	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// tryCompile attempts to compile source code and returns nil if there's a panic
-func tryCompile(source string) (code *runtime.CodeObject, errs []error, panicked bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			panicked = true
-		}
-	}()
-	code, errs = compiler.CompileSource(source, "<test>")
-	return code, errs, false
-}
 
 // =============================================================================
 // Metaclass Tests

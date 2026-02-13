@@ -1,42 +1,11 @@
 package test
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-// Helper function to run Python code and return the VM
-func runCode(t *testing.T, source string) *runtime.VM {
-	vm := runtime.NewVM()
-	code, errs := compiler.CompileSource(source, "<test>")
-	require.Empty(t, errs, "Compilation errors: %v", errs)
-	_, err := vm.Execute(code)
-	require.NoError(t, err)
-	return vm
-}
-
-// Helper function to run Python code and expect an error
-func runCodeExpectError(t *testing.T, source string, expectedErrSubstr string) {
-	vm := runtime.NewVM()
-	code, errs := compiler.CompileSource(source, "<test>")
-	if len(errs) > 0 {
-		// Compilation error - check if it matches
-		for _, e := range errs {
-			if strings.Contains(e.Error(), expectedErrSubstr) {
-				return
-			}
-		}
-		t.Fatalf("Expected error containing %q, got compilation errors: %v", expectedErrSubstr, errs)
-	}
-	_, err := vm.Execute(code)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), expectedErrSubstr)
-}
 
 // =============================================================================
 // Modulo Operator Tests (Python semantics: result has same sign as divisor)
