@@ -4,6 +4,7 @@
 # all from a handful of formulas. A static config would be 500+ lines.
 
 import math
+from common import zones
 
 max_level = 50
 
@@ -35,8 +36,7 @@ for lvl in range(max_level):
     elif lvl % 10 == 9 and lvl > 0:
         milestones[lvl] = {"type": "stat_boost", "reward": "All Stats +5"}
 
-# Zone difficulty scaling
-zones = ["Forest", "Desert", "Mountains", "Swamp", "Volcano"]
+# Zone difficulty scaling (zones imported from common.py)
 zone_scaling = {zones[i]: round(1.0 + i * 0.35, 2) for i in range(len(zones))}
 
 # Boss at every 10th level with scaled stats

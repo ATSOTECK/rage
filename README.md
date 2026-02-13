@@ -199,7 +199,14 @@ state.RunWithFilename(string(src), "config/settings.py")
 settings, _ := rage.AsDict(state.GetGlobal("settings"))
 ```
 
-The Python config scripts use conditionals, computed values, validation, and comprehensions:
+The Python config scripts use conditionals, computed values, validation, cross-file imports, and comprehensions:
+
+```python
+# config/common.py — shared constants, imported by other config files
+materials = {"wood": {"damage": 1.0, ...}, "iron": {"damage": 1.5, ...}, ...}
+rarities = ["common", "uncommon", "rare", "epic", "legendary"]
+zones = ["Forest", "Desert", "Mountains", "Swamp", "Volcano"]
+```
 
 ```python
 # config/settings.py — environment-aware, self-validating config
@@ -212,11 +219,12 @@ else:
 
 assert db_pool_size > 0, "db_pool_size must be positive"  # validates at load time
 api_url = f"https://{host}:{port}/api/v1"                  # derived string
-features = {"ssl": port == 8443, "metrics": environment != "development"}
 ```
 
 ```python
-# config/items.py — one template function generates 15 weapons
+# config/items.py — imports shared data, generates 15 weapons from a template
+from common import materials, rarities
+
 def make_weapon(name, base_damage, material, tier=1):
     mat = materials[material]
     return {"name": f"{material.title()} {name}", "damage": int(base_damage * mat["damage"] * (1 + tier * 0.25)), ...}
@@ -225,8 +233,10 @@ swords = [make_weapon("Sword", 15, mat, tier) for mat in materials for tier in [
 ```
 
 ```python
-# config/levels.py — 50 levels of XP/stats from a few formulas
+# config/levels.py — stdlib + local imports, formulas generate 50 levels
 import math
+from common import zones
+
 xp_for_level = [math.floor(100 * math.pow(1.15, level)) for level in range(50)]
 ```
 

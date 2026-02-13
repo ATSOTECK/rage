@@ -3,15 +3,7 @@
 # A template function generates families of items from parameters.
 # In TOML you'd copy-paste each variant by hand.
 
-materials = {
-    "wood":    {"damage": 1.0, "weight": 0.8, "value": 10},
-    "iron":    {"damage": 1.5, "weight": 1.2, "value": 50},
-    "steel":   {"damage": 2.0, "weight": 1.0, "value": 120},
-    "mithril": {"damage": 2.5, "weight": 0.5, "value": 500},
-    "dragon":  {"damage": 3.5, "weight": 1.5, "value": 2000},
-}
-
-rarities = ["common", "uncommon", "rare", "epic", "legendary"]
+from common import materials, rarities
 
 def make_weapon(name, base_damage, base_weight, material, tier=1):
     """Template: one function defines an entire weapon family."""

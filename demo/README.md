@@ -14,7 +14,12 @@ RAGE_ENV=staging go run demo/main.go      # staging settings
 
 ## What the Demo Shows
 
-A Go "game server" loads its configuration from three Python scripts:
+A Go "game server" loads its configuration from Python scripts. Shared balance constants live in `common.py` and are imported by the other scripts — just like a real project:
+
+### `config/common.py` — Shared Game Balance Data
+- **Single source of truth**: Materials, rarities, and zones defined once
+- **Imported by siblings**: `from common import materials, rarities` in items.py, `from common import zones` in levels.py
+- **Change once, update everywhere**: Add a material here and every config file picks it up
 
 ### `config/settings.py` — Environment-Aware Settings
 - **Conditionals**: Different hosts, ports, pool sizes per environment
@@ -24,13 +29,15 @@ A Go "game server" loads its configuration from three Python scripts:
 - **Feature flags**: Built with expressions like `"ssl": port == 8443`
 
 ### `config/items.py` — Templated Item Definitions
+- **Cross-script imports**: `from common import materials, rarities`
 - **Factory functions**: `make_weapon("Sword", 15, 3.0, "iron", tier=3)` generates a complete item with computed damage, weight, value, and rarity
 - **Comprehensions**: 15 weapons generated from `[make_weapon(...) for mat in materials for tier in tiers]`
 - **Probability tables**: Loot drop rates computed with exponential decay
 - **Aggregation**: Set bonus stats computed from the items in the set
 
 ### `config/levels.py` — Generated Progression Tables
-- **XP curve**: `[int(100 * (1.15 ** level)) for level in range(50)]` — one line instead of 50 hand-written entries
+- **Stdlib + local imports**: `import math` and `from common import zones`
+- **XP curve**: `[math.floor(100 * math.pow(1.15, level)) for level in range(50)]` — one line instead of 50 hand-written entries
 - **Stat formulas**: HP, attack, defense, speed all computed from level
 - **Milestones**: Declarative rewards at specific levels
 - **Boss scaling**: Stats derived from the same formulas as player stats
