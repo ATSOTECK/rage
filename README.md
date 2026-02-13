@@ -226,7 +226,8 @@ swords = [make_weapon("Sword", 15, mat, tier) for mat in materials for tier in [
 
 ```python
 # config/levels.py — 50 levels of XP/stats from a few formulas
-xp_for_level = [int(100 * (1.15 ** level)) for level in range(50)]
+import math
+xp_for_level = [math.floor(100 * math.pow(1.15, level)) for level in range(50)]
 ```
 
 See [`demo/README.md`](demo/README.md) for the full walkthrough.

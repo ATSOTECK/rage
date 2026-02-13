@@ -3,18 +3,20 @@
 # 50 levels of XP curves, stat scaling, milestones, and bosses,
 # all from a handful of formulas. A static config would be 500+ lines.
 
+import math
+
 max_level = 50
 
-# XP curve: exponential growth
-xp_for_level = [int(100 * (1.15 ** level)) for level in range(max_level)]
+# XP curve: smooth exponential ramp using math.pow/math.floor
+xp_for_level = [math.floor(100 * math.pow(1.15, level)) for level in range(max_level)]
 
 # Stat scaling at each level
 def stats_at_level(level):
     return {
-        "hp":      100 + level * 15 + int(level ** 1.5),
+        "hp":      100 + level * 15 + math.floor(math.sqrt(level) * 10),
         "attack":  10 + level * 3,
         "defense": 5 + level * 2 + (level // 10) * 5,
-        "speed":   10 + level,
+        "speed":   10 + math.ceil(level * 0.8),
     }
 
 level_stats = [stats_at_level(lvl) for lvl in range(max_level)]
