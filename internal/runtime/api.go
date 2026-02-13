@@ -602,6 +602,53 @@ func (vm *VM) Call(callable Value, args []Value, kwargs map[string]Value) (Value
 	return vm.call(callable, args, kwargs)
 }
 
+// IsTrue returns whether a Python value is truthy (without needing a VM reference).
+// This handles common cases; for instances with __bool__/__len__, use vm.Truthy instead.
+func IsTrue(v Value) bool {
+	switch val := v.(type) {
+	case *PyNone:
+		return false
+	case *PyBool:
+		return val.Value
+	case *PyInt:
+		return val.Value != 0
+	case *PyFloat:
+		return val.Value != 0.0
+	case *PyString:
+		return len(val.Value) > 0
+	case *PyList:
+		return len(val.Items) > 0
+	case *PyTuple:
+		return len(val.Items) > 0
+	case *PyDict:
+		return len(val.Items) > 0 || val.DictLen() > 0
+	case *PySet:
+		return len(val.Items) > 0
+	default:
+		return v != nil
+	}
+}
+
+// Truthy returns whether a Python value is truthy (exported wrapper)
+func (vm *VM) Truthy(v Value) bool {
+	return vm.truthy(v)
+}
+
+// Equal tests equality of two Python values (exported wrapper)
+func (vm *VM) Equal(a, b Value) bool {
+	return vm.equal(a, b)
+}
+
+// CompareOp performs a comparison operation (exported wrapper)
+func (vm *VM) CompareOp(op Opcode, a, b Value) Value {
+	return vm.compareOp(op, a, b)
+}
+
+// HashValue returns the hash of a Python value (exported wrapper)
+func (vm *VM) HashValue(v Value) uint64 {
+	return vm.hashValueVM(v)
+}
+
 // =====================================
 // Error Helpers
 // =====================================

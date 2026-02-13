@@ -2505,6 +2505,12 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
+		case OpSetupAnnotations:
+			// Ensure __annotations__ dict exists in current namespace
+			if _, ok := frame.Globals["__annotations__"]; !ok {
+				frame.Globals["__annotations__"] = &PyDict{Items: make(map[Value]Value)}
+			}
+
 		case OpNop:
 			// Do nothing
 
