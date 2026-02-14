@@ -1651,6 +1651,11 @@ func (vm *VM) initBuiltins() {
 				}
 			}
 
+			// Call __set_name__ on descriptors in the class dict
+			if err := vm.callSetName(class); err != nil {
+				return nil, err
+			}
+
 			// Call __init_subclass__ on parent classes
 			if err := vm.callInitSubclass(class, kwargs); err != nil {
 				return nil, err
@@ -2094,6 +2099,11 @@ func (vm *VM) initBuiltins() {
 					}
 				}
 
+				// Call __set_name__ on descriptors
+				if err := vm.callSetName(cls); err != nil {
+					return nil, err
+				}
+
 				return cls, nil
 			}
 			return nil, fmt.Errorf("type.__new__() takes 2 or 4 arguments (%d given)", len(args))
@@ -2448,6 +2458,22 @@ func (vm *VM) formatBases(bases []*PyClass) string {
 
 // callInitSubclass calls __init_subclass__ on the parent class after a new class is created.
 // It walks the MRO starting from index 1 (skipping the new class itself) to find the hook.
+// callSetName iterates through the class dict and calls __set_name__(owner, name)
+// on any descriptor that defines it. Called during class creation.
+func (vm *VM) callSetName(class *PyClass) error {
+	for name, val := range class.Dict {
+		if inst, ok := val.(*PyInstance); ok {
+			_, found, err := vm.callDunder(inst, "__set_name__", class, &PyString{Value: name})
+			if err != nil {
+				return fmt.Errorf("RuntimeError: __set_name__ of '%s' descriptor '%s' raised: %w",
+					inst.Class.Name, name, err)
+			}
+			_ = found
+		}
+	}
+	return nil
+}
+
 func (vm *VM) callInitSubclass(class *PyClass, kwargs map[string]Value) error {
 	// Filter out "metaclass" from kwargs
 	var filteredKwargs map[string]Value
