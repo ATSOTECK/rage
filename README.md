@@ -15,7 +15,7 @@ standard library you can pick and choose which modules are made available to scr
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, base64, abc, dataclasses
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, io, base64, abc, dataclasses
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -26,7 +26,7 @@ go get github.com/ATSOTECK/rage
 
 ## Tests
 - **Unit tests**: `go test ./...`
-- **Integration tests**: 94 scripts with 1960 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, complex numbers, and more
+- **Integration tests**: 95 scripts with 1968 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
@@ -291,6 +291,8 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | functools | `rage.ModuleFunctools` | Higher-order functions (partial, reduce, lru_cache, wraps) |
 | io | `rage.ModuleIO` | File I/O operations |
 | base64 | `rage.ModuleBase64` | Base16, Base32, Base64 data encodings |
+| abc | `rage.ModuleAbc` | Abstract base classes (ABC, ABCMeta, abstractmethod) |
+| dataclasses | `rage.ModuleDataclasses` | Data class decorator and field utilities |
 
 ## Working with Values
 
@@ -406,7 +408,7 @@ RAGE is under active development. Currently supported:
 - Operators: arithmetic, comparison, logical, bitwise, matrix multiplication (`@`), in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
-- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`
+- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`, `__init_subclass__`
 - Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`)
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
