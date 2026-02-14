@@ -332,6 +332,16 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 						}
 						return &PyMethod{Func: fn, Instance: instance}, nil
 					}
+					if bf, ok := cm.Func.(*PyBuiltinFunc); ok {
+						boundInst := instance
+						return &PyBuiltinFunc{
+							Name: bf.Name,
+							Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+								allArgs := append([]Value{boundInst}, args...)
+								return bf.Fn(allArgs, kwargs)
+							},
+						}, nil
+					}
 				}
 
 				// Handle staticmethod - return unwrapped function
