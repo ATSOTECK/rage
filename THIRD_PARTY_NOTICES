@@ -8,14 +8,34 @@ incorporated into or adapted by this project.
 CPython Test Suite
 ================================================================================
 
-Test files in test/integration/scripts/ numbered 28 through 78 (prefixed with
-"cpython_") are adapted from CPython's test suite (https://github.com/python/cpython).
+Test files in test/integration/scripts/lang/ prefixed with "cpython_" are
+adapted from CPython's test suite (https://github.com/python/cpython).
+
+Location: test/integration/scripts/lang/
+
+Files adapted from CPython (43 test files):
+  16_cpython_closures.py, 19_cpython_scopes.py, 22_cpython_comprehensions.py,
+  23_cpython_generators.py, 24_cpython_generators_advanced.py,
+  25_cpython_iterators.py, 27_cpython_classes.py, 28_cpython_class_advanced.py,
+  29_cpython_inheritance.py, 31_cpython_magic_methods.py,
+  39_cpython_property_descriptor.py, 41_cpython_decorators.py,
+  44_cpython_unary.py, 46_cpython_builtins.py, 47_cpython_global_builtins.py,
+  49_cpython_type_conversions.py, 50_cpython_assert.py, 51_cpython_del.py,
+  53_cpython_int.py, 54_cpython_float.py, 56_cpython_numeric_edge.py,
+  57_cpython_math_advanced.py, 58_cpython_bool.py, 59_cpython_str.py,
+  60_cpython_string_methods.py, 61_cpython_list.py, 62_cpython_list_methods.py,
+  63_cpython_tuple.py, 64_cpython_tuple_methods.py, 65_cpython_bytes.py,
+  66_cpython_range.py, 67_cpython_dict.py, 68_cpython_dict_methods.py,
+  69_cpython_set.py, 70_cpython_set_methods.py, 71_cpython_slice.py,
+  72_cpython_sequence_ops.py, 73_cpython_membership.py, 76_cpython_sort.py,
+  77_cpython_format.py, 79_cpython_with.py, 81_cpython_control_flow.py,
+  82_cpython_exception_edge.py
 
 Summary of changes:
   - Test cases were extracted and rewritten to use RAGE's test_framework
     (test/expect pattern) instead of CPython's unittest infrastructure.
   - Tests were simplified or trimmed to match the subset of Python semantics
-    that RAGE implements (e.g., no complex numbers, no file I/O, int64 range).
+    that RAGE implements (e.g., int64 range limitations).
   - Some tests were reorganized by topic across multiple files.
 
 Copyright (c) 2001 Python Software Foundation; All Rights Reserved.

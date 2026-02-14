@@ -72,7 +72,7 @@ func extractTestCounts(state *rage.State) (passed, failed int, failures string) 
 // runScript executes a Python test script and returns the results
 func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (passed, failed int, failures string, err error) {
 	// Read test framework module
-	frameworkPath := filepath.Join(scriptsDir, "test_framework.py")
+	frameworkPath := filepath.Join(scriptsDir, "common", "test_framework.py")
 	frameworkSource, err := os.ReadFile(frameworkPath)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to read test framework: %w", err)
@@ -131,39 +131,42 @@ func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (pas
 
 // runAllTests runs all test scripts
 func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
-	entries, err := os.ReadDir(scriptsDir)
-	if err != nil {
-		fmt.Printf("Error reading scripts directory: %v\n", err)
-		return nil, 0, 0
-	}
-
 	var results []ScriptResult
 	totalPassed := 0
 	totalFailed := 0
 
-	for _, entry := range entries {
-		// Skip non-Python files, directories, and the test framework module itself
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".py") || entry.Name() == "test_framework.py" {
-			continue
+	// Walk through scripts directory recursively
+	err := filepath.Walk(scriptsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
 
-		scriptPath := filepath.Join(scriptsDir, entry.Name())
+		// Skip non-Python files and the test framework module itself
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".py") || info.Name() == "test_framework.py" {
+			return nil
+		}
+
+		// Get relative path from scripts directory for display
+		relPath, err := filepath.Rel(scriptsDir, path)
+		if err != nil {
+			relPath = info.Name()
+		}
 
 		result := ScriptResult{
-			Script: entry.Name(),
+			Script: relPath,
 		}
 
 		start := time.Now()
 
 		// Run script
-		passed, failed, failures, err := runScript(scriptPath, scriptsDir, 30*time.Second)
+		passed, failed, failures, err := runScript(path, scriptsDir, 30*time.Second)
 		result.Duration = time.Since(start)
 
 		if err != nil {
 			result.Error = err.Error()
 			totalFailed++
 			results = append(results, result)
-			continue
+			return nil
 		}
 
 		result.Passed = passed
@@ -173,6 +176,12 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 		totalFailed += failed
 
 		results = append(results, result)
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("Error walking scripts directory: %v\n", err)
+		return nil, 0, 0
 	}
 
 	return results, totalPassed, totalFailed
