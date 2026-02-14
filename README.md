@@ -26,7 +26,7 @@ go get github.com/ATSOTECK/rage
 
 ## Tests
 - **Unit tests**: `go test ./...`
-- **Integration tests**: 95 scripts with 1968 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, and more
+- **Integration tests**: 97 scripts with 1976 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
@@ -408,7 +408,7 @@ RAGE is under active development. Currently supported:
 - Operators: arithmetic, comparison, logical, bitwise, matrix multiplication (`@`), in-place operations
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
-- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`, `__init_subclass__`
+- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`, `__init_subclass__`, `__set_name__`
 - Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`)
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
@@ -418,7 +418,7 @@ RAGE is under active development. Currently supported:
 - String formatting: f-strings, `%` printf-style (`%s`, `%d`, `%f`, `%e`, `%g`, `%x`, `%o`, `%c`, `%(key)s` dict formatting, flags, `*` width/precision)
 - Walrus operator: assignment expressions (`:=`)
 - Extended unpacking: `a, *rest, b = [1, 2, 3, 4]`
-- Descriptor protocol: `__get__`, `__set__`, `__delete__` (data descriptors, non-data descriptors, class-level access)
+- Descriptor protocol: `__get__`, `__set__`, `__delete__`, `__set_name__` (data descriptors, non-data descriptors, class-level access)
 - Dunder methods for custom classes: `__new__`, `__init__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__matmul__`, `__eq__`, `__lt__`, etc. including reflected variants)
 - Built-in functions: print (with `sep`, `end`, `flush`), len, range, str, int, float, complex, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
