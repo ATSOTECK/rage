@@ -343,6 +343,8 @@ func main() {
 	totalStart := time.Now()
 	results, totalPassed, totalFailed := runAllTests(scriptsDir)
 	totalDuration := time.Since(totalStart)
+
+	time.Sleep(1 * time.Second) // Sleep to make sure the final test results are printed at the end.
 	printResults(results, totalPassed, totalFailed, totalDuration)
 
 	if totalFailed > 0 {
