@@ -1651,6 +1651,11 @@ func (vm *VM) initBuiltins() {
 				}
 			}
 
+			// Call __init_subclass__ on parent classes
+			if err := vm.callInitSubclass(class, kwargs); err != nil {
+				return nil, err
+			}
+
 			// Populate the __class__ cell if present (for zero-argument super() support)
 			// The __class__ cell is created by the compiler when methods use super()
 			for i, cellName := range bodyFunc.Code.CellVars {
@@ -1937,6 +1942,14 @@ func (vm *VM) initBuiltins() {
 			return None, nil
 		},
 	}
+
+	// object.__init_subclass__(cls, **kwargs) - default hook, does nothing
+	objectClass.Dict["__init_subclass__"] = &PyClassMethod{Func: &PyBuiltinFunc{
+		Name: "__init_subclass__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			return None, nil
+		},
+	}}
 
 	// object.__new__(cls) - create a new instance of cls
 	objectClass.Dict["__new__"] = &PyBuiltinFunc{
@@ -2431,4 +2444,40 @@ func (vm *VM) formatBases(bases []*PyClass) string {
 		result += ", " + names[i]
 	}
 	return result
+}
+
+// callInitSubclass calls __init_subclass__ on the parent class after a new class is created.
+// It walks the MRO starting from index 1 (skipping the new class itself) to find the hook.
+func (vm *VM) callInitSubclass(class *PyClass, kwargs map[string]Value) error {
+	// Filter out "metaclass" from kwargs
+	var filteredKwargs map[string]Value
+	if len(kwargs) > 0 {
+		filteredKwargs = make(map[string]Value, len(kwargs))
+		for k, v := range kwargs {
+			if k != "metaclass" {
+				filteredKwargs[k] = v
+			}
+		}
+	}
+
+	// Walk MRO starting from index 1 (skip the new class itself)
+	for i := 1; i < len(class.Mro); i++ {
+		if method, ok := class.Mro[i].Dict["__init_subclass__"]; ok {
+			args := []Value{class}
+			var err error
+			switch m := method.(type) {
+			case *PyClassMethod:
+				_, err = vm.call(m.Func, args, filteredKwargs)
+			case *PyFunction:
+				_, err = vm.callFunction(m, args, filteredKwargs)
+			case *PyBuiltinFunc:
+				_, err = m.Fn(args, filteredKwargs)
+			}
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
 }
