@@ -15,7 +15,11 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 
 	switch o := obj.(type) {
 	case *PyList:
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return nil, err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(o.Items) + idx
 		}
@@ -24,7 +28,11 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return o.Items[idx], nil
 	case *PyTuple:
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return nil, err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(o.Items) + idx
 		}
@@ -35,7 +43,11 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 	case *PyString:
 		// Convert to runes for proper UTF-8 character indexing
 		runes := []rune(o.Value)
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return nil, err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(runes) + idx
 		}
@@ -44,7 +56,11 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return &PyString{Value: string(runes[idx])}, nil
 	case *PyBytes:
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return nil, err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(o.Value) + idx
 		}
@@ -238,6 +254,9 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 		if v == nil || v == None {
 			return def
 		}
+		if i, err := vm.getIntIndex(v); err == nil {
+			return int(i)
+		}
 		return int(vm.toInt(v))
 	}
 
@@ -302,7 +321,11 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 	}
 	switch o := obj.(type) {
 	case *PyList:
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(o.Items) + idx
 		}
@@ -342,7 +365,11 @@ func (vm *VM) setSlice(obj Value, slice *PySlice, val Value) error {
 	start := 0
 	stop := length
 	if slice.Start != nil && slice.Start != None {
-		start = int(vm.toInt(slice.Start))
+		i, err := vm.getIntIndex(slice.Start)
+		if err != nil {
+			return err
+		}
+		start = int(i)
 		if start < 0 {
 			start = length + start
 		}
@@ -354,7 +381,11 @@ func (vm *VM) setSlice(obj Value, slice *PySlice, val Value) error {
 		}
 	}
 	if slice.Stop != nil && slice.Stop != None {
-		stop = int(vm.toInt(slice.Stop))
+		i, err := vm.getIntIndex(slice.Stop)
+		if err != nil {
+			return err
+		}
+		stop = int(i)
 		if stop < 0 {
 			stop = length + stop
 		}
@@ -387,7 +418,11 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 	length := len(lst.Items)
 	step := 1
 	if slice.Step != nil && slice.Step != None {
-		step = int(vm.toInt(slice.Step))
+		i, err := vm.getIntIndex(slice.Step)
+		if err != nil {
+			return err
+		}
+		step = int(i)
 		if step == 0 {
 			return fmt.Errorf("ValueError: slice step cannot be zero")
 		}
@@ -400,7 +435,11 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 		stop = -length - 1
 	}
 	if slice.Start != nil && slice.Start != None {
-		start = int(vm.toInt(slice.Start))
+		i, err := vm.getIntIndex(slice.Start)
+		if err != nil {
+			return err
+		}
+		start = int(i)
 		if start < 0 {
 			start = length + start
 		}
@@ -421,7 +460,11 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 		}
 	}
 	if slice.Stop != nil && slice.Stop != None {
-		stop = int(vm.toInt(slice.Stop))
+		i, err := vm.getIntIndex(slice.Stop)
+		if err != nil {
+			return err
+		}
+		stop = int(i)
 		if stop < 0 {
 			stop = length + stop
 		}
@@ -483,7 +526,11 @@ func (vm *VM) delItem(obj Value, index Value) error {
 	}
 	switch o := obj.(type) {
 	case *PyList:
-		idx := int(vm.toInt(index))
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return err
+		}
+		idx := int(i)
 		if idx < 0 {
 			idx = len(o.Items) + idx
 		}

@@ -202,6 +202,22 @@ func sysSetRecursionLimit(vm *gopherpy.VM) int {
 func sysGetSizeof(vm *gopherpy.VM) int {
 	obj := vm.Get(1)
 
+	// Check for __sizeof__ on instances
+	if inst, ok := obj.(*gopherpy.PyInstance); ok {
+		for _, cls := range inst.Class.Mro {
+			if method, ok := cls.Dict["__sizeof__"]; ok {
+				result, err := vm.Call(method, []gopherpy.Value{inst}, nil)
+				if err == nil {
+					if intVal, ok := result.(*gopherpy.PyInt); ok {
+						vm.Push(gopherpy.NewInt(intVal.Value))
+						return 1
+					}
+				}
+				break
+			}
+		}
+	}
+
 	// Return approximate sizes based on type
 	var size int64
 	switch v := obj.(type) {

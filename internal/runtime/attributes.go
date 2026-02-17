@@ -8,6 +8,120 @@ import (
 	"unicode/utf8"
 )
 
+// isAttributeError checks if an error is an AttributeError.
+func isAttributeError(err error) bool {
+	if pyExc, ok := err.(*PyException); ok {
+		return pyExc.Type() == "AttributeError"
+	}
+	return strings.HasPrefix(err.Error(), "AttributeError:")
+}
+
+// callMethodValue calls a class-dict method value with an instance as self.
+func (vm *VM) callMethodValue(method Value, self Value, args ...Value) (Value, error) {
+	allArgs := make([]Value, 1+len(args))
+	allArgs[0] = self
+	copy(allArgs[1:], args)
+	switch fn := method.(type) {
+	case *PyFunction:
+		return vm.callFunction(fn, allArgs, nil)
+	case *PyBuiltinFunc:
+		return fn.Fn(allArgs, nil)
+	default:
+		return vm.call(method, allArgs, nil)
+	}
+}
+
+// defaultGetAttribute performs the standard attribute lookup for a PyInstance.
+// This is the logic behind object.__getattribute__: data descriptors → instance dict → class MRO.
+// It does NOT call __getattr__; the caller handles that fallback.
+func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
+	// Descriptor protocol: First check class MRO for data descriptors
+	for _, cls := range o.Class.Mro {
+		if val, ok := cls.Dict[name]; ok {
+			if prop, ok := val.(*PyProperty); ok {
+				if prop.Fget == nil {
+					return nil, fmt.Errorf("property '%s' has no getter", name)
+				}
+				return vm.call(prop.Fget, []Value{o}, nil)
+			}
+			if inst, ok := val.(*PyInstance); ok {
+				if vm.hasMethod(inst, "__set__") || vm.hasMethod(inst, "__delete__") {
+					if getResult, found, err := vm.callDunder(inst, "__get__", o, o.Class); found {
+						if err != nil {
+							return nil, err
+						}
+						return getResult, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Handle __dict__ access on instances
+	if name == "__dict__" && o.Dict != nil {
+		d := &PyDict{Items: make(map[Value]Value), instanceOwner: o}
+		for k, v := range o.Dict {
+			d.DictSet(&PyString{Value: k}, v, vm)
+		}
+		return d, nil
+	}
+
+	// Then check instance dict or slots
+	if o.Slots != nil {
+		if val, ok := o.Slots[name]; ok {
+			return val, nil
+		}
+	} else if val, ok := o.Dict[name]; ok {
+		return val, nil
+	}
+
+	// Then check class MRO for methods/attributes (non-data descriptors)
+	for _, cls := range o.Class.Mro {
+		if val, ok := cls.Dict[name]; ok {
+			if cm, ok := val.(*PyClassMethod); ok {
+				if fn, ok := cm.Func.(*PyFunction); ok {
+					return &PyMethod{Func: fn, Instance: o.Class}, nil
+				}
+				return &PyBuiltinFunc{
+					Name: "bound_classmethod",
+					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+						newArgs := make([]Value, len(args)+1)
+						newArgs[0] = o.Class
+						copy(newArgs[1:], args)
+						return vm.call(cm.Func, newArgs, kwargs)
+					},
+				}, nil
+			}
+			if sm, ok := val.(*PyStaticMethod); ok {
+				return sm.Func, nil
+			}
+			if fn, ok := val.(*PyFunction); ok {
+				return &PyMethod{Func: fn, Instance: o}, nil
+			}
+			if bf, ok := val.(*PyBuiltinFunc); ok {
+				boundInst := Value(o)
+				return &PyBuiltinFunc{
+					Name: bf.Name,
+					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+						allArgs := append([]Value{boundInst}, args...)
+						return bf.Fn(allArgs, kwargs)
+					},
+				}, nil
+			}
+			if inst, ok := val.(*PyInstance); ok {
+				if getResult, found, err := vm.callDunder(inst, "__get__", o, o.Class); found {
+					if err != nil {
+						return nil, err
+					}
+					return getResult, nil
+				}
+			}
+			return val, nil
+		}
+	}
+	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+}
+
 // Attribute access
 
 func (vm *VM) getAttr(obj Value, name string) (Value, error) {
@@ -380,101 +494,44 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
 
 	case *PyInstance:
-		// Descriptor protocol: First check class MRO for data descriptors
-		// Data descriptors (those with __set__ or __delete__) take precedence over instance dict
+		// Check for custom __getattribute__ (not inherited from object)
 		for _, cls := range o.Class.Mro {
-			if val, ok := cls.Dict[name]; ok {
-				if prop, ok := val.(*PyProperty); ok {
-					// Property is a data descriptor - call fget
-					if prop.Fget == nil {
-						return nil, fmt.Errorf("property '%s' has no getter", name)
-					}
-					return vm.call(prop.Fget, []Value{obj}, nil)
-				}
-				// Check for custom data descriptors (instances with __get__ and __set__)
-				if inst, ok := val.(*PyInstance); ok {
-					if vm.hasMethod(inst, "__set__") || vm.hasMethod(inst, "__delete__") {
-						// It's a data descriptor - invoke __get__
-						if getResult, found, err := vm.callDunder(inst, "__get__", obj, o.Class); found {
-							if err != nil {
-								return nil, err
+			if cls.Name == "object" {
+				break // object.__getattribute__ is the default, skip
+			}
+			if gaFn, ok := cls.Dict["__getattribute__"]; ok {
+				result, err := vm.callMethodValue(gaFn, o, &PyString{Value: name})
+				if err != nil {
+					// If __getattribute__ raises AttributeError, fall through to __getattr__
+					if isAttributeError(err) {
+						if gaResult, found, gaErr := vm.callDunder(o, "__getattr__", &PyString{Value: name}); found {
+							if gaErr != nil {
+								return nil, gaErr
 							}
-							return getResult, nil
+							return gaResult, nil
 						}
 					}
+					return nil, err
 				}
+				return result, nil
 			}
 		}
 
-		// Handle __dict__ access on instances
-		if name == "__dict__" && o.Dict != nil {
-			d := &PyDict{Items: make(map[Value]Value), instanceOwner: o}
-			for k, v := range o.Dict {
-				d.DictSet(&PyString{Value: k}, v, vm)
-			}
-			return d, nil
-		}
-
-		// Then check instance dict or slots
-		if o.Slots != nil {
-			if val, ok := o.Slots[name]; ok {
-				return val, nil
-			}
-		} else if val, ok := o.Dict[name]; ok {
-			return val, nil
-		}
-
-		// Then check class MRO for methods/attributes (non-data descriptors)
-		for _, cls := range o.Class.Mro {
-			if val, ok := cls.Dict[name]; ok {
-				// Handle classmethod - bind class instead of instance
-				if cm, ok := val.(*PyClassMethod); ok {
-					if fn, ok := cm.Func.(*PyFunction); ok {
-						return &PyMethod{Func: fn, Instance: o.Class}, nil
+		// Use default attribute lookup, then fall back to __getattr__
+		result, err := vm.defaultGetAttribute(o, name)
+		if err != nil {
+			// Default lookup failed: try __getattr__ as last resort
+			if isAttributeError(err) {
+				if gaResult, found, gaErr := vm.callDunder(o, "__getattr__", &PyString{Value: name}); found {
+					if gaErr != nil {
+						return nil, gaErr
 					}
-					// For non-PyFunction callables, return a wrapper
-					return &PyBuiltinFunc{
-						Name: "bound_classmethod",
-						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-							newArgs := make([]Value, len(args)+1)
-							newArgs[0] = o.Class
-							copy(newArgs[1:], args)
-							return vm.call(cm.Func, newArgs, kwargs)
-						},
-					}, nil
+					return gaResult, nil
 				}
-
-				// Handle staticmethod - return unwrapped function
-				if sm, ok := val.(*PyStaticMethod); ok {
-					return sm.Func, nil
-				}
-
-				// Bind method if it's a function
-				if fn, ok := val.(*PyFunction); ok {
-					return &PyMethod{Func: fn, Instance: obj}, nil
-				}
-
-				// Check for non-data descriptor (instance with __get__ but not __set__)
-				if inst, ok := val.(*PyInstance); ok {
-					if getResult, found, err := vm.callDunder(inst, "__get__", obj, o.Class); found {
-						if err != nil {
-							return nil, err
-						}
-						return getResult, nil
-					}
-				}
-
-				return val, nil
 			}
+			return nil, err
 		}
-		// Last resort: check for __getattr__
-		if result, found, err := vm.callDunder(o, "__getattr__", &PyString{Value: name}); found {
-			if err != nil {
-				return nil, err
-			}
-			return result, nil
-		}
-		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
+		return result, nil
 	case *PyClass:
 		// Handle special class attributes
 		switch name {
@@ -554,6 +611,18 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return o.Origin, nil
 		case "__args__":
 			return &PyTuple{Items: o.Args}, nil
+		case "__mro_entries__":
+			origin := o.Origin
+			return &PyBuiltinFunc{
+				Name: "__mro_entries__",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					// Return the origin class as a tuple for MRO resolution
+					if cls, ok := origin.(*PyClass); ok {
+						return &PyTuple{Items: []Value{cls}}, nil
+					}
+					return &PyTuple{Items: []Value{origin}}, nil
+				},
+			}, nil
 		}
 		return nil, fmt.Errorf("AttributeError: 'GenericAlias' object has no attribute '%s'", name)
 	case *PyDict:
@@ -2909,12 +2978,11 @@ func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) 
 			}
 
 			// Apply format spec
-			if formatSpec != "" {
-				formatted := vm.applyFormatSpec(val, formatSpec)
-				result.WriteString(formatted)
-			} else {
-				result.WriteString(vm.str(val))
+			formatted, fmtErr := vm.formatValue(val, formatSpec)
+			if fmtErr != nil {
+				return nil, fmtErr
 			}
+			result.WriteString(formatted)
 			i = j + 1
 		} else if template[i] == '}' {
 			if i+1 < len(template) && template[i+1] == '}' {
@@ -2929,6 +2997,22 @@ func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) 
 		}
 	}
 	return &PyString{Value: result.String()}, nil
+}
+
+// formatValue formats a value with the given format spec, checking __format__ first.
+func (vm *VM) formatValue(val Value, spec string) (string, error) {
+	if inst, ok := val.(*PyInstance); ok {
+		if result, found, err := vm.callDunder(inst, "__format__", &PyString{Value: spec}); found {
+			if err != nil {
+				return "", err
+			}
+			if s, ok := result.(*PyString); ok {
+				return s.Value, nil
+			}
+			return "", fmt.Errorf("TypeError: __format__ must return a str, not %s", vm.typeName(result))
+		}
+	}
+	return vm.applyFormatSpec(val, spec), nil
 }
 
 // applyFormatSpec applies a format spec like ">10", "<10", "^10", ".2f", "05d"

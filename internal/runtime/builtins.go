@@ -211,6 +211,18 @@ func (vm *VM) initBuiltins() {
 				if s, ok := args[0].(*PyString); ok {
 					return parseComplexString(s.Value)
 				}
+				// Try __complex__ dunder on instances
+				if inst, ok := args[0].(*PyInstance); ok {
+					if result, found, err := vm.callDunder(inst, "__complex__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if c, ok := result.(*PyComplex); ok {
+							return c, nil
+						}
+						return nil, fmt.Errorf("TypeError: __complex__ returned non-complex (type %s)", vm.typeName(result))
+					}
+				}
 			}
 
 			// String not allowed with 2 args
@@ -239,6 +251,19 @@ func (vm *VM) initBuiltins() {
 				case *PyComplex:
 					realPart = v.Real
 					imagPart = v.Imag
+				case *PyInstance:
+					if result, found, err := vm.callDunder(v, "__float__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if f, ok := result.(*PyFloat); ok {
+							realPart = f.Value
+						} else {
+							return nil, fmt.Errorf("TypeError: __float__ returned non-float (type %s)", vm.typeName(result))
+						}
+					} else {
+						return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
+					}
 				default:
 					return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
 				}
@@ -258,6 +283,19 @@ func (vm *VM) initBuiltins() {
 					// complex(a, b) where b is complex: real += -b.Imag, imag += b.Real
 					realPart -= v.Imag
 					imagPart += v.Real
+				case *PyInstance:
+					if result, found, err := vm.callDunder(v, "__float__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if f, ok := result.(*PyFloat); ok {
+							imagPart += f.Value
+						} else {
+							return nil, fmt.Errorf("TypeError: __float__ returned non-float (type %s)", vm.typeName(result))
+						}
+					} else {
+						return nil, fmt.Errorf("TypeError: complex() second argument must be a number, not '%s'", vm.typeName(args[1]))
+					}
 				default:
 					return nil, fmt.Errorf("TypeError: complex() second argument must be a number, not '%s'", vm.typeName(args[1]))
 				}
@@ -283,6 +321,28 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("repr() takes exactly 1 argument (%d given)", len(args))
 			}
 			return &PyString{Value: vm.repr(args[0])}, nil
+		},
+	}
+
+	vm.builtins["format"] = &PyBuiltinFunc{
+		Name: "format",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return nil, fmt.Errorf("TypeError: format() takes 1 or 2 arguments (%d given)", len(args))
+			}
+			spec := ""
+			if len(args) == 2 {
+				if s, ok := args[1].(*PyString); ok {
+					spec = s.Value
+				} else {
+					return nil, fmt.Errorf("TypeError: format() argument 2 must be str, not %s", vm.typeName(args[1]))
+				}
+			}
+			result, err := vm.formatValue(args[0], spec)
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: result}, nil
 		},
 	}
 
@@ -513,6 +573,37 @@ func (vm *VM) initBuiltins() {
 			}
 			obj := args[0]
 			classInfo := args[1]
+
+			// Check for __instancecheck__ on metaclass (search MRO)
+			if cls, ok := classInfo.(*PyClass); ok && cls.Metaclass != nil {
+				typeClass, _ := vm.builtins["type"].(*PyClass)
+				for _, metaCls := range cls.Metaclass.Mro {
+					if metaCls == typeClass || metaCls.Name == "object" {
+						continue
+					}
+					if method, hasMethod := metaCls.Dict["__instancecheck__"]; hasMethod {
+						allArgs := []Value{cls, obj}
+						var result Value
+						var err error
+						switch fn := method.(type) {
+						case *PyFunction:
+							result, err = vm.callFunction(fn, allArgs, nil)
+						case *PyBuiltinFunc:
+							result, err = fn.Fn(allArgs, nil)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if result != nil {
+							if vm.truthy(result) {
+								return True, nil
+							}
+							return False, nil
+						}
+						break
+					}
+				}
+			}
 
 			// Helper to check if obj is instance of a type by name
 			checkTypeName := func(typeName string) bool {
@@ -941,6 +1032,15 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("reversed() takes exactly one argument (%d given)", len(args))
 			}
+			// Try __reversed__ dunder on PyInstance first
+			if inst, ok := args[0].(*PyInstance); ok {
+				if result, found, err := vm.callDunder(inst, "__reversed__"); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+			}
 			items, err := vm.toList(args[0])
 			if err != nil {
 				return nil, err
@@ -1071,6 +1171,79 @@ func (vm *VM) initBuiltins() {
 				return False, nil
 			}
 			return True, nil
+		},
+	}
+
+	// dir([obj]) - list attributes of object or names in current scope
+	vm.builtins["dir"] = &PyBuiltinFunc{
+		Name: "dir",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) > 1 {
+				return nil, fmt.Errorf("dir expected at most 1 argument, got %d", len(args))
+			}
+			if len(args) == 0 {
+				// No argument: return sorted names from current scope
+				names := make(map[string]bool)
+				if vm.frame != nil {
+					for k := range vm.frame.Globals {
+						names[k] = true
+					}
+					for k := range vm.builtins {
+						names[k] = true
+					}
+				}
+				return vm.sortedNameList(names), nil
+			}
+
+			obj := args[0]
+
+			// Check for __dir__ on instances
+			if inst, ok := obj.(*PyInstance); ok {
+				if result, found, err := vm.callDunder(inst, "__dir__"); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+			}
+
+			// Default: collect attributes
+			names := make(map[string]bool)
+			switch o := obj.(type) {
+			case *PyInstance:
+				if o.Dict != nil {
+					for k := range o.Dict {
+						names[k] = true
+					}
+				}
+				if o.Slots != nil {
+					for k := range o.Slots {
+						names[k] = true
+					}
+				}
+				for _, cls := range o.Class.Mro {
+					for k := range cls.Dict {
+						names[k] = true
+					}
+				}
+			case *PyClass:
+				for _, cls := range o.Mro {
+					for k := range cls.Dict {
+						names[k] = true
+					}
+				}
+			case *PyModule:
+				for k := range o.Dict {
+					names[k] = true
+				}
+			case *PyDict:
+				for _, item := range o.Items {
+					if ks, ok := item.(*PyString); ok {
+						names[ks.Value] = true
+					}
+				}
+			}
+			return vm.sortedNameList(names), nil
 		},
 	}
 
@@ -1217,7 +1390,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("hex() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0x%x", -n)}, nil
 			}
@@ -1232,7 +1408,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("oct() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0o%o", -n)}, nil
 			}
@@ -1247,7 +1426,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("bin() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0b%b", -n)}, nil
 			}
@@ -1261,6 +1443,20 @@ func (vm *VM) initBuiltins() {
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) < 1 || len(args) > 2 {
 				return nil, fmt.Errorf("round() takes 1 or 2 arguments (%d given)", len(args))
+			}
+			// Try __round__ dunder on PyInstance first
+			if inst, ok := args[0].(*PyInstance); ok {
+				var dunderArgs []Value
+				if len(args) == 2 {
+					dunderArgs = []Value{args[1]}
+				}
+				if result, found, err := vm.callDunder(inst, "__round__", dunderArgs...); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+				return nil, fmt.Errorf("TypeError: type %s doesn't define __round__ method", vm.typeName(args[0]))
 			}
 			num := vm.toFloat(args[0])
 
@@ -1406,6 +1602,37 @@ func (vm *VM) initBuiltins() {
 				return false
 			}
 
+			// Check for __subclasscheck__ on metaclass of arg 2 (search MRO)
+			if targetCls, ok := args[1].(*PyClass); ok && targetCls.Metaclass != nil {
+				typeClass, _ := vm.builtins["type"].(*PyClass)
+				for _, metaCls := range targetCls.Metaclass.Mro {
+					if metaCls == typeClass || metaCls.Name == "object" {
+						continue
+					}
+					if method, hasMethod := metaCls.Dict["__subclasscheck__"]; hasMethod {
+						allArgs := []Value{targetCls, args[0]}
+						var result Value
+						var err error
+						switch fn := method.(type) {
+						case *PyFunction:
+							result, err = vm.callFunction(fn, allArgs, nil)
+						case *PyBuiltinFunc:
+							result, err = fn.Fn(allArgs, nil)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if result != nil {
+							if vm.truthy(result) {
+								return True, nil
+							}
+							return False, nil
+						}
+						break
+					}
+				}
+			}
+
 			clsName, ok := getClassName(args[0])
 			if !ok {
 				return nil, fmt.Errorf("TypeError: issubclass() arg 1 must be a class")
@@ -1473,6 +1700,7 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["None"] = None
 	vm.builtins["True"] = True
 	vm.builtins["False"] = False
+	vm.builtins["NotImplemented"] = NotImplemented
 
 	// __build_class__ is used to create classes
 	vm.builtins["__build_class__"] = &PyBuiltinFunc{
@@ -1495,12 +1723,38 @@ func (vm *VM) initBuiltins() {
 			}
 			className := nameVal.Value
 
-			// Remaining args are base classes
+			// Remaining args are base classes — resolve __mro_entries__ for non-class bases
+			originalBases := args[2:]
 			var bases []*PyClass
-			for i := 2; i < len(args); i++ {
-				if base, ok := args[i].(*PyClass); ok {
+			for _, baseArg := range originalBases {
+				if base, ok := baseArg.(*PyClass); ok {
 					bases = append(bases, base)
+					continue
 				}
+				// Try __mro_entries__ for non-class bases (e.g. GenericAlias)
+				origTuple := &PyTuple{Items: make([]Value, len(originalBases))}
+				copy(origTuple.Items, originalBases)
+				if mroEntries, err := vm.getAttr(baseArg, "__mro_entries__"); err == nil {
+					if result, callErr := vm.call(mroEntries, []Value{origTuple}, nil); callErr == nil {
+						if tup, ok := result.(*PyTuple); ok {
+							for _, entry := range tup.Items {
+								if cls, ok := entry.(*PyClass); ok {
+									bases = append(bases, cls)
+								}
+							}
+							continue
+						}
+						if lst, ok := result.(*PyList); ok {
+							for _, entry := range lst.Items {
+								if cls, ok := entry.(*PyClass); ok {
+									bases = append(bases, cls)
+								}
+							}
+							continue
+						}
+					}
+				}
+				// If __mro_entries__ not found or failed, skip non-class base
 			}
 
 			// If no bases specified, implicitly inherit from object (Python 3 behavior)
@@ -1521,6 +1775,25 @@ func (vm *VM) initBuiltins() {
 			if mc, ok := kwargs["metaclass"]; ok {
 				if mcClass, ok := mc.(*PyClass); ok {
 					metaclass = mcClass
+				}
+			}
+
+			// If no explicit metaclass, infer from bases
+			if metaclass == nil {
+				for _, base := range bases {
+					if base.Metaclass != nil && base.Metaclass != typeClass {
+						if metaclass == nil {
+							metaclass = base.Metaclass
+						} else {
+							// Check if new metaclass is subclass of current
+							for _, m := range base.Metaclass.Mro {
+								if m == metaclass {
+									metaclass = base.Metaclass
+									break
+								}
+							}
+						}
+					}
 				}
 			}
 
@@ -1875,6 +2148,25 @@ func (vm *VM) initBuiltins() {
 	objectClass := vm.builtins["object"].(*PyClass)
 	objectClass.Mro = []*PyClass{objectClass}
 
+	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
+	objectClass.Dict["__getattribute__"] = &PyBuiltinFunc{
+		Name: "object.__getattribute__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("object.__getattribute__() takes exactly 2 arguments (%d given)", len(args))
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("descriptor '__getattribute__' requires a 'object' instance")
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			return vm.defaultGetAttribute(inst, name.Value)
+		},
+	}
+
 	// object.__setattr__(self, name, value) - direct instance dict assignment (bypasses user __setattr__)
 	objectClass.Dict["__setattr__"] = &PyBuiltinFunc{
 		Name: "object.__setattr__",
@@ -1974,6 +2266,29 @@ func (vm *VM) initBuiltins() {
 	}
 
 	// object.__init_subclass__(cls, **kwargs) - default hook, does nothing
+	objectClass.Dict["__sizeof__"] = &PyBuiltinFunc{
+		Name: "object.__sizeof__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 {
+				return nil, fmt.Errorf("descriptor '__sizeof__' requires an argument")
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return MakeInt(64), nil
+			}
+			// Base size for the instance struct
+			var size int64 = 64
+			if inst.Dict != nil {
+				// 8 bytes per key-value pair estimate
+				size += int64(len(inst.Dict) * 16)
+			}
+			if inst.Slots != nil {
+				size += int64(len(inst.Slots) * 16)
+			}
+			return MakeInt(size), nil
+		},
+	}
+
 	objectClass.Dict["__init_subclass__"] = &PyClassMethod{Func: &PyBuiltinFunc{
 		Name: "__init_subclass__",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -2442,6 +2757,20 @@ func (vm *VM) ComputeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error)
 	}
 
 	return result, nil
+}
+
+// sortedNameList converts a set of names to a sorted PyList of PyStrings.
+func (vm *VM) sortedNameList(names map[string]bool) *PyList {
+	sorted := make([]string, 0, len(names))
+	for k := range names {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+	items := make([]Value, len(sorted))
+	for i, s := range sorted {
+		items[i] = &PyString{Value: s}
+	}
+	return &PyList{Items: items}
 }
 
 // isAbstractValue checks if a value is marked as abstract

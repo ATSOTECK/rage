@@ -22,4 +22,6 @@ func InitAllModules() {
 	InitBase64Module()
 	InitAbcModule()
 	InitDataclassesModule()
+	InitCopyModule()
+	InitOperatorModule()
 }

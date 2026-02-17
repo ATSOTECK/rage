@@ -55,9 +55,9 @@ func InitMathModule() {
 		Func("cosh", mathUnaryFloat(math.Cosh)).
 		Func("tanh", mathUnaryFloat(math.Tanh)).
 		// Rounding and absolute value
-		Func("ceil", mathUnaryFloat(math.Ceil)).
-		Func("floor", mathUnaryFloat(math.Floor)).
-		Func("trunc", mathUnaryFloat(math.Trunc)).
+		Func("ceil", mathCeil).
+		Func("floor", mathFloor).
+		Func("trunc", mathTrunc).
 		Func("fabs", mathUnaryFloat(math.Abs)).
 		Func("copysign", mathBinaryFloat(math.Copysign)).
 		// Special functions
@@ -130,5 +130,50 @@ func mathDegrees(vm *runtime.VM) int {
 func mathRadians(vm *runtime.VM) int {
 	x := vm.CheckFloat(1)
 	vm.Push(runtime.NewFloat(x * math.Pi / 180.0))
+	return 1
+}
+
+func mathCeil(vm *runtime.VM) int {
+	v := vm.Get(1)
+	if inst, ok := v.(*runtime.PyInstance); ok {
+		if result, found := vm.CallDunder(inst, "__ceil__"); found {
+			vm.Push(result)
+			return 1
+		}
+		vm.RaiseError("TypeError: type %s doesn't define __ceil__ method", inst.Class.Name)
+		return 0
+	}
+	x := vm.CheckFloat(1)
+	vm.Push(runtime.NewInt(int64(math.Ceil(x))))
+	return 1
+}
+
+func mathFloor(vm *runtime.VM) int {
+	v := vm.Get(1)
+	if inst, ok := v.(*runtime.PyInstance); ok {
+		if result, found := vm.CallDunder(inst, "__floor__"); found {
+			vm.Push(result)
+			return 1
+		}
+		vm.RaiseError("TypeError: type %s doesn't define __floor__ method", inst.Class.Name)
+		return 0
+	}
+	x := vm.CheckFloat(1)
+	vm.Push(runtime.NewInt(int64(math.Floor(x))))
+	return 1
+}
+
+func mathTrunc(vm *runtime.VM) int {
+	v := vm.Get(1)
+	if inst, ok := v.(*runtime.PyInstance); ok {
+		if result, found := vm.CallDunder(inst, "__trunc__"); found {
+			vm.Push(result)
+			return 1
+		}
+		vm.RaiseError("TypeError: type %s doesn't define __trunc__ method", inst.Class.Name)
+		return 0
+	}
+	x := vm.CheckFloat(1)
+	vm.Push(runtime.NewInt(int64(math.Trunc(x))))
 	return 1
 }

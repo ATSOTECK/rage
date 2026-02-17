@@ -1236,9 +1236,45 @@ func (vm *VM) run() (Value, error) {
 			OpInplaceLShift, OpInplaceRShift, OpInplaceAnd, OpInplaceOr, OpInplaceXor:
 			b := vm.pop()
 			a := vm.pop()
-			// For now, inplace ops are the same as binary ops
+
+			// Try inplace dunder method on PyInstance first
+			var result Value
+			var err error
+			if inst, ok := a.(*PyInstance); ok {
+				var inplaceDunders = [...]string{
+					OpInplaceAdd - OpInplaceAdd:      "__iadd__",
+					OpInplaceSubtract - OpInplaceAdd:  "__isub__",
+					OpInplaceMultiply - OpInplaceAdd:  "__imul__",
+					OpInplaceDivide - OpInplaceAdd:    "__itruediv__",
+					OpInplaceFloorDiv - OpInplaceAdd:  "__ifloordiv__",
+					OpInplaceModulo - OpInplaceAdd:    "__imod__",
+					OpInplacePower - OpInplaceAdd:     "__ipow__",
+					OpInplaceMatMul - OpInplaceAdd:    "__imatmul__",
+					OpInplaceLShift - OpInplaceAdd:    "__ilshift__",
+					OpInplaceRShift - OpInplaceAdd:    "__irshift__",
+					OpInplaceAnd - OpInplaceAdd:       "__iand__",
+					OpInplaceOr - OpInplaceAdd:        "__ior__",
+					OpInplaceXor - OpInplaceAdd:       "__ixor__",
+				}
+				dunder := inplaceDunders[op-OpInplaceAdd]
+				var found bool
+				result, found, err = vm.callDunder(inst, dunder, b)
+				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+				}
+				if found && result != nil {
+					vm.push(result)
+					continue
+				}
+			}
+
+			// Fall back to regular binary op
 			binOp := op - OpInplaceAdd + OpBinaryAdd
-			result, err := vm.binaryOp(binOp, a, b)
+			result, err = vm.binaryOp(binOp, a, b)
 			if err != nil {
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr

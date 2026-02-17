@@ -15,7 +15,7 @@ standard library you can pick and choose which modules are made available to scr
 - Embeddable - designed to be used as a library in Go applications
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
-- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, io, base64, abc, dataclasses
+- Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, io, base64, abc, dataclasses, copy
 - Go interoperability - call Go functions from Python and vice versa
 
 ## Installation
@@ -26,7 +26,7 @@ go get github.com/ATSOTECK/rage
 
 ## Tests
 - **Unit tests**: `go test ./...`
-- **Integration tests**: 97 scripts with 1976 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, and more
+- **Integration tests**: 104 scripts with 2062 tests covering data types, operators, control flow, functions, classes, exceptions, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
@@ -293,6 +293,7 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 | base64 | `rage.ModuleBase64` | Base16, Base32, Base64 data encodings |
 | abc | `rage.ModuleAbc` | Abstract base classes (ABC, ABCMeta, abstractmethod) |
 | dataclasses | `rage.ModuleDataclasses` | Data class decorator and field utilities |
+| copy | `rage.ModuleCopy` | Shallow and deep copy operations |
 
 ## Working with Values
 
@@ -419,8 +420,8 @@ RAGE is under active development. Currently supported:
 - Walrus operator: assignment expressions (`:=`)
 - Extended unpacking: `a, *rest, b = [1, 2, 3, 4]`
 - Descriptor protocol: `__get__`, `__set__`, `__delete__`, `__set_name__` (data descriptors, non-data descriptors, class-level access)
-- Dunder methods for custom classes: `__new__`, `__init__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__matmul__`, `__eq__`, `__lt__`, etc. including reflected variants)
-- Built-in functions: print (with `sep`, `end`, `flush`), len, range, str, int, float, complex, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
+- Dunder methods for custom classes: `__new__`, `__init__`, `__del__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__setattr__`, `__delattr__`, `__getitem__`, `__setitem__`, `__delitem__`, `__missing__`, `__enter__`, `__exit__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, `__bytes__`, `__format__`, `__sizeof__`, `__copy__`, `__deepcopy__`, `__class_getitem__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__matmul__`, `__eq__`, `__lt__`, etc. including reflected variants)
+- Built-in functions: print (with `sep`, `end`, `flush`), len, range, str, int, float, complex, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, format, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
 
 ### Not Yet Implemented
 - Full async/await - async generators, async context managers (basic support via asyncio module)

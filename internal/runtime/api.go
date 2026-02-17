@@ -761,6 +761,44 @@ func (vm *VM) TypeError(expected string, got Value) {
 	})
 }
 
+// CallDunder looks up and calls a dunder method on a PyInstance via MRO.
+// Returns (result, found). If found is false, no method was found.
+// Panics with RaiseError on call errors (matching GoFunction conventions).
+func (vm *VM) CallDunder(inst *PyInstance, name string, args ...Value) (Value, bool) {
+	result, found, err := vm.callDunder(inst, name, args...)
+	if err != nil {
+		vm.RaiseError("%s", err.Error())
+		return nil, false
+	}
+	return result, found
+}
+
+// CallFunction calls a PyFunction with the given arguments.
+func (vm *VM) CallFunction(fn *PyFunction, args []Value, kwargs map[string]Value) (Value, error) {
+	return vm.callFunction(fn, args, kwargs)
+}
+
+// IsInstanceOf checks if an instance is an instance of a class (including subclasses via MRO).
+func (vm *VM) IsInstanceOf(inst *PyInstance, cls *PyClass) bool {
+	return vm.isInstanceOf(inst, cls)
+}
+
+// CallDunderWithError looks up and calls a dunder method on a PyInstance via MRO.
+// Returns (result, found, error) - for use in PyBuiltinFunc where errors are returned.
+func (vm *VM) CallDunderWithError(inst *PyInstance, name string, args ...Value) (Value, bool, error) {
+	return vm.callDunder(inst, name, args...)
+}
+
+// TypeNameOf returns the Python type name for a value.
+func (vm *VM) TypeNameOf(v Value) string {
+	return vm.typeName(v)
+}
+
+// GetIntIndex exports getIntIndex for use by stdlib packages.
+func (vm *VM) GetIntIndex(v Value) (int64, error) {
+	return vm.getIntIndex(v)
+}
+
 // RaiseError raises a Python-style error.
 // The format string can optionally start with an exception type prefix like "ValueError: ".
 func (vm *VM) RaiseError(format string, args ...any) {

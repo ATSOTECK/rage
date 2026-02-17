@@ -6,6 +6,56 @@ import (
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
+// getInstanceClass returns the PyClass of a value, or nil if not a PyInstance.
+func getInstanceClass(v runtime.Value) *runtime.PyClass {
+	if inst, ok := v.(*runtime.PyInstance); ok {
+		return inst.Class
+	}
+	return nil
+}
+
+// callSubclassHook searches cls's MRO for __subclasshook__ and calls it with subclass.
+// Returns True/False if the hook gave a definitive answer, or nil if it returned NotImplemented
+// or was not found (meaning the caller should fall through to normal behavior).
+func callSubclassHook(vm *runtime.VM, cls *runtime.PyClass, subclass *runtime.PyClass) runtime.Value {
+	for _, mroCls := range cls.Mro {
+		if hook, ok := mroCls.Dict["__subclasshook__"]; ok {
+			// __subclasshook__ is a classmethod; call with cls as first arg
+			var result runtime.Value
+			var err error
+			switch fn := hook.(type) {
+			case *runtime.PyClassMethod:
+				// Unwrap the classmethod
+				switch inner := fn.Func.(type) {
+				case *runtime.PyFunction:
+					result, err = vm.CallFunction(inner, []runtime.Value{cls, subclass}, nil)
+				case *runtime.PyBuiltinFunc:
+					result, err = inner.Fn([]runtime.Value{cls, subclass}, nil)
+				}
+			case *runtime.PyFunction:
+				result, err = vm.CallFunction(fn, []runtime.Value{cls, subclass}, nil)
+			case *runtime.PyBuiltinFunc:
+				result, err = fn.Fn([]runtime.Value{cls, subclass}, nil)
+			}
+			if err != nil {
+				return nil // treat errors as NotImplemented
+			}
+			// Check for NotImplemented
+			if _, isNotImpl := result.(*runtime.PyNotImplementedType); isNotImpl {
+				return nil // fall through to normal check
+			}
+			if result == nil {
+				return nil
+			}
+			if vm.Truthy(result) {
+				return runtime.True
+			}
+			return runtime.False
+		}
+	}
+	return nil
+}
+
 // makeRegisterMethod creates a register() builtin for an ABC class.
 // It appends the argument to the class's RegisteredSubclasses and returns it (for use as a decorator).
 func makeRegisterMethod(owner *runtime.PyClass) *runtime.PyBuiltinFunc {
@@ -47,12 +97,95 @@ func InitAbcModule() {
 		abcMetaClass.Mro, _ = vm.ComputeC3MRO(abcMetaClass, abcMetaClass.Bases)
 		abcMetaClass.Dict["register"] = makeRegisterMethod(abcMetaClass)
 
+		// __instancecheck__ - called by isinstance() when metaclass is ABCMeta
+		abcMetaClass.Dict["__instancecheck__"] = &runtime.PyBuiltinFunc{
+			Name: "__instancecheck__",
+			Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+				if len(args) < 2 {
+					return nil, fmt.Errorf("TypeError: __instancecheck__ requires 2 arguments")
+				}
+				cls, ok := args[0].(*runtime.PyClass)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: __instancecheck__ first arg must be a class")
+				}
+				instance := args[1]
+
+				// Try __subclasshook__ on cls MRO
+				instClass := getInstanceClass(instance)
+				if instClass != nil {
+					result := callSubclassHook(vm, cls, instClass)
+					if result != nil {
+						return result, nil
+					}
+				}
+
+				// Fall back to normal isinstance check
+				if inst, ok := instance.(*runtime.PyInstance); ok {
+					if vm.IsInstanceOf(inst, cls) {
+						return runtime.True, nil
+					}
+					// Check registered virtual subclasses on cls and its MRO
+					for _, mroCls := range cls.Mro {
+						for _, reg := range mroCls.RegisteredSubclasses {
+							if vm.IsInstanceOf(inst, reg) {
+								return runtime.True, nil
+							}
+						}
+					}
+				}
+				return runtime.False, nil
+			},
+		}
+
+		// __subclasscheck__ - called by issubclass() when metaclass is ABCMeta
+		abcMetaClass.Dict["__subclasscheck__"] = &runtime.PyBuiltinFunc{
+			Name: "__subclasscheck__",
+			Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+				if len(args) < 2 {
+					return nil, fmt.Errorf("TypeError: __subclasscheck__ requires 2 arguments")
+				}
+				cls, ok := args[0].(*runtime.PyClass)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: __subclasscheck__ first arg must be a class")
+				}
+				subclass, ok := args[1].(*runtime.PyClass)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: issubclass() arg 1 must be a class")
+				}
+
+				// Try __subclasshook__ on cls MRO
+				result := callSubclassHook(vm, cls, subclass)
+				if result != nil {
+					return result, nil
+				}
+
+				// Fall back to normal MRO-based subclass check
+				for _, mroClass := range subclass.Mro {
+					if mroClass == cls {
+						return runtime.True, nil
+					}
+				}
+				// Check registered virtual subclasses on cls and its MRO
+				for _, mroCls := range cls.Mro {
+					for _, reg := range mroCls.RegisteredSubclasses {
+						for _, mroClass := range subclass.Mro {
+							if mroClass == reg {
+								return runtime.True, nil
+							}
+						}
+					}
+				}
+				return runtime.False, nil
+			},
+		}
+
 		// Create ABC class (convenience base class)
 		abcClass := &runtime.PyClass{
-			Name:  "ABC",
-			Bases: []*runtime.PyClass{objectClass},
-			Dict:  make(map[string]runtime.Value),
-			IsABC: true,
+			Name:      "ABC",
+			Bases:     []*runtime.PyClass{objectClass},
+			Dict:      make(map[string]runtime.Value),
+			IsABC:     true,
+			Metaclass: abcMetaClass,
 		}
 		abcClass.Mro, _ = vm.ComputeC3MRO(abcClass, abcClass.Bases)
 		abcClass.Dict["register"] = makeRegisterMethod(abcClass)
