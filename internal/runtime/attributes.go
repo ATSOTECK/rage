@@ -284,7 +284,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					}
 					note, ok := args[0].(*PyString)
 					if !ok {
-						return nil, fmt.Errorf("note must be a str, not '%s'", vm.typeName(args[0]))
+						return nil, fmt.Errorf("TypeError: note must be a str, not '%s'", vm.typeName(args[0]))
 					}
 					if exc.Notes == nil {
 						exc.Notes = &PyList{Items: []Value{}}

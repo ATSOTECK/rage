@@ -2623,7 +2623,7 @@ func (vm *VM) initExceptionClasses() {
 			}
 			note, ok := args[1].(*PyString)
 			if !ok {
-				return nil, fmt.Errorf("note must be a str, not '%s'", vm.typeName(args[1]))
+				return nil, fmt.Errorf("TypeError: note must be a str, not '%s'", vm.typeName(args[1]))
 			}
 			notes, exists := self.Dict["__notes__"]
 			if !exists {

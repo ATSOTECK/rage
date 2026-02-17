@@ -170,3 +170,75 @@ def test_eg_message():
     eg = ExceptionGroup("test message", [ValueError("v")])
     expect(eg.message).to_be("test message")
 test("ExceptionGroup message attribute", test_eg_message)
+
+# Test 19: add_note basic usage
+def test_add_note():
+    e = ValueError("oops")
+    e.add_note("extra context")
+    expect(len(e.__notes__)).to_be(1)
+    expect(e.__notes__[0]).to_be("extra context")
+test("add_note basic usage", test_add_note)
+
+# Test 20: add_note multiple notes
+def test_add_note_multiple():
+    e = TypeError("bad type")
+    e.add_note("note 1")
+    e.add_note("note 2")
+    e.add_note("note 3")
+    expect(len(e.__notes__)).to_be(3)
+    expect(e.__notes__[0]).to_be("note 1")
+    expect(e.__notes__[1]).to_be("note 2")
+    expect(e.__notes__[2]).to_be("note 3")
+test("add_note multiple notes", test_add_note_multiple)
+
+# Test 21: __notes__ not present before add_note
+def test_notes_not_present():
+    e = ValueError("v")
+    expect(hasattr(e, "__notes__")).to_be(False)
+test("__notes__ not present before add_note", test_notes_not_present)
+
+# Test 22: add_note in except block
+def test_add_note_in_except():
+    try:
+        raise ValueError("original")
+    except ValueError as e:
+        e.add_note("caught and annotated")
+        expect(len(e.__notes__)).to_be(1)
+        expect(e.__notes__[0]).to_be("caught and annotated")
+test("add_note in except block", test_add_note_in_except)
+
+# Test 23: add_note preserved on re-raise
+def test_add_note_reraise():
+    note_found = False
+    try:
+        try:
+            raise ValueError("inner")
+        except ValueError as e:
+            e.add_note("added in inner handler")
+            raise
+    except ValueError as e2:
+        note_found = len(e2.__notes__) == 1 and e2.__notes__[0] == "added in inner handler"
+    expect(note_found).to_be(True)
+test("add_note preserved on re-raise", test_add_note_reraise)
+
+# Test 24: add_note before raise
+def test_add_note_before_raise():
+    e = ValueError("pre-annotated")
+    e.add_note("added before raise")
+    try:
+        raise e
+    except ValueError as caught:
+        expect(len(caught.__notes__)).to_be(1)
+        expect(caught.__notes__[0]).to_be("added before raise")
+test("add_note before raise", test_add_note_before_raise)
+
+# Test 25: add_note requires string argument
+def test_add_note_type_check():
+    e = ValueError("v")
+    got_error = False
+    try:
+        e.add_note(42)
+    except TypeError:
+        got_error = True
+    expect(got_error).to_be(True)
+test("add_note requires string argument", test_add_note_type_check)
