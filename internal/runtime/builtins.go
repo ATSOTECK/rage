@@ -211,6 +211,18 @@ func (vm *VM) initBuiltins() {
 				if s, ok := args[0].(*PyString); ok {
 					return parseComplexString(s.Value)
 				}
+				// Try __complex__ dunder on instances
+				if inst, ok := args[0].(*PyInstance); ok {
+					if result, found, err := vm.callDunder(inst, "__complex__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if c, ok := result.(*PyComplex); ok {
+							return c, nil
+						}
+						return nil, fmt.Errorf("TypeError: __complex__ returned non-complex (type %s)", vm.typeName(result))
+					}
+				}
 			}
 
 			// String not allowed with 2 args
@@ -239,6 +251,19 @@ func (vm *VM) initBuiltins() {
 				case *PyComplex:
 					realPart = v.Real
 					imagPart = v.Imag
+				case *PyInstance:
+					if result, found, err := vm.callDunder(v, "__float__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if f, ok := result.(*PyFloat); ok {
+							realPart = f.Value
+						} else {
+							return nil, fmt.Errorf("TypeError: __float__ returned non-float (type %s)", vm.typeName(result))
+						}
+					} else {
+						return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
+					}
 				default:
 					return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
 				}
@@ -258,6 +283,19 @@ func (vm *VM) initBuiltins() {
 					// complex(a, b) where b is complex: real += -b.Imag, imag += b.Real
 					realPart -= v.Imag
 					imagPart += v.Real
+				case *PyInstance:
+					if result, found, err := vm.callDunder(v, "__float__"); found {
+						if err != nil {
+							return nil, err
+						}
+						if f, ok := result.(*PyFloat); ok {
+							imagPart += f.Value
+						} else {
+							return nil, fmt.Errorf("TypeError: __float__ returned non-float (type %s)", vm.typeName(result))
+						}
+					} else {
+						return nil, fmt.Errorf("TypeError: complex() second argument must be a number, not '%s'", vm.typeName(args[1]))
+					}
 				default:
 					return nil, fmt.Errorf("TypeError: complex() second argument must be a number, not '%s'", vm.typeName(args[1]))
 				}
