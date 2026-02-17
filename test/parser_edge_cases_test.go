@@ -376,18 +376,12 @@ del a
 `
 	vm := runtime.NewVM()
 	code, errs := compiler.CompileSource(source, "<test>")
-	if len(errs) > 0 {
-		t.Skip("del statement not supported")
-		return
-	}
+	require.Empty(t, errs)
 	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("del statement not fully supported: " + err.Error())
-		return
-	}
-	// After del, 'a' should not exist
-	a := vm.GetGlobal("a")
-	assert.Nil(t, a)
+	require.NoError(t, err)
+	// After del, 'a' should not exist in globals
+	_, exists := vm.Globals["a"]
+	assert.False(t, exists, "variable 'a' should be deleted from globals")
 }
 
 // =============================================================================

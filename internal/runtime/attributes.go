@@ -2818,14 +2818,18 @@ func (vm *VM) delAttr(obj Value, name string) error {
 			}
 		}
 		if o.Slots != nil {
-			if _, exists := o.Slots[name]; !exists {
+			val, exists := o.Slots[name]
+			if !exists {
 				return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
 			}
+			vm.callDel(val)
 			delete(o.Slots, name)
 		} else {
-			if _, exists := o.Dict[name]; !exists {
+			val, exists := o.Dict[name]
+			if !exists {
 				return fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
 			}
+			vm.callDel(val)
 			delete(o.Dict, name)
 		}
 		return nil
