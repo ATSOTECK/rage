@@ -651,6 +651,7 @@ type ExceptHandler struct {
 	Type     Expr        // can be nil for bare except
 	Name     *Identifier // can be nil
 	Body     []Stmt
+	IsStar   bool // true for "except* Type:"
 	StartPos Position
 	EndPos   Position
 }

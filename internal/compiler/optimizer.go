@@ -2170,7 +2170,7 @@ func isJumpOp(op runtime.Opcode) bool {
 		runtime.OpPopJumpIfTrue, runtime.OpPopJumpIfFalse,
 		runtime.OpJumpIfTrueOrPop, runtime.OpJumpIfFalseOrPop,
 		runtime.OpForIter, runtime.OpSetupExcept, runtime.OpSetupFinally,
-		runtime.OpSetupWith,
+		runtime.OpSetupExceptStar, runtime.OpSetupWith,
 		// New compare+jump superinstructions
 		runtime.OpCompareLtJump, runtime.OpCompareLeJump,
 		runtime.OpCompareGtJump, runtime.OpCompareGeJump,

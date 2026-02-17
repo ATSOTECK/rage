@@ -1402,6 +1402,14 @@ func (c *Compiler) compileFor(s *model.For) {
 }
 
 func (c *Compiler) compileTry(s *model.Try) {
+	// Check if any handler uses except* syntax
+	for _, h := range s.Handlers {
+		if h.IsStar {
+			c.compileTryStar(s)
+			return
+		}
+	}
+
 	hasFinally := len(s.FinalBody) > 0
 	hasExcept := len(s.Handlers) > 0
 
@@ -1504,6 +1512,93 @@ func (c *Compiler) compileTry(s *model.Try) {
 		}
 
 		// End finally - will re-raise exception if one was active
+		c.emit(runtime.OpEndFinally)
+	}
+}
+
+func (c *Compiler) compileTryStar(s *model.Try) {
+	hasFinally := len(s.FinalBody) > 0
+
+	// If we have a finally block, set it up first (it wraps everything)
+	var finallyJump int
+	if hasFinally {
+		finallyJump = c.emitJump(runtime.OpSetupFinally)
+	}
+
+	// Setup except* handler
+	handlerJump := c.emitJump(runtime.OpSetupExceptStar)
+
+	// Compile try body
+	for _, stmt := range s.Body {
+		c.compileStmt(stmt)
+	}
+
+	// Pop except* handler (try body completed normally)
+	c.emit(runtime.OpPopExcept)
+	successJump := c.emitJump(runtime.OpJump)
+
+	// Handler entry: stack has [eg]
+	c.patchJump(handlerJump, c.currentOffset())
+
+	// Each except* handler checks its type against the exception group
+	// Stack invariant: [eg] at start and end of each handler
+	for _, handler := range s.Handlers {
+		// DUP the eg for EXCEPT_STAR_MATCH to consume: [eg, eg]
+		c.emit(runtime.OpDup)
+		// Compile the exception type: [eg, eg, type]
+		c.compileExpr(handler.Type)
+		// EXCEPT_STAR_MATCH pops eg_dup + type, pushes result: [eg, result]
+		c.emit(runtime.OpExceptStarMatch)
+
+		// DUP result for test: [eg, result, result]
+		c.emit(runtime.OpDup)
+		// POP_JUMP_IF_FALSE pops copy: [eg, result]
+		skipJump := c.emitJump(runtime.OpPopJumpIfFalse)
+
+		// Matched — clear exception state and store/pop subgroup
+		c.emit(runtime.OpClearException)
+		if handler.Name != nil {
+			c.compileStore(handler.Name) // pops result: [eg]
+		} else {
+			c.emit(runtime.OpPop) // pops result: [eg]
+		}
+
+		// Compile handler body
+		for _, stmt := range handler.Body {
+			c.compileStmt(stmt)
+		}
+
+		// Clear exception variable after handler (Python 3 semantics)
+		if handler.Name != nil {
+			c.emit(runtime.OpLoadNone)
+			c.compileStore(handler.Name)
+		}
+
+		afterBodyJump := c.emitJump(runtime.OpJump)
+
+		// skip: no match — pop the None result: [eg]
+		c.patchJump(skipJump, c.currentOffset())
+		c.emit(runtime.OpPop) // pop None: [eg]
+
+		// next_handler:
+		c.patchJump(afterBodyJump, c.currentOffset())
+	}
+
+	// EXCEPT_STAR_RERAISE: re-raise remaining or clean up
+	c.emit(runtime.OpExceptStarReraise)
+
+	// Else clause (runs if no exception was raised)
+	c.patchJump(successJump, c.currentOffset())
+	for _, stmt := range s.OrElse {
+		c.compileStmt(stmt)
+	}
+
+	// Finally clause
+	if hasFinally {
+		c.patchJump(finallyJump, c.currentOffset())
+		for _, stmt := range s.FinalBody {
+			c.compileStmt(stmt)
+		}
 		c.emit(runtime.OpEndFinally)
 	}
 }
