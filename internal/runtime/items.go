@@ -95,8 +95,46 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 			return result, err
 		}
 		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
+	case *PyClass:
+		// Class subscript: cls[item] → cls.__class_getitem__(item)
+		for _, cls := range o.Mro {
+			if method, ok := cls.Dict["__class_getitem__"]; ok {
+				// Build args: (cls, item)
+				args := []Value{o, index}
+				switch fn := method.(type) {
+				case *PyFunction:
+					result, err := vm.callFunction(fn, args, nil)
+					return result, err
+				case *PyBuiltinFunc:
+					result, err := fn.Fn(args, nil)
+					return result, err
+				case *PyClassMethod:
+					// __class_getitem__ is implicitly a classmethod
+					args := []Value{o, index}
+					return vm.call(fn.Func, args, nil)
+				}
+			}
+		}
+		return nil, fmt.Errorf("TypeError: type '%s' is not subscriptable", o.Name)
+	case *PyBuiltinFunc:
+		// Built-in type subscript: list[int], dict[str, int], etc.
+		switch o.Name {
+		case "list", "dict", "tuple", "set", "frozenset", "type", "bytearray", "memoryview":
+			args := vm.unpackSubscriptArgs(index)
+			return &GenericAlias{Origin: o, Args: args}, nil
+		}
+		return nil, fmt.Errorf("TypeError: '%s' is not subscriptable", o.Name)
 	}
 	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
+}
+
+// unpackSubscriptArgs converts a subscript index into a slice of type arguments.
+// For dict[str, int], the compiler produces a tuple (str, int) as the index.
+func (vm *VM) unpackSubscriptArgs(index Value) []Value {
+	if t, ok := index.(*PyTuple); ok {
+		return t.Items
+	}
+	return []Value{index}
 }
 
 // computeSliceIndices normalizes start/stop/step for a sequence of the given length.

@@ -1057,3 +1057,52 @@ type PyCoroutine struct {
 func (c *PyCoroutine) Type() string   { return "coroutine" }
 func (c *PyCoroutine) String() string { return fmt.Sprintf("<coroutine object %s>", c.Name) }
 
+// GenericAlias represents a parameterized type like list[int] or dict[str, int]
+type GenericAlias struct {
+	Origin Value   // The original class/builtin (e.g., list, dict, or a PyClass)
+	Args   []Value // The type arguments
+}
+
+func (g *GenericAlias) Type() string { return "GenericAlias" }
+func (g *GenericAlias) String() string {
+	return g.formatRepr()
+}
+
+func (g *GenericAlias) formatRepr() string {
+	// Get origin name
+	var originName string
+	switch o := g.Origin.(type) {
+	case *PyClass:
+		originName = o.Name
+	case *PyBuiltinFunc:
+		originName = o.Name
+	default:
+		originName = fmt.Sprintf("%v", o)
+	}
+
+	if len(g.Args) == 0 {
+		return originName
+	}
+
+	args := make([]string, len(g.Args))
+	for i, arg := range g.Args {
+		args[i] = genericAliasArgRepr(arg)
+	}
+	return fmt.Sprintf("%s[%s]", originName, strings.Join(args, ", "))
+}
+
+func genericAliasArgRepr(v Value) string {
+	switch a := v.(type) {
+	case *PyClass:
+		return a.Name
+	case *PyBuiltinFunc:
+		return a.Name
+	case *PyNone:
+		return "None"
+	case *GenericAlias:
+		return a.formatRepr()
+	default:
+		return fmt.Sprintf("%v", a)
+	}
+}
+

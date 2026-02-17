@@ -548,6 +548,14 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}
 		}
 		return nil, fmt.Errorf("type object '%s' has no attribute '%s'", o.Name, name)
+	case *GenericAlias:
+		switch name {
+		case "__origin__":
+			return o.Origin, nil
+		case "__args__":
+			return &PyTuple{Items: o.Args}, nil
+		}
+		return nil, fmt.Errorf("AttributeError: 'GenericAlias' object has no attribute '%s'", name)
 	case *PyDict:
 		d := o
 		switch name {
