@@ -1331,6 +1331,20 @@ func (vm *VM) initBuiltins() {
 			if len(args) < 1 || len(args) > 2 {
 				return nil, fmt.Errorf("round() takes 1 or 2 arguments (%d given)", len(args))
 			}
+			// Try __round__ dunder on PyInstance first
+			if inst, ok := args[0].(*PyInstance); ok {
+				var dunderArgs []Value
+				if len(args) == 2 {
+					dunderArgs = []Value{args[1]}
+				}
+				if result, found, err := vm.callDunder(inst, "__round__", dunderArgs...); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+				return nil, fmt.Errorf("TypeError: type %s doesn't define __round__ method", vm.typeName(args[0]))
+			}
 			num := vm.toFloat(args[0])
 
 			if len(args) == 1 {
