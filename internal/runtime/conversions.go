@@ -540,6 +540,8 @@ func (vm *VM) str(v Value) string {
 		return fmt.Sprintf("<%s object>", val.Class.Name)
 	case *PyClass:
 		return fmt.Sprintf("<class '%s'>", val.Name)
+	case *GenericAlias:
+		return val.formatRepr()
 	case *PyException:
 		return vm.formatException(val)
 	default:
@@ -668,6 +670,8 @@ func (vm *VM) typeName(v Value) string {
 		return "userdata"
 	case *PyModule:
 		return "module"
+	case *GenericAlias:
+		return "GenericAlias"
 	default:
 		return "object"
 	}
@@ -728,6 +732,8 @@ func (vm *VM) repr(v Value) string {
 			}
 		}
 		return fmt.Sprintf("<%s object>", val.Class.Name)
+	case *GenericAlias:
+		return val.formatRepr()
 	default:
 		return vm.str(v)
 	}

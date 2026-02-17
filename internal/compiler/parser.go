@@ -2416,6 +2416,28 @@ func (p *Parser) parseSlice() model.Expr {
 	if !p.check(model.TK_Colon) {
 		lower = p.parseExpression()
 		if !p.check(model.TK_Colon) {
+			// Check for comma-separated tuple index: obj[a, b, c]
+			if p.check(model.TK_Comma) {
+				elts := []model.Expr{lower}
+				for p.match(model.TK_Comma) {
+					if p.check(model.TK_RBracket) {
+						break
+					}
+					next := p.parseExpression()
+					if next == nil {
+						break
+					}
+					elts = append(elts, next)
+				}
+				if len(elts) == 1 {
+					return lower
+				}
+				return &model.Tuple{
+					Elts:     elts,
+					StartPos: lower.Pos(),
+					EndPos:   elts[len(elts)-1].End(),
+				}
+			}
 			return lower // Regular index
 		}
 	}
