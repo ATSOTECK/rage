@@ -2049,6 +2049,25 @@ func (vm *VM) initBuiltins() {
 	objectClass := vm.builtins["object"].(*PyClass)
 	objectClass.Mro = []*PyClass{objectClass}
 
+	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
+	objectClass.Dict["__getattribute__"] = &PyBuiltinFunc{
+		Name: "object.__getattribute__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("object.__getattribute__() takes exactly 2 arguments (%d given)", len(args))
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("descriptor '__getattribute__' requires a 'object' instance")
+			}
+			name, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("attribute name must be string, not '%s'", vm.typeName(args[1]))
+			}
+			return vm.defaultGetAttribute(inst, name.Value)
+		},
+	}
+
 	// object.__setattr__(self, name, value) - direct instance dict assignment (bypasses user __setattr__)
 	objectClass.Dict["__setattr__"] = &PyBuiltinFunc{
 		Name: "object.__setattr__",
