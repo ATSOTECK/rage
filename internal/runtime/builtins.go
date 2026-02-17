@@ -1174,6 +1174,79 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	// dir([obj]) - list attributes of object or names in current scope
+	vm.builtins["dir"] = &PyBuiltinFunc{
+		Name: "dir",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) > 1 {
+				return nil, fmt.Errorf("dir expected at most 1 argument, got %d", len(args))
+			}
+			if len(args) == 0 {
+				// No argument: return sorted names from current scope
+				names := make(map[string]bool)
+				if vm.frame != nil {
+					for k := range vm.frame.Globals {
+						names[k] = true
+					}
+					for k := range vm.builtins {
+						names[k] = true
+					}
+				}
+				return vm.sortedNameList(names), nil
+			}
+
+			obj := args[0]
+
+			// Check for __dir__ on instances
+			if inst, ok := obj.(*PyInstance); ok {
+				if result, found, err := vm.callDunder(inst, "__dir__"); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+			}
+
+			// Default: collect attributes
+			names := make(map[string]bool)
+			switch o := obj.(type) {
+			case *PyInstance:
+				if o.Dict != nil {
+					for k := range o.Dict {
+						names[k] = true
+					}
+				}
+				if o.Slots != nil {
+					for k := range o.Slots {
+						names[k] = true
+					}
+				}
+				for _, cls := range o.Class.Mro {
+					for k := range cls.Dict {
+						names[k] = true
+					}
+				}
+			case *PyClass:
+				for _, cls := range o.Mro {
+					for k := range cls.Dict {
+						names[k] = true
+					}
+				}
+			case *PyModule:
+				for k := range o.Dict {
+					names[k] = true
+				}
+			case *PyDict:
+				for _, item := range o.Items {
+					if ks, ok := item.(*PyString); ok {
+						names[ks.Value] = true
+					}
+				}
+			}
+			return vm.sortedNameList(names), nil
+		},
+	}
+
 	// getattr(obj, name[, default]) - get attribute from object
 	vm.builtins["getattr"] = &PyBuiltinFunc{
 		Name: "getattr",
@@ -2658,6 +2731,20 @@ func (vm *VM) ComputeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error)
 	}
 
 	return result, nil
+}
+
+// sortedNameList converts a set of names to a sorted PyList of PyStrings.
+func (vm *VM) sortedNameList(names map[string]bool) *PyList {
+	sorted := make([]string, 0, len(names))
+	for k := range names {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+	items := make([]Value, len(sorted))
+	for i, s := range sorted {
+		items[i] = &PyString{Value: s}
+	}
+	return &PyList{Items: items}
 }
 
 // isAbstractValue checks if a value is marked as abstract
