@@ -574,6 +574,37 @@ func (vm *VM) initBuiltins() {
 			obj := args[0]
 			classInfo := args[1]
 
+			// Check for __instancecheck__ on metaclass (search MRO)
+			if cls, ok := classInfo.(*PyClass); ok && cls.Metaclass != nil {
+				typeClass, _ := vm.builtins["type"].(*PyClass)
+				for _, metaCls := range cls.Metaclass.Mro {
+					if metaCls == typeClass || metaCls.Name == "object" {
+						continue
+					}
+					if method, hasMethod := metaCls.Dict["__instancecheck__"]; hasMethod {
+						allArgs := []Value{cls, obj}
+						var result Value
+						var err error
+						switch fn := method.(type) {
+						case *PyFunction:
+							result, err = vm.callFunction(fn, allArgs, nil)
+						case *PyBuiltinFunc:
+							result, err = fn.Fn(allArgs, nil)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if result != nil {
+							if vm.truthy(result) {
+								return True, nil
+							}
+							return False, nil
+						}
+						break
+					}
+				}
+			}
+
 			// Helper to check if obj is instance of a type by name
 			checkTypeName := func(typeName string) bool {
 				switch o := obj.(type) {
@@ -1487,6 +1518,37 @@ func (vm *VM) initBuiltins() {
 					return true
 				}
 				return false
+			}
+
+			// Check for __subclasscheck__ on metaclass of arg 2 (search MRO)
+			if targetCls, ok := args[1].(*PyClass); ok && targetCls.Metaclass != nil {
+				typeClass, _ := vm.builtins["type"].(*PyClass)
+				for _, metaCls := range targetCls.Metaclass.Mro {
+					if metaCls == typeClass || metaCls.Name == "object" {
+						continue
+					}
+					if method, hasMethod := metaCls.Dict["__subclasscheck__"]; hasMethod {
+						allArgs := []Value{targetCls, args[0]}
+						var result Value
+						var err error
+						switch fn := method.(type) {
+						case *PyFunction:
+							result, err = vm.callFunction(fn, allArgs, nil)
+						case *PyBuiltinFunc:
+							result, err = fn.Fn(allArgs, nil)
+						}
+						if err != nil {
+							return nil, err
+						}
+						if result != nil {
+							if vm.truthy(result) {
+								return True, nil
+							}
+							return False, nil
+						}
+						break
+					}
+				}
 			}
 
 			clsName, ok := getClassName(args[0])
