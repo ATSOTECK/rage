@@ -286,6 +286,28 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	vm.builtins["format"] = &PyBuiltinFunc{
+		Name: "format",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 || len(args) > 2 {
+				return nil, fmt.Errorf("TypeError: format() takes 1 or 2 arguments (%d given)", len(args))
+			}
+			spec := ""
+			if len(args) == 2 {
+				if s, ok := args[1].(*PyString); ok {
+					spec = s.Value
+				} else {
+					return nil, fmt.Errorf("TypeError: format() argument 2 must be str, not %s", vm.typeName(args[1]))
+				}
+			}
+			result, err := vm.formatValue(args[0], spec)
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: result}, nil
+		},
+	}
+
 	vm.builtins["bool"] = &PyBuiltinFunc{
 		Name: "bool",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

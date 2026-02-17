@@ -2909,12 +2909,11 @@ func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) 
 			}
 
 			// Apply format spec
-			if formatSpec != "" {
-				formatted := vm.applyFormatSpec(val, formatSpec)
-				result.WriteString(formatted)
-			} else {
-				result.WriteString(vm.str(val))
+			formatted, fmtErr := vm.formatValue(val, formatSpec)
+			if fmtErr != nil {
+				return nil, fmtErr
 			}
+			result.WriteString(formatted)
 			i = j + 1
 		} else if template[i] == '}' {
 			if i+1 < len(template) && template[i+1] == '}' {
@@ -2929,6 +2928,22 @@ func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) 
 		}
 	}
 	return &PyString{Value: result.String()}, nil
+}
+
+// formatValue formats a value with the given format spec, checking __format__ first.
+func (vm *VM) formatValue(val Value, spec string) (string, error) {
+	if inst, ok := val.(*PyInstance); ok {
+		if result, found, err := vm.callDunder(inst, "__format__", &PyString{Value: spec}); found {
+			if err != nil {
+				return "", err
+			}
+			if s, ok := result.(*PyString); ok {
+				return s.Value, nil
+			}
+			return "", fmt.Errorf("TypeError: __format__ must return a str, not %s", vm.typeName(result))
+		}
+	}
+	return vm.applyFormatSpec(val, spec), nil
 }
 
 // applyFormatSpec applies a format spec like ">10", "<10", "^10", ".2f", "05d"
