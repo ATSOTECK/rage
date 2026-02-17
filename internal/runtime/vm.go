@@ -267,6 +267,7 @@ func (vm *VM) run() (Value, error) {
 
 		case OpDeleteName:
 			name := frame.Code.Names[arg]
+			vm.callDel(frame.Globals[name])
 			delete(frame.Globals, name)
 
 		case OpLoadFast:
@@ -284,6 +285,7 @@ func (vm *VM) run() (Value, error) {
 			frame.Locals[arg] = frame.Stack[frame.SP]
 
 		case OpDeleteFast:
+			vm.callDel(frame.Locals[arg])
 			frame.Locals[arg] = nil
 
 		case OpLoadDeref:
@@ -1014,6 +1016,11 @@ func (vm *VM) run() (Value, error) {
 		case OpStoreGlobal:
 			name := frame.Code.Names[arg]
 			frame.Globals[name] = vm.pop()
+
+		case OpDeleteGlobal:
+			name := frame.Code.Names[arg]
+			vm.callDel(frame.Globals[name])
+			delete(frame.Globals, name)
 
 		case OpLoadAttr:
 			name := frame.Code.Names[arg]

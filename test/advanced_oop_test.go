@@ -1014,17 +1014,13 @@ result = deleted
 	vm := runtime.NewVM()
 	code, errs, panicked := tryCompile(source)
 	if panicked || len(errs) > 0 {
-		t.Skip("__del__ not supported")
-		return
+		t.Fatalf("compilation failed: %v", errs)
 	}
+	_ = panicked
 	_, err := vm.Execute(code)
-	if err != nil {
-		t.Skip("__del__ not implemented: " + err.Error())
-		return
-	}
-	// Note: __del__ might not be called immediately
+	require.NoError(t, err)
 	result := vm.GetGlobal("result")
-	_ = result // Just check it doesn't crash
+	assert.Equal(t, true, result.(*runtime.PyBool).Value)
 }
 
 // =============================================================================

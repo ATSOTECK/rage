@@ -80,6 +80,27 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 	return nil, false, nil
 }
 
+// callDel calls __del__ on a PyInstance if the method exists in its MRO.
+// Errors from __del__ are silently ignored (matching CPython behavior).
+func (vm *VM) callDel(val Value) {
+	inst, ok := val.(*PyInstance)
+	if !ok {
+		return
+	}
+	for _, cls := range inst.Class.Mro {
+		if method, ok := cls.Dict["__del__"]; ok {
+			args := []Value{inst}
+			switch fn := method.(type) {
+			case *PyFunction:
+				vm.callFunction(fn, args, nil)
+			case *PyBuiltinFunc:
+				fn.Fn(args, nil)
+			}
+			return
+		}
+	}
+}
+
 func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 	// Bool is a subclass of int - coerce for unary operations
 	if ab, ok := a.(*PyBool); ok {
