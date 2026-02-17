@@ -460,6 +460,9 @@ func (vm *VM) str(v Value) string {
 	switch val := v.(type) {
 	case *PyNone:
 		return "None"
+	case *PyNotImplementedType:
+		_ = val
+		return "NotImplemented"
 	case *PyBool:
 		if val.Value {
 			return "True"
@@ -634,6 +637,9 @@ func (vm *VM) typeName(v Value) string {
 	switch val := v.(type) {
 	case *PyNone:
 		return "NoneType"
+	case *PyNotImplementedType:
+		_ = val
+		return "NotImplementedType"
 	case *PyBool:
 		return "bool"
 	case *PyInt:

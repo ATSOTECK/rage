@@ -1618,6 +1618,7 @@ func (vm *VM) initBuiltins() {
 	vm.builtins["None"] = None
 	vm.builtins["True"] = True
 	vm.builtins["False"] = False
+	vm.builtins["NotImplemented"] = NotImplemented
 
 	// __build_class__ is used to create classes
 	vm.builtins["__build_class__"] = &PyBuiltinFunc{
@@ -1666,6 +1667,25 @@ func (vm *VM) initBuiltins() {
 			if mc, ok := kwargs["metaclass"]; ok {
 				if mcClass, ok := mc.(*PyClass); ok {
 					metaclass = mcClass
+				}
+			}
+
+			// If no explicit metaclass, infer from bases
+			if metaclass == nil {
+				for _, base := range bases {
+					if base.Metaclass != nil && base.Metaclass != typeClass {
+						if metaclass == nil {
+							metaclass = base.Metaclass
+						} else {
+							// Check if new metaclass is subclass of current
+							for _, m := range base.Metaclass.Mro {
+								if m == metaclass {
+									metaclass = base.Metaclass
+									break
+								}
+							}
+						}
+					}
 				}
 			}
 

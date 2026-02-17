@@ -137,7 +137,14 @@ func TestMathModuleFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			result := vm.GetGlobal("result")
-			assert.InDelta(t, tt.expected, result.(*runtime.PyFloat).Value, 0.0001)
+			switch v := result.(type) {
+			case *runtime.PyFloat:
+				assert.InDelta(t, tt.expected, v.Value, 0.0001)
+			case *runtime.PyInt:
+				assert.InDelta(t, tt.expected, float64(v.Value), 0.0001)
+			default:
+				t.Fatalf("unexpected result type: %T", result)
+			}
 		})
 	}
 }

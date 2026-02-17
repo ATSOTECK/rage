@@ -27,6 +27,15 @@ func (n *PyNone) String() string { return "None" }
 // None is the singleton None value
 var None = &PyNone{}
 
+// PyNotImplementedType represents Python's NotImplemented singleton
+type PyNotImplementedType struct{}
+
+func (n *PyNotImplementedType) Type() string   { return "NotImplementedType" }
+func (n *PyNotImplementedType) String() string { return "NotImplemented" }
+
+// NotImplemented is the singleton NotImplemented value
+var NotImplemented = &PyNotImplementedType{}
+
 // PyBool represents a Python boolean
 type PyBool struct {
 	Value bool

@@ -773,6 +773,16 @@ func (vm *VM) CallDunder(inst *PyInstance, name string, args ...Value) (Value, b
 	return result, found
 }
 
+// CallFunction calls a PyFunction with the given arguments.
+func (vm *VM) CallFunction(fn *PyFunction, args []Value, kwargs map[string]Value) (Value, error) {
+	return vm.callFunction(fn, args, kwargs)
+}
+
+// IsInstanceOf checks if an instance is an instance of a class (including subclasses via MRO).
+func (vm *VM) IsInstanceOf(inst *PyInstance, cls *PyClass) bool {
+	return vm.isInstanceOf(inst, cls)
+}
+
 // CallDunderWithError looks up and calls a dunder method on a PyInstance via MRO.
 // Returns (result, found, error) - for use in PyBuiltinFunc where errors are returned.
 func (vm *VM) CallDunderWithError(inst *PyInstance, name string, args ...Value) (Value, bool, error) {
