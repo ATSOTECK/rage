@@ -1,6 +1,9 @@
 package runtime
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Item access
 
@@ -92,6 +95,14 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 	case *PyInstance:
 		// Check for __getitem__ method
 		if result, found, err := vm.callDunder(o, "__getitem__", index); found {
+			if err != nil && vm.isKeyError(err) {
+				// KeyError from __getitem__: try __missing__
+				// Clear exception state so __missing__ can execute cleanly
+				vm.currentException = nil
+				if missing, mFound, mErr := vm.callDunder(o, "__missing__", index); mFound {
+					return missing, mErr
+				}
+			}
 			return result, err
 		}
 		return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
@@ -135,6 +146,14 @@ func (vm *VM) unpackSubscriptArgs(index Value) []Value {
 		return t.Items
 	}
 	return []Value{index}
+}
+
+// isKeyError checks if an error is a KeyError (either a *PyException or a Go error string).
+func (vm *VM) isKeyError(err error) bool {
+	if pyExc, ok := err.(*PyException); ok {
+		return pyExc.Type() == "KeyError"
+	}
+	return strings.HasPrefix(err.Error(), "KeyError:")
 }
 
 // computeSliceIndices normalizes start/stop/step for a sequence of the given length.

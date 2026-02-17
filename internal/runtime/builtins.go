@@ -420,6 +420,31 @@ func (vm *VM) initBuiltins() {
 					result[i] = byte(n)
 				}
 				return &PyBytes{Value: result}, nil
+			case *PyInstance:
+				// Check for __bytes__ method
+				if result, found, err := vm.callDunder(v, "__bytes__"); found {
+					if err != nil {
+						return nil, err
+					}
+					if b, ok := result.(*PyBytes); ok {
+						return b, nil
+					}
+					return nil, fmt.Errorf("TypeError: __bytes__ returned non-bytes (type %s)", vm.typeName(result))
+				}
+				// Fall through to iteration
+				items, err := vm.toList(args[0])
+				if err != nil {
+					return nil, fmt.Errorf("TypeError: cannot convert '%s' object to bytes", vm.typeName(args[0]))
+				}
+				result := make([]byte, len(items))
+				for i, item := range items {
+					n := vm.toInt(item)
+					if n < 0 || n > 255 {
+						return nil, fmt.Errorf("ValueError: bytes must be in range(0, 256)")
+					}
+					result[i] = byte(n)
+				}
+				return &PyBytes{Value: result}, nil
 			default:
 				// Try to iterate
 				items, err := vm.toList(args[0])
