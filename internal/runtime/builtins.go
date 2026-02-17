@@ -2610,6 +2610,31 @@ func (vm *VM) initExceptionClasses() {
 		Dict:  make(map[string]Value),
 	}
 	baseException.Mro = []*PyClass{baseException}
+	// add_note(note) — appends a note string to __notes__
+	baseException.Dict["add_note"] = &PyBuiltinFunc{
+		Name: "BaseException.add_note",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 2 {
+				return nil, fmt.Errorf("add_note() missing required argument: 'note'")
+			}
+			self, ok := args[0].(*PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("add_note() requires an exception instance")
+			}
+			note, ok := args[1].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("note must be a str, not '%s'", vm.typeName(args[1]))
+			}
+			notes, exists := self.Dict["__notes__"]
+			if !exists {
+				notesList := &PyList{Items: []Value{note}}
+				self.Dict["__notes__"] = notesList
+			} else if notesList, ok := notes.(*PyList); ok {
+				notesList.Items = append(notesList.Items, note)
+			}
+			return None, nil
+		},
+	}
 	vm.builtins["BaseException"] = baseException
 
 	// Exception inherits from BaseException (most exceptions derive from this)

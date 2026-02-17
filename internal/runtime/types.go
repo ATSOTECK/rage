@@ -820,6 +820,7 @@ type PyException struct {
 	Context   *PyException     // __context__ for implicit chaining
 	Traceback []TracebackEntry // Traceback frames
 	Instance  *PyInstance      // non-nil for ExceptionGroup instances
+	Notes     *PyList          // __notes__ list (nil until add_note is called)
 }
 
 // exceptStarState tracks the remaining unmatched exceptions during except* handling

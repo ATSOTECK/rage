@@ -367,3 +367,98 @@ msg = eg.message
 `)
 	assert.Equal(t, "test message", vm.GetGlobal("msg").(*runtime.PyString).Value)
 }
+
+// --- Exception add_note / __notes__ ---
+
+func TestExceptionAddNote(t *testing.T) {
+	vm := runCode(t, `
+e = ValueError("oops")
+e.add_note("extra context")
+notes = e.__notes__
+count = len(notes)
+first = notes[0]
+`)
+	assert.Equal(t, int64(1), vm.GetGlobal("count").(*runtime.PyInt).Value)
+	assert.Equal(t, "extra context", vm.GetGlobal("first").(*runtime.PyString).Value)
+}
+
+func TestExceptionAddMultipleNotes(t *testing.T) {
+	vm := runCode(t, `
+e = TypeError("bad type")
+e.add_note("note 1")
+e.add_note("note 2")
+e.add_note("note 3")
+count = len(e.__notes__)
+second = e.__notes__[1]
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("count").(*runtime.PyInt).Value)
+	assert.Equal(t, "note 2", vm.GetGlobal("second").(*runtime.PyString).Value)
+}
+
+func TestExceptionNotesNotPresentBeforeAddNote(t *testing.T) {
+	vm := runCode(t, `
+e = ValueError("v")
+has_notes = hasattr(e, "__notes__")
+`)
+	assert.Equal(t, runtime.False, vm.GetGlobal("has_notes"))
+}
+
+func TestExceptionNotesCaughtNotPresentBeforeAddNote(t *testing.T) {
+	vm := runCode(t, `
+try:
+    raise ValueError("v")
+except ValueError as e:
+    has_notes = e.__notes__ is None
+`)
+	assert.Equal(t, runtime.True, vm.GetGlobal("has_notes"))
+}
+
+func TestExceptionAddNoteRequiresString(t *testing.T) {
+	runCodeExpectError(t, `
+e = ValueError("v")
+e.add_note(42)
+`, "note must be a str")
+}
+
+func TestExceptionAddNoteInExceptBlock(t *testing.T) {
+	vm := runCode(t, `
+try:
+    raise ValueError("original")
+except ValueError as e:
+    e.add_note("caught and annotated")
+    notes = e.__notes__
+    count = len(notes)
+    first = notes[0]
+`)
+	assert.Equal(t, int64(1), vm.GetGlobal("count").(*runtime.PyInt).Value)
+	assert.Equal(t, "caught and annotated", vm.GetGlobal("first").(*runtime.PyString).Value)
+}
+
+func TestExceptionAddNotePreservedOnReraise(t *testing.T) {
+	vm := runCode(t, `
+note_found = False
+try:
+    try:
+        raise ValueError("inner")
+    except ValueError as e:
+        e.add_note("added in inner handler")
+        raise
+except ValueError as e2:
+    note_found = len(e2.__notes__) == 1 and e2.__notes__[0] == "added in inner handler"
+`)
+	assert.Equal(t, runtime.True, vm.GetGlobal("note_found"))
+}
+
+func TestExceptionAddNoteBeforeRaise(t *testing.T) {
+	vm := runCode(t, `
+e = ValueError("pre-annotated")
+e.add_note("added before raise")
+try:
+    raise e
+except ValueError as caught:
+    count = len(caught.__notes__)
+    first = caught.__notes__[0]
+`)
+	assert.Equal(t, int64(1), vm.GetGlobal("count").(*runtime.PyInt).Value)
+	assert.Equal(t, "added before raise", vm.GetGlobal("first").(*runtime.PyString).Value)
+}

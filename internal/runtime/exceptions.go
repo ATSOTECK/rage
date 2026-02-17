@@ -41,6 +41,12 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 			if vm.isBaseExceptionGroup(v.Class) {
 				exc.Instance = v
 			}
+			// Copy __notes__ from instance to PyException
+			if notes, ok := v.Dict["__notes__"]; ok {
+				if notesList, ok := notes.(*PyList); ok {
+					exc.Notes = notesList
+				}
+			}
 		} else {
 			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
 			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}

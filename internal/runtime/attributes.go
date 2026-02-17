@@ -269,6 +269,30 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return None, nil
 		case "__traceback__":
 			return None, nil
+		case "__notes__":
+			if o.Notes != nil {
+				return o.Notes, nil
+			}
+			return None, nil
+		case "add_note":
+			exc := o
+			return &PyBuiltinFunc{
+				Name: "add_note",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					if len(args) != 1 {
+						return nil, fmt.Errorf("add_note() takes exactly one argument (%d given)", len(args))
+					}
+					note, ok := args[0].(*PyString)
+					if !ok {
+						return nil, fmt.Errorf("note must be a str, not '%s'", vm.typeName(args[0]))
+					}
+					if exc.Notes == nil {
+						exc.Notes = &PyList{Items: []Value{}}
+					}
+					exc.Notes.Items = append(exc.Notes.Items, note)
+					return None, nil
+				},
+			}, nil
 		}
 		// Delegate to Instance for ExceptionGroup attributes (message, exceptions, subgroup, etc.)
 		if o.Instance != nil {
