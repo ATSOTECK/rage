@@ -761,6 +761,18 @@ func (vm *VM) TypeError(expected string, got Value) {
 	})
 }
 
+// CallDunder looks up and calls a dunder method on a PyInstance via MRO.
+// Returns (result, found). If found is false, no method was found.
+// Panics with RaiseError on call errors (matching GoFunction conventions).
+func (vm *VM) CallDunder(inst *PyInstance, name string, args ...Value) (Value, bool) {
+	result, found, err := vm.callDunder(inst, name, args...)
+	if err != nil {
+		vm.RaiseError("%s", err.Error())
+		return nil, false
+	}
+	return result, found
+}
+
 // RaiseError raises a Python-style error.
 // The format string can optionally start with an exception type prefix like "ValueError: ".
 func (vm *VM) RaiseError(format string, args ...any) {
