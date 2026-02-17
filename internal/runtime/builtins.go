@@ -2668,6 +2668,248 @@ func (vm *VM) initExceptionClasses() {
 	// ArithmeticError (base for ZeroDivisionError - for compatibility)
 	arithmeticError := makeExc("ArithmeticError", exception)
 	_ = arithmeticError // We already created ZeroDivisionError above
+
+	// BaseExceptionGroup inherits from BaseException
+	baseExcGroup := &PyClass{
+		Name:  "BaseExceptionGroup",
+		Bases: []*PyClass{baseException},
+		Dict:  make(map[string]Value),
+	}
+	baseExcGroup.Mro = []*PyClass{baseExcGroup, baseException}
+	vm.builtins["BaseExceptionGroup"] = baseExcGroup
+
+	// ExceptionGroup inherits from Exception and BaseExceptionGroup
+	excGroup := &PyClass{
+		Name:  "ExceptionGroup",
+		Bases: []*PyClass{exception, baseExcGroup},
+		Dict:  make(map[string]Value),
+	}
+	excGroup.Mro = []*PyClass{excGroup, exception, baseExcGroup, baseException}
+	vm.builtins["ExceptionGroup"] = excGroup
+
+	// Shared __init__ for both exception group classes
+	egInit := &PyBuiltinFunc{Name: "ExceptionGroup.__init__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 3 {
+			return nil, fmt.Errorf("TypeError: ExceptionGroup.__init__() requires at least 2 arguments (message, exceptions)")
+		}
+		self := args[0]
+		inst, ok := self.(*PyInstance)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: ExceptionGroup.__init__() expected instance")
+		}
+		msgVal := args[1]
+		msgStr, ok := msgVal.(*PyString)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: ExceptionGroup message must be a string")
+		}
+		excsVal := args[2]
+		var excItems []Value
+		switch ev := excsVal.(type) {
+		case *PyList:
+			excItems = ev.Items
+		case *PyTuple:
+			excItems = ev.Items
+		default:
+			return nil, fmt.Errorf("TypeError: ExceptionGroup exceptions must be a list or tuple")
+		}
+		if len(excItems) == 0 {
+			return nil, fmt.Errorf("ValueError: ExceptionGroup exceptions must be non-empty")
+		}
+		// Convert to []*PyException for VM use and validate
+		pyExcs := make([]*PyException, len(excItems))
+		tupleItems := make([]Value, len(excItems))
+		for i, item := range excItems {
+			switch e := item.(type) {
+			case *PyException:
+				pyExcs[i] = e
+				tupleItems[i] = e
+			case *PyInstance:
+				if vm.isExceptionClass(e.Class) {
+					pyExcs[i] = vm.createException(e, nil)
+					tupleItems[i] = e
+				} else {
+					return nil, fmt.Errorf("TypeError: exceptions must be instances of BaseException")
+				}
+			default:
+				return nil, fmt.Errorf("TypeError: exceptions must be instances of BaseException")
+			}
+		}
+		inst.Dict["message"] = msgStr
+		inst.Dict["exceptions"] = &PyTuple{Items: tupleItems}
+		inst.Dict["args"] = &PyTuple{Items: []Value{msgStr}}
+		inst.Dict["__eg_exceptions__"] = &pyExceptionList{items: pyExcs}
+		return None, nil
+	}}
+
+	// __str__ for exception groups
+	egStr := &PyBuiltinFunc{Name: "ExceptionGroup.__str__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return &PyString{Value: "ExceptionGroup()"}, nil
+		}
+		inst, ok := args[0].(*PyInstance)
+		if !ok {
+			return &PyString{Value: "ExceptionGroup()"}, nil
+		}
+		msg := "ExceptionGroup"
+		if m, ok := inst.Dict["message"].(*PyString); ok {
+			msg = m.Value
+		}
+		excsTuple, _ := inst.Dict["exceptions"].(*PyTuple)
+		count := 0
+		if excsTuple != nil {
+			count = len(excsTuple.Items)
+		}
+		sub := "sub-exception"
+		if count != 1 {
+			sub = "sub-exceptions"
+		}
+		return &PyString{Value: fmt.Sprintf("%s (%d %s)", msg, count, sub)}, nil
+	}}
+
+	// __repr__ for exception groups
+	egRepr := &PyBuiltinFunc{Name: "ExceptionGroup.__repr__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return &PyString{Value: "ExceptionGroup()"}, nil
+		}
+		inst, ok := args[0].(*PyInstance)
+		if !ok {
+			return &PyString{Value: "ExceptionGroup()"}, nil
+		}
+		msg := ""
+		if m, ok := inst.Dict["message"].(*PyString); ok {
+			msg = m.Value
+		}
+		excsTuple, _ := inst.Dict["exceptions"].(*PyTuple)
+		className := "ExceptionGroup"
+		if inst.Class != nil {
+			className = inst.Class.Name
+		}
+		excReprs := "[]"
+		if excsTuple != nil {
+			parts := make([]string, len(excsTuple.Items))
+			for i, e := range excsTuple.Items {
+				parts[i] = vm.repr(e)
+			}
+			excReprs = "[" + strings.Join(parts, ", ") + "]"
+		}
+		return &PyString{Value: fmt.Sprintf("%s('%s', %s)", className, msg, excReprs)}, nil
+	}}
+
+	// subgroup(condition) — filter exceptions matching type
+	egSubgroup := &PyBuiltinFunc{Name: "ExceptionGroup.subgroup", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, fmt.Errorf("TypeError: subgroup() requires 1 argument")
+		}
+		inst, ok := args[0].(*PyInstance)
+		if !ok {
+			return None, nil
+		}
+		condition := args[1]
+		egExcs := vm.getEGExceptions(inst)
+		if egExcs == nil {
+			return None, nil
+		}
+		var matched []*PyException
+		for _, exc := range egExcs {
+			if vm.exceptionMatches(exc, condition) {
+				matched = append(matched, exc)
+			}
+		}
+		if len(matched) == 0 {
+			return None, nil
+		}
+		msg := ""
+		if m, ok := inst.Dict["message"].(*PyString); ok {
+			msg = m.Value
+		}
+		return vm.buildExceptionGroup(msg, matched, vm.isBaseExceptionGroup(inst.Class))
+	}}
+
+	// split(condition) — return (matched, rest) tuple
+	egSplit := &PyBuiltinFunc{Name: "ExceptionGroup.split", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, fmt.Errorf("TypeError: split() requires 1 argument")
+		}
+		inst, ok := args[0].(*PyInstance)
+		if !ok {
+			return &PyTuple{Items: []Value{None, None}}, nil
+		}
+		condition := args[1]
+		egExcs := vm.getEGExceptions(inst)
+		if egExcs == nil {
+			return &PyTuple{Items: []Value{None, None}}, nil
+		}
+		var matched, rest []*PyException
+		for _, exc := range egExcs {
+			if vm.exceptionMatches(exc, condition) {
+				matched = append(matched, exc)
+			} else {
+				rest = append(rest, exc)
+			}
+		}
+		msg := ""
+		if m, ok := inst.Dict["message"].(*PyString); ok {
+			msg = m.Value
+		}
+		isBase := vm.isBaseExceptionGroup(inst.Class)
+		var matchGroup, restGroup Value
+		if len(matched) > 0 {
+			matchGroup, _ = vm.buildExceptionGroup(msg, matched, isBase)
+		} else {
+			matchGroup = None
+		}
+		if len(rest) > 0 {
+			restGroup, _ = vm.buildExceptionGroup(msg, rest, isBase)
+		} else {
+			restGroup = None
+		}
+		return &PyTuple{Items: []Value{matchGroup, restGroup}}, nil
+	}}
+
+	// derive(excs) — create new group of same class
+	egDerive := &PyBuiltinFunc{Name: "ExceptionGroup.derive", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, fmt.Errorf("TypeError: derive() requires 1 argument")
+		}
+		inst, ok := args[0].(*PyInstance)
+		if !ok {
+			return None, nil
+		}
+		excsVal := args[1]
+		var excItems []Value
+		switch ev := excsVal.(type) {
+		case *PyList:
+			excItems = ev.Items
+		case *PyTuple:
+			excItems = ev.Items
+		default:
+			return nil, fmt.Errorf("TypeError: derive() argument must be a list or tuple")
+		}
+		pyExcs := make([]*PyException, len(excItems))
+		for i, item := range excItems {
+			switch e := item.(type) {
+			case *PyException:
+				pyExcs[i] = e
+			default:
+				pyExcs[i] = vm.createException(e, nil)
+			}
+		}
+		msg := ""
+		if m, ok := inst.Dict["message"].(*PyString); ok {
+			msg = m.Value
+		}
+		return vm.buildExceptionGroup(msg, pyExcs, vm.isBaseExceptionGroup(inst.Class))
+	}}
+
+	// Register methods on both classes
+	for _, cls := range []*PyClass{baseExcGroup, excGroup} {
+		cls.Dict["__init__"] = egInit
+		cls.Dict["__str__"] = egStr
+		cls.Dict["__repr__"] = egRepr
+		cls.Dict["subgroup"] = egSubgroup
+		cls.Dict["split"] = egSplit
+		cls.Dict["derive"] = egDerive
+	}
 }
 
 // ComputeC3MRO computes the Method Resolution Order using C3 linearization algorithm.

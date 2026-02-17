@@ -136,6 +136,11 @@ const (
 	OpExceptionMatch // Check if exception matches type for except clause
 	OpClearException // Clear current exception state (for handler entry)
 
+	// Exception groups (except*)
+	OpSetupExceptStar  // Setup except* handler (arg: handler offset)
+	OpExceptStarMatch  // Match exception group against type: stack [eg, type] → [eg, subgroup_or_None]
+	OpExceptStarReraise // Re-raise unmatched exceptions from except* block
+
 	// With statement
 	OpSetupWith   // Setup with statement (arg: cleanup offset)
 	OpWithCleanup // Cleanup with statement
@@ -351,7 +356,10 @@ var OpcodeNames = map[Opcode]string{
 	OpEndFinally:       "END_FINALLY",
 	OpRaiseVarargs:     "RAISE_VARARGS",
 	OpExceptionMatch:   "EXCEPTION_MATCH",
-	OpClearException:   "CLEAR_EXCEPTION",
+	OpClearException:    "CLEAR_EXCEPTION",
+	OpSetupExceptStar:  "SETUP_EXCEPT_STAR",
+	OpExceptStarMatch:  "EXCEPT_STAR_MATCH",
+	OpExceptStarReraise: "EXCEPT_STAR_RERAISE",
 	OpSetupWith:        "SETUP_WITH",
 	OpWithCleanup:      "WITH_CLEANUP",
 	OpAssert:           "ASSERT",
@@ -464,7 +472,9 @@ func init() {
 		OpCompareIn, OpCompareNotIn,
 		OpBinarySubscr, OpStoreSubscr, OpDeleteSubscr,
 		OpGetIter, OpReturn,
-		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException, OpWithCleanup,
+		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException,
+		OpExceptStarMatch, OpExceptStarReraise,
+		OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
 		OpImportStar,
 		// Generator/coroutine opcodes (no args)
@@ -618,7 +628,7 @@ func formatArg(co *CodeObject, op Opcode, arg int) string {
 	case OpJump, OpJumpIfTrue, OpJumpIfFalse,
 		OpPopJumpIfTrue, OpPopJumpIfFalse,
 		OpJumpIfTrueOrPop, OpJumpIfFalseOrPop,
-		OpForIter, OpSetupExcept, OpSetupFinally, OpSetupWith:
+		OpForIter, OpSetupExcept, OpSetupFinally, OpSetupExceptStar, OpSetupWith:
 		return fmt.Sprintf("to %d", arg)
 	}
 	return ""

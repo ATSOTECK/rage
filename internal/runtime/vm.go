@@ -26,6 +26,9 @@ type VM struct {
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
 
+	// except* state stack
+	exceptStarStack []ExceptStarState
+
 	// Filesystem module imports
 	SearchPaths  []string                              // Directories to search for .py modules
 	FileImporter func(filename string) (*CodeObject, error) // Callback to compile a .py file (avoids circular dep)
@@ -2187,6 +2190,69 @@ func (vm *VM) run() (Value, error) {
 			// Clear the current exception state (when handler catches exception)
 			// Does NOT pop the block stack (block was already popped by handleException)
 			vm.currentException = nil
+
+		case OpSetupExceptStar:
+			// Push except* handler block onto block stack
+			block := Block{
+				Type:    BlockExceptStar,
+				Handler: arg,
+				Level:   frame.SP,
+			}
+			frame.BlockStack = append(frame.BlockStack, block)
+
+		case OpExceptStarMatch:
+			// Stack: [eg, eg_dup, type] → [eg, subgroup_or_None]
+			// Pop type and the DUP'd eg (state is tracked in exceptStarStack)
+			excType := vm.pop()
+			vm.pop() // Discard DUP'd eg
+			if len(vm.exceptStarStack) == 0 {
+				vm.push(None)
+				break
+			}
+			state := &vm.exceptStarStack[len(vm.exceptStarStack)-1]
+			var matched, remaining []*PyException
+			for _, exc := range state.Remaining {
+				if vm.exceptionMatches(exc, excType) {
+					matched = append(matched, exc)
+				} else {
+					remaining = append(remaining, exc)
+				}
+			}
+			state.Remaining = remaining
+			if len(matched) > 0 {
+				// Build a new ExceptionGroup with matched exceptions
+				subgroup, err := vm.buildExceptionGroup(state.Message, matched, state.IsBase)
+				if err != nil {
+					return nil, err
+				}
+				vm.push(subgroup)
+			} else {
+				vm.push(None)
+			}
+
+		case OpExceptStarReraise:
+			// Pop eg from stack
+			vm.pop()
+			if len(vm.exceptStarStack) == 0 {
+				break
+			}
+			state := vm.exceptStarStack[len(vm.exceptStarStack)-1]
+			vm.exceptStarStack = vm.exceptStarStack[:len(vm.exceptStarStack)-1]
+			if len(state.Remaining) > 0 {
+				// Re-raise unmatched as new ExceptionGroup
+				newGroup, err := vm.buildExceptionGroup(state.Message, state.Remaining, state.IsBase)
+				if err != nil {
+					return nil, err
+				}
+				exc := vm.createException(newGroup, nil)
+				_, herr := vm.handleException(exc)
+				if herr != nil {
+					return nil, herr
+				}
+			} else {
+				// All matched — clear exception
+				vm.currentException = nil
+			}
 
 		case OpSetupWith:
 			// Push with-cleanup block onto block stack

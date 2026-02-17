@@ -889,6 +889,22 @@ func (p *Parser) parseTryStmt() model.Stmt {
 		handlers = append(handlers, p.parseExceptHandler())
 	}
 
+	// Validate: no mixing except and except* in the same try block
+	if len(handlers) > 1 {
+		hasStar := false
+		hasPlain := false
+		for _, h := range handlers {
+			if h.IsStar {
+				hasStar = true
+			} else {
+				hasPlain = true
+			}
+		}
+		if hasStar && hasPlain {
+			p.addError("cannot mix except and except* in the same try block")
+		}
+	}
+
 	var orElse []model.Stmt
 	if p.check(model.TK_Else) {
 		p.advance()
@@ -934,6 +950,13 @@ func (p *Parser) parseExceptHandler() *model.ExceptHandler {
 
 	var typ model.Expr
 	var name *model.Identifier
+	isStar := false
+
+	// Check for except* syntax
+	if p.check(model.TK_Star) {
+		p.advance()
+		isStar = true
+	}
 
 	if !p.check(model.TK_Colon) {
 		typ = p.parseExpression()
@@ -941,6 +964,8 @@ func (p *Parser) parseExceptHandler() *model.ExceptHandler {
 		if p.match(model.TK_As) {
 			name = p.parseIdentifier()
 		}
+	} else if isStar {
+		p.addError("except* requires an exception type")
 	}
 
 	p.expect(model.TK_Colon)
@@ -959,6 +984,7 @@ func (p *Parser) parseExceptHandler() *model.ExceptHandler {
 		Type:     typ,
 		Name:     name,
 		Body:     body,
+		IsStar:   isStar,
 		StartPos: startPos,
 		EndPos:   endPos,
 	}

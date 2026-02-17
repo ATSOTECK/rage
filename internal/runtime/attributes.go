@@ -270,6 +270,10 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		case "__traceback__":
 			return None, nil
 		}
+		// Delegate to Instance for ExceptionGroup attributes (message, exceptions, subgroup, etc.)
+		if o.Instance != nil {
+			return vm.getAttr(o.Instance, name)
+		}
 		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Type(), name)
 
 	case *PyModule:

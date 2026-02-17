@@ -1,5 +1,7 @@
 package runtime
 
+import "fmt"
+
 // Exception handling helpers
 
 // createException creates a PyException from a value
@@ -35,6 +37,10 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 				exc.Args = &PyTuple{Items: []Value{}}
 			}
 			exc.Message = vm.str(v)
+			// Link back to instance for ExceptionGroup attribute access
+			if vm.isBaseExceptionGroup(v.Class) {
+				exc.Instance = v
+			}
 		} else {
 			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
 			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
@@ -179,6 +185,35 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			vm.push(exc)    // Push exception for WITH_CLEANUP
 			return nil, nil // Continue execution at cleanup handler
 
+		case BlockExceptStar:
+			// except* handler — wrap exception in ExceptionGroup if needed,
+			// push onto stack and initialize exceptStarState
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			var leafExcs []*PyException
+			var msg string
+			var isBase bool
+			if vm.isExceptionGroup(exc) {
+				leafExcs = vm.getEGExceptions(exc.Instance)
+				if m, ok := exc.Instance.Dict["message"].(*PyString); ok {
+					msg = m.Value
+				}
+				// Only use BaseExceptionGroup if the class is exactly BaseExceptionGroup
+				// (not ExceptionGroup which also has BaseExceptionGroup in MRO)
+				isBase = vm.isOnlyBaseExceptionGroup(exc.Instance.Class)
+			} else {
+				leafExcs = []*PyException{exc}
+				msg = exc.Type()
+				isBase = false
+			}
+			vm.push(exc) // Push exception onto stack for handler
+			vm.exceptStarStack = append(vm.exceptStarStack, ExceptStarState{
+				Remaining: leafExcs,
+				Message:   msg,
+				IsBase:    isBase,
+			})
+			return nil, nil
+
 		case BlockLoop:
 			// Skip loop blocks when unwinding for exception
 			continue
@@ -268,4 +303,94 @@ func (vm *VM) wrapGoError(err error) *PyException {
 		Args:    &PyTuple{Items: []Value{&PyString{Value: msg}}},
 		Message: msg,
 	}
+}
+
+// pyExceptionList is a Value wrapper for []*PyException stored in ExceptionGroup instances
+type pyExceptionList struct {
+	items []*PyException
+}
+
+func (p *pyExceptionList) Type() string   { return "exception_list" }
+func (p *pyExceptionList) String() string { return fmt.Sprintf("<exception_list: %d>", len(p.items)) }
+
+// getEGExceptions retrieves the []*PyException list from an ExceptionGroup instance
+func (vm *VM) getEGExceptions(inst *PyInstance) []*PyException {
+	if el, ok := inst.Dict["__eg_exceptions__"].(*pyExceptionList); ok {
+		return el.items
+	}
+	return nil
+}
+
+// isBaseExceptionGroup checks if a class has BaseExceptionGroup in its MRO
+func (vm *VM) isBaseExceptionGroup(cls *PyClass) bool {
+	beg, ok := vm.builtins["BaseExceptionGroup"].(*PyClass)
+	if !ok {
+		return false
+	}
+	for _, mroClass := range cls.Mro {
+		if mroClass == beg {
+			return true
+		}
+	}
+	return false
+}
+
+// isOnlyBaseExceptionGroup checks if a class is BaseExceptionGroup but NOT ExceptionGroup
+func (vm *VM) isOnlyBaseExceptionGroup(cls *PyClass) bool {
+	eg, ok := vm.builtins["ExceptionGroup"].(*PyClass)
+	if !ok {
+		return true // no ExceptionGroup class; fall back to Base
+	}
+	for _, mroClass := range cls.Mro {
+		if mroClass == eg {
+			return false // it's an ExceptionGroup or subclass
+		}
+	}
+	return vm.isBaseExceptionGroup(cls)
+}
+
+// isExceptionGroup checks if a PyException wraps an ExceptionGroup
+func (vm *VM) isExceptionGroup(exc *PyException) bool {
+	if exc.Instance != nil {
+		return vm.isBaseExceptionGroup(exc.Instance.Class)
+	}
+	if exc.ExcType != nil {
+		return vm.isBaseExceptionGroup(exc.ExcType)
+	}
+	return false
+}
+
+// buildExceptionGroup creates a new ExceptionGroup PyException
+func (vm *VM) buildExceptionGroup(message string, exceptions []*PyException, isBase bool) (Value, error) {
+	className := "ExceptionGroup"
+	if isBase {
+		className = "BaseExceptionGroup"
+	}
+	cls, ok := vm.builtins[className].(*PyClass)
+	if !ok {
+		return None, fmt.Errorf("RuntimeError: %s class not found", className)
+	}
+
+	// Build instance
+	inst := &PyInstance{
+		Class: cls,
+		Dict:  make(map[string]Value),
+	}
+	tupleItems := make([]Value, len(exceptions))
+	for i, e := range exceptions {
+		tupleItems[i] = e
+	}
+	inst.Dict["message"] = &PyString{Value: message}
+	inst.Dict["exceptions"] = &PyTuple{Items: tupleItems}
+	inst.Dict["args"] = &PyTuple{Items: []Value{&PyString{Value: message}}}
+	inst.Dict["__eg_exceptions__"] = &pyExceptionList{items: exceptions}
+
+	// Create PyException wrapping this instance
+	exc := &PyException{
+		ExcType:  cls,
+		Args:     &PyTuple{Items: []Value{&PyString{Value: message}}},
+		Message:  message,
+		Instance: inst,
+	}
+	return exc, nil
 }

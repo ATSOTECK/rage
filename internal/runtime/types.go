@@ -819,6 +819,14 @@ type PyException struct {
 	Cause     *PyException     // __cause__ for chained exceptions (raise X from Y)
 	Context   *PyException     // __context__ for implicit chaining
 	Traceback []TracebackEntry // Traceback frames
+	Instance  *PyInstance      // non-nil for ExceptionGroup instances
+}
+
+// exceptStarState tracks the remaining unmatched exceptions during except* handling
+type ExceptStarState struct {
+	Remaining []*PyException
+	Message   string
+	IsBase    bool
 }
 
 func (e *PyException) Type() string {
@@ -955,6 +963,7 @@ const (
 	BlockExcept
 	BlockFinally
 	BlockWith
+	BlockExceptStar
 )
 
 

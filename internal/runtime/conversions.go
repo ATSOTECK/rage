@@ -536,9 +536,12 @@ func (vm *VM) str(v Value) string {
 	case *PyModule:
 		return fmt.Sprintf("<module '%s'>", val.Name)
 	case *PyInstance:
-		// Check if this is an exception instance
+		// Check if this is an exception instance — use formatExceptionInstance
+		// unless the class defines its own __str__ (like ExceptionGroup)
 		if vm.isExceptionClass(val.Class) {
-			return vm.formatExceptionInstance(val)
+			if _, hasStr := val.Class.Dict["__str__"]; !hasStr {
+				return vm.formatExceptionInstance(val)
+			}
 		}
 		// Check for __str__ method via MRO
 		if result, found, err := vm.callDunder(val, "__str__"); found && err == nil {

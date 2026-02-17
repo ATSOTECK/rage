@@ -1746,11 +1746,12 @@ func (o *Optimizer) eliminateStoreLoad(instrs []*instruction) bool {
 
 func (o *Optimizer) threadJumps(instrs []*instruction) bool {
 	// Build offset map for finding targets
+	// Use originalHadArg since jump args still reference original byte offsets
 	offsetToIdx := make(map[int]int)
 	offset := 0
 	for i, instr := range instrs {
 		offsetToIdx[offset] = i
-		if instr.op.HasArg() || instr.arg >= 0 {
+		if instr.originalHadArg {
 			offset += 3
 		} else {
 			offset++
@@ -2170,7 +2171,7 @@ func isJumpOp(op runtime.Opcode) bool {
 		runtime.OpPopJumpIfTrue, runtime.OpPopJumpIfFalse,
 		runtime.OpJumpIfTrueOrPop, runtime.OpJumpIfFalseOrPop,
 		runtime.OpForIter, runtime.OpSetupExcept, runtime.OpSetupFinally,
-		runtime.OpSetupWith,
+		runtime.OpSetupExceptStar, runtime.OpSetupWith,
 		// New compare+jump superinstructions
 		runtime.OpCompareLtJump, runtime.OpCompareLeJump,
 		runtime.OpCompareGtJump, runtime.OpCompareGeJump,
