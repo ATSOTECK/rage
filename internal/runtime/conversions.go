@@ -291,6 +291,18 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
 		}
 		return f, nil
+	case *PyInstance:
+		// Check for __float__ method
+		if result, found, err := vm.callDunder(val, "__float__"); found {
+			if err != nil {
+				return 0, err
+			}
+			if f, ok := result.(*PyFloat); ok {
+				return f.Value, nil
+			}
+			return 0, fmt.Errorf("TypeError: __float__ returned non-float (type %s)", vm.typeName(result))
+		}
+		return 0, fmt.Errorf("TypeError: float() argument must be a string or a number, not '%s'", vm.typeName(v))
 	default:
 		return 0, fmt.Errorf("TypeError: float() argument must be a string or a number, not '%s'", vm.typeName(v))
 	}
