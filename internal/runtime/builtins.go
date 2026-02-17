@@ -1996,6 +1996,29 @@ func (vm *VM) initBuiltins() {
 	}
 
 	// object.__init_subclass__(cls, **kwargs) - default hook, does nothing
+	objectClass.Dict["__sizeof__"] = &PyBuiltinFunc{
+		Name: "object.__sizeof__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 {
+				return nil, fmt.Errorf("descriptor '__sizeof__' requires an argument")
+			}
+			inst, ok := args[0].(*PyInstance)
+			if !ok {
+				return MakeInt(64), nil
+			}
+			// Base size for the instance struct
+			var size int64 = 64
+			if inst.Dict != nil {
+				// 8 bytes per key-value pair estimate
+				size += int64(len(inst.Dict) * 16)
+			}
+			if inst.Slots != nil {
+				size += int64(len(inst.Slots) * 16)
+			}
+			return MakeInt(size), nil
+		},
+	}
+
 	objectClass.Dict["__init_subclass__"] = &PyClassMethod{Func: &PyBuiltinFunc{
 		Name: "__init_subclass__",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

@@ -454,6 +454,18 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					return &PyMethod{Func: fn, Instance: obj}, nil
 				}
 
+				// Bind builtin function to instance
+				if bf, ok := val.(*PyBuiltinFunc); ok {
+					boundInst := obj
+					return &PyBuiltinFunc{
+						Name: bf.Name,
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							allArgs := append([]Value{boundInst}, args...)
+							return bf.Fn(allArgs, kwargs)
+						},
+					}, nil
+				}
+
 				// Check for non-data descriptor (instance with __get__ but not __set__)
 				if inst, ok := val.(*PyInstance); ok {
 					if getResult, found, err := vm.callDunder(inst, "__get__", obj, o.Class); found {
