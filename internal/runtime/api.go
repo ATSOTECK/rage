@@ -794,6 +794,11 @@ func (vm *VM) TypeNameOf(v Value) string {
 	return vm.typeName(v)
 }
 
+// GetIntIndex exports getIntIndex for use by stdlib packages.
+func (vm *VM) GetIntIndex(v Value) (int64, error) {
+	return vm.getIntIndex(v)
+}
+
 // RaiseError raises a Python-style error.
 // The format string can optionally start with an exception type prefix like "ValueError: ".
 func (vm *VM) RaiseError(format string, args ...any) {

@@ -84,6 +84,21 @@ func InitOperatorModule() {
 			},
 		}
 
+		// operator.index(a) - call __index__ on a
+		mod.Dict["index"] = &runtime.PyBuiltinFunc{
+			Name: "index",
+			Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: index() takes exactly one argument (%d given)", len(args))
+				}
+				i, err := vm.GetIntIndex(args[0])
+				if err != nil {
+					return nil, err
+				}
+				return runtime.MakeInt(i), nil
+			},
+		}
+
 		return mod
 	})
 }

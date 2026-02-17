@@ -1317,7 +1317,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("hex() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0x%x", -n)}, nil
 			}
@@ -1332,7 +1335,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("oct() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0o%o", -n)}, nil
 			}
@@ -1347,7 +1353,10 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("bin() takes exactly one argument (%d given)", len(args))
 			}
-			n := vm.toInt(args[0])
+			n, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
 			if n < 0 {
 				return &PyString{Value: fmt.Sprintf("-0b%b", -n)}, nil
 			}
