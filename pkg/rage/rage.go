@@ -51,6 +51,7 @@ const (
 	ModuleAbc
 	ModuleDataclasses
 	ModuleCopy
+	ModuleOperator
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -75,6 +76,7 @@ var AllModules = []Module{
 	ModuleAbc,
 	ModuleDataclasses,
 	ModuleCopy,
+	ModuleOperator,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -366,6 +368,8 @@ func initModule(m Module) {
 		stdlib.InitDataclassesModule()
 	case ModuleCopy:
 		stdlib.InitCopyModule()
+	case ModuleOperator:
+		stdlib.InitOperatorModule()
 	}
 }
 

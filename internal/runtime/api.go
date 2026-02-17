@@ -773,6 +773,17 @@ func (vm *VM) CallDunder(inst *PyInstance, name string, args ...Value) (Value, b
 	return result, found
 }
 
+// CallDunderWithError looks up and calls a dunder method on a PyInstance via MRO.
+// Returns (result, found, error) - for use in PyBuiltinFunc where errors are returned.
+func (vm *VM) CallDunderWithError(inst *PyInstance, name string, args ...Value) (Value, bool, error) {
+	return vm.callDunder(inst, name, args...)
+}
+
+// TypeNameOf returns the Python type name for a value.
+func (vm *VM) TypeNameOf(v Value) string {
+	return vm.typeName(v)
+}
+
 // RaiseError raises a Python-style error.
 // The format string can optionally start with an exception type prefix like "ValueError: ".
 func (vm *VM) RaiseError(format string, args ...any) {
