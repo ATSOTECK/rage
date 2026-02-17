@@ -1587,10 +1587,20 @@ func (c *Compiler) compileTryStar(s *model.Try) {
 	// EXCEPT_STAR_RERAISE: re-raise remaining or clean up
 	c.emit(runtime.OpExceptStarReraise)
 
+	// After handler completes, skip over the else body
+	var skipElseJump int
+	if len(s.OrElse) > 0 {
+		skipElseJump = c.emitJump(runtime.OpJump)
+	}
+
 	// Else clause (runs if no exception was raised)
 	c.patchJump(successJump, c.currentOffset())
 	for _, stmt := range s.OrElse {
 		c.compileStmt(stmt)
+	}
+
+	if len(s.OrElse) > 0 {
+		c.patchJump(skipElseJump, c.currentOffset())
 	}
 
 	// Finally clause

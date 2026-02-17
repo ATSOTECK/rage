@@ -2245,8 +2245,9 @@ func (vm *VM) run() (Value, error) {
 					return nil, err
 				}
 				exc := vm.createException(newGroup, nil)
-				if _, err := vm.handleException(exc); err != nil {
-					return nil, err
+				_, herr := vm.handleException(exc)
+				if herr != nil {
+					return nil, herr
 				}
 			} else {
 				// All matched — clear exception

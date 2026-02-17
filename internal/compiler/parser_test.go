@@ -644,6 +644,101 @@ finally:
 	assert.Len(t, tryStmt.FinalBody, 1)
 }
 
+func TestParserExceptStar(t *testing.T) {
+	input := `try:
+    risky()
+except* ValueError as e:
+    handle_value(e)
+except* TypeError:
+    handle_type()`
+
+	parser := NewParser(input)
+	module, errs := parser.Parse()
+
+	require.Empty(t, errs)
+	require.Len(t, module.Body, 1)
+
+	tryStmt, ok := module.Body[0].(*model.Try)
+	require.True(t, ok, "expected Try")
+	assert.Len(t, tryStmt.Body, 1)
+	require.Len(t, tryStmt.Handlers, 2)
+
+	// First handler: except* ValueError as e
+	h0 := tryStmt.Handlers[0]
+	assert.True(t, h0.IsStar, "first handler should be except*")
+	assert.NotNil(t, h0.Type)
+	assert.NotNil(t, h0.Name)
+	assert.Equal(t, "e", h0.Name.Name)
+
+	// Second handler: except* TypeError
+	h1 := tryStmt.Handlers[1]
+	assert.True(t, h1.IsStar, "second handler should be except*")
+	assert.NotNil(t, h1.Type)
+	assert.Nil(t, h1.Name)
+}
+
+func TestParserExceptStarWithFinally(t *testing.T) {
+	input := `try:
+    risky()
+except* ValueError:
+    handle()
+finally:
+    cleanup()`
+
+	parser := NewParser(input)
+	module, errs := parser.Parse()
+
+	require.Empty(t, errs)
+	require.Len(t, module.Body, 1)
+
+	tryStmt, ok := module.Body[0].(*model.Try)
+	require.True(t, ok, "expected Try")
+	require.Len(t, tryStmt.Handlers, 1)
+	assert.True(t, tryStmt.Handlers[0].IsStar)
+	assert.Len(t, tryStmt.FinalBody, 1)
+}
+
+func TestParserExceptStarMixedError(t *testing.T) {
+	input := `try:
+    risky()
+except ValueError:
+    handle()
+except* TypeError:
+    handle2()`
+
+	parser := NewParser(input)
+	_, errs := parser.Parse()
+
+	require.NotEmpty(t, errs, "expected error for mixing except and except*")
+}
+
+func TestParserExceptStarBareError(t *testing.T) {
+	input := `try:
+    risky()
+except*:
+    handle()`
+
+	parser := NewParser(input)
+	_, errs := parser.Parse()
+
+	require.NotEmpty(t, errs, "expected error for bare except*")
+}
+
+func TestParserExceptNotStar(t *testing.T) {
+	// Regular except should NOT set IsStar
+	input := `try:
+    risky()
+except ValueError:
+    handle()`
+
+	parser := NewParser(input)
+	module, errs := parser.Parse()
+
+	require.Empty(t, errs)
+	tryStmt := module.Body[0].(*model.Try)
+	assert.False(t, tryStmt.Handlers[0].IsStar, "regular except should not be star")
+}
+
 func TestParserWithStatement(t *testing.T) {
 	input := `with open("file") as f:
     data = f.read()`
