@@ -1001,6 +1001,15 @@ func (vm *VM) initBuiltins() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("reversed() takes exactly one argument (%d given)", len(args))
 			}
+			// Try __reversed__ dunder on PyInstance first
+			if inst, ok := args[0].(*PyInstance); ok {
+				if result, found, err := vm.callDunder(inst, "__reversed__"); found {
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+			}
 			items, err := vm.toList(args[0])
 			if err != nil {
 				return nil, err
