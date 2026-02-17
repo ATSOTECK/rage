@@ -1723,12 +1723,38 @@ func (vm *VM) initBuiltins() {
 			}
 			className := nameVal.Value
 
-			// Remaining args are base classes
+			// Remaining args are base classes — resolve __mro_entries__ for non-class bases
+			originalBases := args[2:]
 			var bases []*PyClass
-			for i := 2; i < len(args); i++ {
-				if base, ok := args[i].(*PyClass); ok {
+			for _, baseArg := range originalBases {
+				if base, ok := baseArg.(*PyClass); ok {
 					bases = append(bases, base)
+					continue
 				}
+				// Try __mro_entries__ for non-class bases (e.g. GenericAlias)
+				origTuple := &PyTuple{Items: make([]Value, len(originalBases))}
+				copy(origTuple.Items, originalBases)
+				if mroEntries, err := vm.getAttr(baseArg, "__mro_entries__"); err == nil {
+					if result, callErr := vm.call(mroEntries, []Value{origTuple}, nil); callErr == nil {
+						if tup, ok := result.(*PyTuple); ok {
+							for _, entry := range tup.Items {
+								if cls, ok := entry.(*PyClass); ok {
+									bases = append(bases, cls)
+								}
+							}
+							continue
+						}
+						if lst, ok := result.(*PyList); ok {
+							for _, entry := range lst.Items {
+								if cls, ok := entry.(*PyClass); ok {
+									bases = append(bases, cls)
+								}
+							}
+							continue
+						}
+					}
+				}
+				// If __mro_entries__ not found or failed, skip non-class base
 			}
 
 			// If no bases specified, implicitly inherit from object (Python 3 behavior)

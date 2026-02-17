@@ -611,6 +611,18 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return o.Origin, nil
 		case "__args__":
 			return &PyTuple{Items: o.Args}, nil
+		case "__mro_entries__":
+			origin := o.Origin
+			return &PyBuiltinFunc{
+				Name: "__mro_entries__",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					// Return the origin class as a tuple for MRO resolution
+					if cls, ok := origin.(*PyClass); ok {
+						return &PyTuple{Items: []Value{cls}}, nil
+					}
+					return &PyTuple{Items: []Value{origin}}, nil
+				},
+			}, nil
 		}
 		return nil, fmt.Errorf("AttributeError: 'GenericAlias' object has no attribute '%s'", name)
 	case *PyDict:
