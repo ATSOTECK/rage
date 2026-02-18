@@ -42,6 +42,38 @@ A Go "game server" loads its configuration from Python scripts. Shared balance c
 - **Milestones**: Declarative rewards at specific levels
 - **Boss scaling**: Stats derived from the same formulas as player stats
 
+### `config/entities.py` — Go-Defined Game Classes
+
+This config script uses **four classes defined entirely in Go** using the ClassBuilder API. No Python class definitions — the classes are registered from Go and used naturally in Python:
+
+- **`Vec2(x, y)`** — 2D vector with arithmetic (`+`, `-`, `*`), `abs()`, `round()`, a `.length` property, and `Vec2.zero()`/`Vec2.from_angle()` factories. Methods: `distance_to()`, `normalized()`, `dot()`, `lerp()`.
+- **`Color(r, g, b)`** — RGB color with additive blending (`+`), brightness scaling (`*`), hex formatting (`format(c, "hex")` → `#rrggbb`), and numeric conversions (`int()` → packed RGB, `float()` → luminance). Methods: `inverted()`, `grayscale()`, `mix(other, t=0.5)`. Factory: `Color.from_hex("#rrggbb")`.
+- **`Inventory(capacity)`** — Ordered container with `[]` access, `in` membership, `len()`, `del`, iteration, and `reversed()`. Methods: `keys()`, `total_weight()`, `drop(name)`.
+- **`GameSession(name)`** — Context manager (`with` statement) that logs config events via `session(event=..., count=...)`. Dynamic attribute access exposes `.name` and `.events`. Methods: `filter(event_name)`, `event_count()`.
+
+**ClassBuilder features demonstrated:**
+
+| Category | Methods | Class |
+|---|---|---|
+| Binary operators | `Add`, `Sub`, `Mul` | Vec2, Color |
+| Unary operators | `Neg`, `Abs` | Vec2 |
+| Comparison + hashing | `Eq`, `Hash` | Vec2, Color |
+| String representations | `Str`, `Repr` | Vec2, Color, Inventory |
+| Numeric conversions | `IntConv`, `FloatConv`, `Format` | Color |
+| Container protocol | `Len`, `GetItem`, `SetItem`, `DelItem`, `Contains`, `Bool` | Inventory |
+| Iteration | `Iter`, `Next`, `Reversed` | Inventory |
+| In-place operators | `IAdd` | Inventory |
+| Context manager | `Enter`, `Exit` | GameSession |
+| Callable instances | `CallKw` | GameSession |
+| Dynamic attributes | `GetAttr` | GameSession |
+| Properties | `Property` | Vec2 |
+| Static methods | `StaticMethod` | Vec2 |
+| Class subscript | `ClassGetItem` | Color |
+| Rounding | `Round` | Vec2 |
+| Instance methods | `Method` | Vec2, Color, Inventory, GameSession |
+| Keyword methods | `MethodKw` | Color (`mix`) |
+| Class methods | `ClassMethod` | Vec2 (`from_angle`), Color (`from_hex`) |
+
 ## How It Works (Go Side)
 
 ```go
@@ -69,3 +101,48 @@ port, _ := rage.AsInt(settings["port"])
 ```
 
 The Python scripts are **pure Python** — no RAGE-specific imports needed. The Go side provides context (`env()`, `cpu_count`) and reads results (`GetGlobal`).
+
+## Defining Classes in Go (ClassBuilder)
+
+```go
+// Build a Vec2 class with operators, properties, and static methods
+vec2 := rage.NewClass("Vec2").
+    Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+        self.Set("x", args[0])
+        self.Set("y", args[1])
+        return nil
+    }).
+    Add(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+        o, _ := rage.AsObject(other)
+        x1, _ := rage.AsFloat(self.Get("x"))
+        y1, _ := rage.AsFloat(self.Get("y"))
+        x2, _ := rage.AsFloat(o.Get("x"))
+        y2, _ := rage.AsFloat(o.Get("y"))
+        result := self.Class().NewInstance()
+        result.Set("x", rage.Float(x1+x2))
+        result.Set("y", rage.Float(y1+y2))
+        return result, nil
+    }).
+    Str(func(s *rage.State, self rage.Object) (string, error) {
+        x, _ := rage.AsFloat(self.Get("x"))
+        y, _ := rage.AsFloat(self.Get("y"))
+        return fmt.Sprintf("Vec2(%g, %g)", x, y), nil
+    }).
+    Property("length", func(s *rage.State, self rage.Object) (rage.Value, error) {
+        x, _ := rage.AsFloat(self.Get("x"))
+        y, _ := rage.AsFloat(self.Get("y"))
+        return rage.Float(math.Sqrt(x*x + y*y)), nil
+    }).
+    Build(state)
+
+state.SetGlobal("Vec2", vec2)
+```
+
+Then in Python:
+
+```python
+center = Vec2(400, 300)
+offset = Vec2(-50, -50)
+pos = center + offset           # Vec2(350, 250)
+print(pos.length)               # 430.116...
+```
