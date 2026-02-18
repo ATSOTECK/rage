@@ -170,10 +170,12 @@ type ClassBuilder struct {
 	name         string
 	bases        []*runtime.PyClass
 	initFn       func(s *State, self Object, args []Value, kwargs map[string]Value) error
+	newFn        func(s *State, cls ClassValue, args []Value, kwargs map[string]Value) (Object, error)
 	methods      map[string]methodDef
 	classMethods map[string]classMethodDef
 	statics      map[string]staticMethodDef
 	properties   map[string]propertyDef
+	attrs        map[string]Value
 }
 
 // NewClass starts building a new Python class with the given name.
@@ -184,6 +186,7 @@ func NewClass(name string) *ClassBuilder {
 		classMethods: make(map[string]classMethodDef),
 		statics:      make(map[string]staticMethodDef),
 		properties:   make(map[string]propertyDef),
+		attrs:        make(map[string]Value),
 	}
 }
 
@@ -540,6 +543,465 @@ func (b *ClassBuilder) StaticMethodKw(name string, fn func(s *State, args []Valu
 	return b
 }
 
+// Attr sets a class-level attribute (installed into the class dict).
+func (b *ClassBuilder) Attr(name string, val Value) *ClassBuilder {
+	b.attrs[name] = val
+	return b
+}
+
+// New sets a custom __new__ method. The function receives the class and args,
+// and should return a new Object (typically via cls.NewInstance()).
+func (b *ClassBuilder) New(fn func(s *State, cls ClassValue, args ...Value) (Object, error)) *ClassBuilder {
+	b.newFn = func(s *State, cls ClassValue, args []Value, kwargs map[string]Value) (Object, error) {
+		return fn(s, cls, args...)
+	}
+	return b
+}
+
+// NewKw sets a custom __new__ method with keyword argument support.
+func (b *ClassBuilder) NewKw(fn func(s *State, cls ClassValue, args []Value, kwargs map[string]Value) (Object, error)) *ClassBuilder {
+	b.newFn = fn
+	return b
+}
+
+// binaryDunder is a helper that registers a binary dunder method (__add__, __sub__, etc.).
+func (b *ClassBuilder) binaryDunder(name string, fn func(*State, Object, Value) (Value, error)) *ClassBuilder {
+	b.methods[name] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError(name + " requires an argument")
+		}
+		return fn(s, self, args[0])
+	}}
+	return b
+}
+
+// unaryDunder is a helper that registers a unary dunder method (__neg__, __pos__, etc.).
+func (b *ClassBuilder) unaryDunder(name string, fn func(*State, Object) (Value, error)) *ClassBuilder {
+	b.methods[name] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		return fn(s, self)
+	}}
+	return b
+}
+
+// --- Binary operators (forward) ---
+
+// Add sets __add__.
+func (b *ClassBuilder) Add(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__add__", fn)
+}
+
+// Sub sets __sub__.
+func (b *ClassBuilder) Sub(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__sub__", fn)
+}
+
+// Mul sets __mul__.
+func (b *ClassBuilder) Mul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__mul__", fn)
+}
+
+// TrueDiv sets __truediv__.
+func (b *ClassBuilder) TrueDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__truediv__", fn)
+}
+
+// FloorDiv sets __floordiv__.
+func (b *ClassBuilder) FloorDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__floordiv__", fn)
+}
+
+// Mod sets __mod__.
+func (b *ClassBuilder) Mod(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__mod__", fn)
+}
+
+// Pow sets __pow__.
+func (b *ClassBuilder) Pow(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__pow__", fn)
+}
+
+// LShift sets __lshift__.
+func (b *ClassBuilder) LShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__lshift__", fn)
+}
+
+// RShift sets __rshift__.
+func (b *ClassBuilder) RShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rshift__", fn)
+}
+
+// And sets __and__.
+func (b *ClassBuilder) And(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__and__", fn)
+}
+
+// Or sets __or__.
+func (b *ClassBuilder) Or(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__or__", fn)
+}
+
+// Xor sets __xor__.
+func (b *ClassBuilder) Xor(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__xor__", fn)
+}
+
+// MatMul sets __matmul__.
+func (b *ClassBuilder) MatMul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__matmul__", fn)
+}
+
+// --- Binary operators (reverse) ---
+
+// RAdd sets __radd__.
+func (b *ClassBuilder) RAdd(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__radd__", fn)
+}
+
+// RSub sets __rsub__.
+func (b *ClassBuilder) RSub(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rsub__", fn)
+}
+
+// RMul sets __rmul__.
+func (b *ClassBuilder) RMul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rmul__", fn)
+}
+
+// RTrueDiv sets __rtruediv__.
+func (b *ClassBuilder) RTrueDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rtruediv__", fn)
+}
+
+// RFloorDiv sets __rfloordiv__.
+func (b *ClassBuilder) RFloorDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rfloordiv__", fn)
+}
+
+// RMod sets __rmod__.
+func (b *ClassBuilder) RMod(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rmod__", fn)
+}
+
+// RPow sets __rpow__.
+func (b *ClassBuilder) RPow(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rpow__", fn)
+}
+
+// RLShift sets __rlshift__.
+func (b *ClassBuilder) RLShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rlshift__", fn)
+}
+
+// RRShift sets __rrshift__.
+func (b *ClassBuilder) RRShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rrshift__", fn)
+}
+
+// RAnd sets __rand__.
+func (b *ClassBuilder) RAnd(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rand__", fn)
+}
+
+// ROr sets __ror__.
+func (b *ClassBuilder) ROr(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ror__", fn)
+}
+
+// RXor sets __rxor__.
+func (b *ClassBuilder) RXor(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rxor__", fn)
+}
+
+// RMatMul sets __rmatmul__.
+func (b *ClassBuilder) RMatMul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__rmatmul__", fn)
+}
+
+// --- Binary operators (in-place) ---
+
+// IAdd sets __iadd__.
+func (b *ClassBuilder) IAdd(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__iadd__", fn)
+}
+
+// ISub sets __isub__.
+func (b *ClassBuilder) ISub(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__isub__", fn)
+}
+
+// IMul sets __imul__.
+func (b *ClassBuilder) IMul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__imul__", fn)
+}
+
+// ITrueDiv sets __itruediv__.
+func (b *ClassBuilder) ITrueDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__itruediv__", fn)
+}
+
+// IFloorDiv sets __ifloordiv__.
+func (b *ClassBuilder) IFloorDiv(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ifloordiv__", fn)
+}
+
+// IMod sets __imod__.
+func (b *ClassBuilder) IMod(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__imod__", fn)
+}
+
+// IPow sets __ipow__.
+func (b *ClassBuilder) IPow(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ipow__", fn)
+}
+
+// ILShift sets __ilshift__.
+func (b *ClassBuilder) ILShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ilshift__", fn)
+}
+
+// IRShift sets __irshift__.
+func (b *ClassBuilder) IRShift(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__irshift__", fn)
+}
+
+// IAnd sets __iand__.
+func (b *ClassBuilder) IAnd(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__iand__", fn)
+}
+
+// IOr sets __ior__.
+func (b *ClassBuilder) IOr(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ior__", fn)
+}
+
+// IXor sets __ixor__.
+func (b *ClassBuilder) IXor(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__ixor__", fn)
+}
+
+// IMatMul sets __imatmul__.
+func (b *ClassBuilder) IMatMul(fn func(s *State, self Object, other Value) (Value, error)) *ClassBuilder {
+	return b.binaryDunder("__imatmul__", fn)
+}
+
+// --- Unary operators ---
+
+// Neg sets __neg__ (unary -).
+func (b *ClassBuilder) Neg(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__neg__", fn)
+}
+
+// Pos sets __pos__ (unary +).
+func (b *ClassBuilder) Pos(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__pos__", fn)
+}
+
+// Abs sets __abs__ (abs() builtin).
+func (b *ClassBuilder) Abs(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__abs__", fn)
+}
+
+// Invert sets __invert__ (unary ~).
+func (b *ClassBuilder) Invert(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__invert__", fn)
+}
+
+// --- Attribute interception ---
+
+// GetAttr sets __getattr__. Called when normal attribute lookup fails.
+func (b *ClassBuilder) GetAttr(fn func(s *State, self Object, name string) (Value, error)) *ClassBuilder {
+	b.methods["__getattr__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__getattr__ requires a name argument")
+		}
+		name, _ := AsString(args[0])
+		return fn(s, self, name)
+	}}
+	return b
+}
+
+// SetAttr sets __setattr__. Called on all attribute assignments.
+func (b *ClassBuilder) SetAttr(fn func(s *State, self Object, name string, val Value) error) *ClassBuilder {
+	b.methods["__setattr__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, TypeError("__setattr__ requires name and value arguments")
+		}
+		name, _ := AsString(args[0])
+		err := fn(s, self, name, args[1])
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
+// DelAttr sets __delattr__. Called on attribute deletion.
+func (b *ClassBuilder) DelAttr(fn func(s *State, self Object, name string) error) *ClassBuilder {
+	b.methods["__delattr__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__delattr__ requires a name argument")
+		}
+		name, _ := AsString(args[0])
+		err := fn(s, self, name)
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
+// --- Numeric conversions ---
+
+// IntConv sets __int__ (int() builtin).
+func (b *ClassBuilder) IntConv(fn func(s *State, self Object) (int64, error)) *ClassBuilder {
+	b.methods["__int__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		n, err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return Int(n), nil
+	}}
+	return b
+}
+
+// FloatConv sets __float__ (float() builtin).
+func (b *ClassBuilder) FloatConv(fn func(s *State, self Object) (float64, error)) *ClassBuilder {
+	b.methods["__float__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		f, err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return Float(f), nil
+	}}
+	return b
+}
+
+// Index sets __index__ (used for slicing, indexing, and operator.index()).
+func (b *ClassBuilder) Index(fn func(s *State, self Object) (int64, error)) *ClassBuilder {
+	b.methods["__index__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		n, err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return Int(n), nil
+	}}
+	return b
+}
+
+// ComplexConv sets __complex__ (complex() builtin).
+func (b *ClassBuilder) ComplexConv(fn func(s *State, self Object) (complex128, error)) *ClassBuilder {
+	b.methods["__complex__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		c, err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return Complex(real(c), imag(c)), nil
+	}}
+	return b
+}
+
+// BytesConv sets __bytes__ (bytes() builtin).
+func (b *ClassBuilder) BytesConv(fn func(s *State, self Object) ([]byte, error)) *ClassBuilder {
+	b.methods["__bytes__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		bs, err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return Bytes(bs), nil
+	}}
+	return b
+}
+
+// --- Format, Missing, Del ---
+
+// Format sets __format__ (format() builtin and f-strings).
+func (b *ClassBuilder) Format(fn func(s *State, self Object, spec string) (string, error)) *ClassBuilder {
+	b.methods["__format__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		spec := ""
+		if len(args) > 0 {
+			spec, _ = AsString(args[0])
+		}
+		result, err := fn(s, self, spec)
+		if err != nil {
+			return nil, err
+		}
+		return String(result), nil
+	}}
+	return b
+}
+
+// Missing sets __missing__. Called by dict subclasses when a key is not found.
+func (b *ClassBuilder) Missing(fn func(s *State, self Object, key Value) (Value, error)) *ClassBuilder {
+	b.methods["__missing__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__missing__ requires a key argument")
+		}
+		return fn(s, self, args[0])
+	}}
+	return b
+}
+
+// Del sets __del__ (destructor, called on garbage collection, best-effort).
+func (b *ClassBuilder) Del(fn func(s *State, self Object) error) *ClassBuilder {
+	b.methods["__del__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		err := fn(s, self)
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
+// --- Descriptor protocol ---
+
+// DescGet sets __get__ for the descriptor protocol.
+func (b *ClassBuilder) DescGet(fn func(s *State, self Object, instance, owner Value) (Value, error)) *ClassBuilder {
+	b.methods["__get__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		var instance, owner Value = None, None
+		if len(args) > 0 {
+			instance = args[0]
+		}
+		if len(args) > 1 {
+			owner = args[1]
+		}
+		return fn(s, self, instance, owner)
+	}}
+	return b
+}
+
+// DescSet sets __set__ for the descriptor protocol.
+func (b *ClassBuilder) DescSet(fn func(s *State, self Object, instance, val Value) error) *ClassBuilder {
+	b.methods["__set__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, TypeError("__set__ requires instance and value arguments")
+		}
+		err := fn(s, self, args[0], args[1])
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
+// DescDelete sets __delete__ for the descriptor protocol.
+func (b *ClassBuilder) DescDelete(fn func(s *State, self Object, instance Value) error) *ClassBuilder {
+	b.methods["__delete__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__delete__ requires an instance argument")
+		}
+		err := fn(s, self, args[0])
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
 // Build creates the Python class and registers it in the given State.
 // Returns a ClassValue that can be passed to State.SetGlobal.
 func (b *ClassBuilder) Build(s *State) ClassValue {
@@ -571,6 +1033,42 @@ func (b *ClassBuilder) Build(s *State) ClassValue {
 	// Set metaclass to type
 	if typeClass, ok := vm.GetBuiltin("type").(*runtime.PyClass); ok {
 		cls.Metaclass = typeClass
+	}
+
+	// Add class-level attributes first (methods can override)
+	for name, val := range b.attrs {
+		cls.Dict[name] = toRuntime(val)
+	}
+
+	// Add __new__ if provided (as a static method)
+	if b.newFn != nil {
+		newFn := b.newFn
+		className := b.name
+		cls.Dict["__new__"] = &runtime.PyStaticMethod{
+			Func: &runtime.PyBuiltinFunc{
+				Name: className + ".__new__",
+				Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+					if len(args) < 1 {
+						return nil, fmt.Errorf("TypeError: %s.__new__() requires a class argument", className)
+					}
+					clsArg, ok := args[0].(*runtime.PyClass)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: %s.__new__() first argument must be a class", className)
+					}
+					cv := ClassValue{class: clsArg}
+					rageArgs := make([]Value, len(args)-1)
+					for i := 1; i < len(args); i++ {
+						rageArgs[i-1] = fromRuntime(args[i])
+					}
+					rageKwargs := convertKwargs(kwargs)
+					result, err := newFn(s, cv, rageArgs, rageKwargs)
+					if err != nil {
+						return nil, err
+					}
+					return result.toRuntime(), nil
+				},
+			},
+		}
 	}
 
 	// Add __init__ if provided

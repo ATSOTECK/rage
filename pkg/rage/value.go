@@ -196,6 +196,17 @@ func (v DictValue) toRuntime() runtime.Value {
 	return d
 }
 
+// BytesValue represents a Python bytes
+type BytesValue struct {
+	value []byte
+}
+
+func (v BytesValue) Type() string             { return "bytes" }
+func (v BytesValue) String() string           { return fmt.Sprintf("b'%s'", string(v.value)) }
+func (v BytesValue) GoValue() any             { return v.value }
+func (v BytesValue) Bytes() []byte            { return v.value }
+func (v BytesValue) toRuntime() runtime.Value { return runtime.NewBytes(v.value) }
+
 // UserDataValue wraps arbitrary Go values
 type UserDataValue struct {
 	value any
@@ -275,6 +286,11 @@ func Dict(pairs ...any) Value {
 	return DictValue{items: items}
 }
 
+// Bytes creates a Python bytes value
+func Bytes(v []byte) Value {
+	return BytesValue{value: v}
+}
+
 // UserData wraps a Go value for use in Python
 func UserData(v any) Value {
 	return UserDataValue{value: v}
@@ -321,6 +337,8 @@ func FromGo(v any) Value {
 		return ComplexValue{real: real(val), imag: imag(val)}
 	case string:
 		return String(val)
+	case []byte:
+		return Bytes(val)
 	case []any:
 		items := make([]Value, len(val))
 		for i, item := range val {
@@ -393,6 +411,12 @@ func IsTuple(v Value) bool {
 // IsDict returns true if the value is a dict
 func IsDict(v Value) bool {
 	_, ok := v.(DictValue)
+	return ok
+}
+
+// IsBytes returns true if the value is bytes
+func IsBytes(v Value) bool {
+	_, ok := v.(BytesValue)
 	return ok
 }
 
@@ -486,6 +510,14 @@ func AsDict(v Value) (map[string]Value, bool) {
 	return nil, false
 }
 
+// AsBytes returns the bytes value or nil if not bytes
+func AsBytes(v Value) ([]byte, bool) {
+	if bv, ok := v.(BytesValue); ok {
+		return bv.value, true
+	}
+	return nil, false
+}
+
 // AsUserData returns the userdata value or nil if not userdata
 func AsUserData(v Value) (any, bool) {
 	if uv, ok := v.(UserDataValue); ok {
@@ -541,6 +573,8 @@ func fromRuntime(v runtime.Value) Value {
 		return ComplexValue{real: val.Real, imag: val.Imag}
 	case *runtime.PyString:
 		return String(val.Value)
+	case *runtime.PyBytes:
+		return BytesValue{value: val.Value}
 	case *runtime.PyList:
 		items := make([]Value, len(val.Items))
 		for i, item := range val.Items {

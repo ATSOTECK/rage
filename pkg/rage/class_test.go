@@ -931,3 +931,493 @@ func TestAsObjectAsClass(t *testing.T) {
 		t.Error("AsClass should fail on Object")
 	}
 }
+
+func TestClassBuilder_Attr(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("WithAttr").
+		Attr("VERSION", Int(42)).
+		Attr("NAME", String("test")).
+		Build(state)
+
+	state.SetGlobal("WithAttr", cls)
+
+	result := eval(t, state, `WithAttr.VERSION`)
+	if n, ok := AsInt(result); !ok || n != 42 {
+		t.Errorf("expected 42, got %v", result)
+	}
+
+	result = eval(t, state, `WithAttr.NAME`)
+	if s, ok := AsString(result); !ok || s != "test" {
+		t.Errorf("expected 'test', got %v", result)
+	}
+
+	// Attrs should also be accessible on instances
+	result = eval(t, state, `WithAttr().VERSION`)
+	if n, ok := AsInt(result); !ok || n != 42 {
+		t.Errorf("expected 42 on instance, got %v", result)
+	}
+}
+
+func TestClassBuilder_AddSubMul(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Num").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Add(func(s *State, self Object, other Value) (Value, error) {
+			a, _ := AsInt(self.Get("v"))
+			o, ok := AsObject(other)
+			if !ok {
+				return None, nil
+			}
+			b, _ := AsInt(o.Get("v"))
+			return Int(a + b), nil
+		}).
+		Sub(func(s *State, self Object, other Value) (Value, error) {
+			a, _ := AsInt(self.Get("v"))
+			o, ok := AsObject(other)
+			if !ok {
+				return None, nil
+			}
+			b, _ := AsInt(o.Get("v"))
+			return Int(a - b), nil
+		}).
+		Mul(func(s *State, self Object, other Value) (Value, error) {
+			a, _ := AsInt(self.Get("v"))
+			o, ok := AsObject(other)
+			if !ok {
+				return None, nil
+			}
+			b, _ := AsInt(o.Get("v"))
+			return Int(a * b), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Num", cls)
+
+	result := eval(t, state, `Num(10) + Num(5)`)
+	if n, ok := AsInt(result); !ok || n != 15 {
+		t.Errorf("Add: expected 15, got %v", result)
+	}
+
+	result = eval(t, state, `Num(10) - Num(3)`)
+	if n, ok := AsInt(result); !ok || n != 7 {
+		t.Errorf("Sub: expected 7, got %v", result)
+	}
+
+	result = eval(t, state, `Num(4) * Num(5)`)
+	if n, ok := AsInt(result); !ok || n != 20 {
+		t.Errorf("Mul: expected 20, got %v", result)
+	}
+}
+
+func TestClassBuilder_NegAbs(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Num").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Neg(func(s *State, self Object) (Value, error) {
+			n, _ := AsInt(self.Get("v"))
+			return Int(-n), nil
+		}).
+		Abs(func(s *State, self Object) (Value, error) {
+			n, _ := AsInt(self.Get("v"))
+			if n < 0 {
+				return Int(-n), nil
+			}
+			return Int(n), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Num", cls)
+
+	result := eval(t, state, `-Num(5)`)
+	if n, ok := AsInt(result); !ok || n != -5 {
+		t.Errorf("Neg: expected -5, got %v", result)
+	}
+
+	result = eval(t, state, `abs(Num(-7))`)
+	if n, ok := AsInt(result); !ok || n != 7 {
+		t.Errorf("Abs: expected 7, got %v", result)
+	}
+}
+
+func TestClassBuilder_GetAttrDunder(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Dynamic").
+		GetAttr(func(s *State, self Object, name string) (Value, error) {
+			return String("dynamic:" + name), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Dynamic", cls)
+
+	result := eval(t, state, `Dynamic().foo`)
+	if s, ok := AsString(result); !ok || s != "dynamic:foo" {
+		t.Errorf("expected 'dynamic:foo', got %v", result)
+	}
+
+	result = eval(t, state, `Dynamic().bar`)
+	if s, ok := AsString(result); !ok || s != "dynamic:bar" {
+		t.Errorf("expected 'dynamic:bar', got %v", result)
+	}
+}
+
+func TestClassBuilder_SetAttrDunder(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Tracked").
+		SetAttr(func(s *State, self Object, name string, val Value) error {
+			// Store under a prefixed key
+			self.Set("_tracked_"+name, val)
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Tracked", cls)
+
+	_, err := state.Run(`
+t = Tracked()
+t.x = 42
+_setattr_result = t._tracked_x
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_setattr_result")
+	if n, ok := AsInt(result); !ok || n != 42 {
+		t.Errorf("expected 42, got %v", result)
+	}
+}
+
+func TestClassBuilder_DelAttrDunder(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Deletable").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("x", Int(10))
+			self.Set("_deleted", False)
+			return nil
+		}).
+		DelAttr(func(s *State, self Object, name string) error {
+			self.Delete(name)
+			self.Set("_deleted", True)
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Deletable", cls)
+
+	_, err := state.Run(`
+d = Deletable()
+del d.x
+_delattr_result = d._deleted
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_delattr_result")
+	if b, ok := AsBool(result); !ok || !b {
+		t.Errorf("expected True, got %v", result)
+	}
+}
+
+func TestClassBuilder_New(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Singleton").
+		New(func(s *State, cls ClassValue, args ...Value) (Object, error) {
+			inst := cls.NewInstance()
+			inst.Set("created_by_new", True)
+			return inst, nil
+		}).
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("initialized", True)
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Singleton", cls)
+
+	_, err := state.Run(`
+s = Singleton()
+_new_created = s.created_by_new
+_new_init = s.initialized
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_new_created")
+	if b, ok := AsBool(result); !ok || !b {
+		t.Errorf("expected created_by_new=True, got %v", result)
+	}
+	result = state.GetGlobal("_new_init")
+	if b, ok := AsBool(result); !ok || !b {
+		t.Errorf("expected initialized=True, got %v", result)
+	}
+}
+
+func TestClassBuilder_IntConv(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("IntLike").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		IntConv(func(s *State, self Object) (int64, error) {
+			f, _ := AsFloat(self.Get("v"))
+			return int64(f), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("IntLike", cls)
+
+	result := eval(t, state, `int(IntLike(3.7))`)
+	if n, ok := AsInt(result); !ok || n != 3 {
+		t.Errorf("expected 3, got %v", result)
+	}
+}
+
+func TestClassBuilder_FloatConv(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("FloatLike").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		FloatConv(func(s *State, self Object) (float64, error) {
+			n, _ := AsInt(self.Get("v"))
+			return float64(n) + 0.5, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("FloatLike", cls)
+
+	result := eval(t, state, `float(FloatLike(3))`)
+	if f, ok := AsFloat(result); !ok || f != 3.5 {
+		t.Errorf("expected 3.5, got %v", result)
+	}
+}
+
+func TestClassBuilder_Index(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Idx").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Index(func(s *State, self Object) (int64, error) {
+			n, _ := AsInt(self.Get("v"))
+			return n, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Idx", cls)
+
+	// __index__ allows use as a list index
+	result := eval(t, state, `[10, 20, 30][Idx(1)]`)
+	if n, ok := AsInt(result); !ok || n != 20 {
+		t.Errorf("expected 20, got %v", result)
+	}
+}
+
+func TestClassBuilder_Format(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Fmt").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Format(func(s *State, self Object, spec string) (string, error) {
+			n, _ := AsInt(self.Get("v"))
+			if spec == "hex" {
+				return fmt.Sprintf("0x%x", n), nil
+			}
+			return fmt.Sprintf("%d", n), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Fmt", cls)
+
+	result := eval(t, state, `format(Fmt(255), "hex")`)
+	if s, ok := AsString(result); !ok || s != "0xff" {
+		t.Errorf("expected '0xff', got %v", result)
+	}
+
+	result = eval(t, state, `format(Fmt(42), "")`)
+	if s, ok := AsString(result); !ok || s != "42" {
+		t.Errorf("expected '42', got %v", result)
+	}
+}
+
+func TestClassBuilder_Missing(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("DefaultDict").
+		Init(func(s *State, self Object, args ...Value) error {
+			return nil
+		}).
+		GetItem(func(s *State, self Object, key Value) (Value, error) {
+			k, _ := AsString(key)
+			v := self.Get("_item_" + k)
+			if IsNone(v) {
+				return String("default"), nil
+			}
+			return v, nil
+		}).
+		SetItem(func(s *State, self Object, key, val Value) error {
+			k, _ := AsString(key)
+			self.Set("_item_"+k, val)
+			return nil
+		}).
+		Missing(func(s *State, self Object, key Value) (Value, error) {
+			return String("missing"), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("DefaultDict", cls)
+
+	result := eval(t, state, `DefaultDict()["nonexistent"]`)
+	if s, ok := AsString(result); !ok || s != "default" {
+		t.Errorf("expected 'default', got %v", result)
+	}
+}
+
+func TestClassBuilder_InPlaceOps(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Acc").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		IAdd(func(s *State, self Object, other Value) (Value, error) {
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(other)
+			self.Set("v", Int(a+b))
+			return self, nil
+		}).
+		Str(func(s *State, self Object) (string, error) {
+			n, _ := AsInt(self.Get("v"))
+			return fmt.Sprintf("Acc(%d)", n), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Acc", cls)
+
+	_, err := state.Run(`
+a = Acc(10)
+a += 5
+_iadd_result = a.v
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_iadd_result")
+	if n, ok := AsInt(result); !ok || n != 15 {
+		t.Errorf("expected 15, got %v", result)
+	}
+}
+
+func TestClassBuilder_DescGet(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	// Build a descriptor class
+	desc := NewClass("Desc").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("val", args[0])
+			return nil
+		}).
+		DescGet(func(s *State, self Object, instance, owner Value) (Value, error) {
+			if IsNone(instance) {
+				return self, nil // class access returns descriptor itself
+			}
+			return self.Get("val"), nil
+		}).
+		DescSet(func(s *State, self Object, instance, val Value) error {
+			self.Set("val", val)
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Desc", desc)
+
+	_, err := state.Run(`
+class MyClass:
+    attr = Desc(42)
+
+obj = MyClass()
+_desc_get_result = obj.attr
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_desc_get_result")
+	if n, ok := AsInt(result); !ok || n != 42 {
+		t.Errorf("expected 42, got %v", result)
+	}
+}
+
+func TestClassBuilder_BytesValue(t *testing.T) {
+	// Test BytesValue type
+	b := Bytes([]byte("hello"))
+	if b.Type() != "bytes" {
+		t.Errorf("expected type 'bytes', got %q", b.Type())
+	}
+	if !IsBytes(b) {
+		t.Error("expected IsBytes = true")
+	}
+	bs, ok := AsBytes(b)
+	if !ok || string(bs) != "hello" {
+		t.Errorf("expected 'hello', got %v", bs)
+	}
+}
+
+func TestClassBuilder_ReverseOps(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("RNum").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		RMul(func(s *State, self Object, other Value) (Value, error) {
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(other)
+			return Int(a * b), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("RNum", cls)
+
+	result := eval(t, state, `3 * RNum(5)`)
+	if n, ok := AsInt(result); !ok || n != 15 {
+		t.Errorf("expected 15, got %v", result)
+	}
+}

@@ -9,9 +9,14 @@
 #   Multiplier(factor)     — __call__
 #   Rect(w, h)             — properties: area (read-only), width (read-write)
 #   Counter(n)             — static_method from_string(s), class_method class_name()
-#   Vec2(x, y)             — __add__, __str__, __repr__
+#   Vec2(x, y)             — __add__, __sub__, __mul__, __neg__, __abs__, __str__, __repr__
 #   GoBase(value)          — simple base class for Python to inherit from
 #   Store()                — __setitem__, __getitem__
+#   Formattable(v)         — __format__, __int__, __float__, __index__
+#   Accumulator(start)     — __iadd__, __isub__
+#   DynObj()               — __getattr__ (dynamic attributes)
+#   WithAttrs              — class-level attributes via Attr()
+#   CustomNew              — custom __new__
 
 from test_framework import test, expect
 
@@ -601,5 +606,140 @@ def test_go_raises_key_error():
 test("go_raises_value_error", test_go_raises_value_error)
 test("go_raises_type_error", test_go_raises_type_error)
 test("go_raises_key_error", test_go_raises_key_error)
+
+# ===========================================================================
+# Vec2 extended: __sub__, __mul__, __neg__, __abs__
+# ===========================================================================
+
+def test_vec2_sub():
+    v1 = Vec2(5, 10)
+    v2 = Vec2(2, 3)
+    result = v1 - v2
+    expect(result).to_be([3, 7])
+
+def test_vec2_mul():
+    v = Vec2(3, 4)
+    result = v * 2
+    expect(result).to_be([6, 8])
+
+def test_vec2_neg():
+    v = Vec2(3, -4)
+    result = -v
+    expect(result).to_be([-3, 4])
+
+def test_vec2_abs():
+    v = Vec2(-3, -4)
+    result = abs(v)
+    expect(result).to_be([3, 4])
+
+test("vec2_sub", test_vec2_sub)
+test("vec2_mul", test_vec2_mul)
+test("vec2_neg", test_vec2_neg)
+test("vec2_abs", test_vec2_abs)
+
+# ===========================================================================
+# __format__, __int__, __float__, __index__
+# ===========================================================================
+
+def test_format_default():
+    f = Formattable(42)
+    expect(format(f, "")).to_be("42")
+
+def test_format_hex():
+    f = Formattable(255)
+    expect(format(f, "hex")).to_be("0xff")
+
+def test_format_bin():
+    f = Formattable(10)
+    expect(format(f, "bin")).to_be("0b1010")
+
+def test_int_conv():
+    f = Formattable(42)
+    expect(int(f)).to_be(42)
+
+def test_float_conv():
+    f = Formattable(3)
+    expect(float(f)).to_be(3.5)
+
+def test_index_conv():
+    f = Formattable(1)
+    items = [10, 20, 30]
+    expect(items[f]).to_be(20)
+
+test("format_default", test_format_default)
+test("format_hex", test_format_hex)
+test("format_bin", test_format_bin)
+test("int_conv", test_int_conv)
+test("float_conv", test_float_conv)
+test("index_conv", test_index_conv)
+
+# ===========================================================================
+# In-place operators: __iadd__, __isub__
+# ===========================================================================
+
+def test_iadd():
+    a = Accumulator(10)
+    a += 5
+    expect(a.v).to_be(15)
+
+def test_isub():
+    a = Accumulator(10)
+    a -= 3
+    expect(a.v).to_be(7)
+
+def test_iadd_chain():
+    a = Accumulator(0)
+    a += 10
+    a += 20
+    a += 30
+    expect(a.v).to_be(60)
+
+test("iadd", test_iadd)
+test("isub", test_isub)
+test("iadd_chain", test_iadd_chain)
+
+# ===========================================================================
+# __getattr__ (dynamic attributes)
+# ===========================================================================
+
+def test_getattr_dynamic():
+    d = DynObj()
+    expect(d.foo).to_be("dynamic:foo")
+    expect(d.bar).to_be("dynamic:bar")
+    expect(d.anything).to_be("dynamic:anything")
+
+test("getattr_dynamic", test_getattr_dynamic)
+
+# ===========================================================================
+# Class-level attributes via Attr()
+# ===========================================================================
+
+def test_class_attrs():
+    expect(WithAttrs.VERSION).to_be(1)
+    expect(WithAttrs.NAME).to_be("WithAttrs")
+
+def test_class_attrs_on_instance():
+    w = WithAttrs()
+    expect(w.VERSION).to_be(1)
+    expect(w.NAME).to_be("WithAttrs")
+
+test("class_attrs", test_class_attrs)
+test("class_attrs_on_instance", test_class_attrs_on_instance)
+
+# ===========================================================================
+# Custom __new__
+# ===========================================================================
+
+def test_custom_new():
+    obj = CustomNew(42)
+    expect(obj.from_new).to_be(True)
+    expect(obj.v).to_be(42)
+
+def test_custom_new_no_args():
+    obj = CustomNew()
+    expect(obj.from_new).to_be(True)
+
+test("custom_new", test_custom_new)
+test("custom_new_no_args", test_custom_new_no_args)
 
 print("Go-defined classes tests completed")

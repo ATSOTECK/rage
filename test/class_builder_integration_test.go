@@ -250,23 +250,56 @@ func registerGoClasses(t *testing.T, state *rage.State) {
 		Build(state)
 	state.SetGlobal("Counter", counter)
 
-	// Vec2(x, y) — __add__, __str__, __repr__
+	// Vec2(x, y) — __add__, __sub__, __mul__, __neg__, __abs__, __str__, __repr__
 	vec2 := rage.NewClass("Vec2").
 		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("x", args[0])
 			self.Set("y", args[1])
 			return nil
 		}).
-		Dunder("__add__", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
-			other, ok := args[0].(rage.Object)
+		Add(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+			o, ok := other.(rage.Object)
 			if !ok {
 				return rage.None, nil
 			}
 			x1, _ := rage.AsInt(self.Get("x"))
 			y1, _ := rage.AsInt(self.Get("y"))
-			x2, _ := rage.AsInt(other.Get("x"))
-			y2, _ := rage.AsInt(other.Get("y"))
+			x2, _ := rage.AsInt(o.Get("x"))
+			y2, _ := rage.AsInt(o.Get("y"))
 			return rage.List(rage.Int(x1+x2), rage.Int(y1+y2)), nil
+		}).
+		Sub(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+			o, ok := other.(rage.Object)
+			if !ok {
+				return rage.None, nil
+			}
+			x1, _ := rage.AsInt(self.Get("x"))
+			y1, _ := rage.AsInt(self.Get("y"))
+			x2, _ := rage.AsInt(o.Get("x"))
+			y2, _ := rage.AsInt(o.Get("y"))
+			return rage.List(rage.Int(x1-x2), rage.Int(y1-y2)), nil
+		}).
+		Mul(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+			x, _ := rage.AsInt(self.Get("x"))
+			y, _ := rage.AsInt(self.Get("y"))
+			scalar, _ := rage.AsInt(other)
+			return rage.List(rage.Int(x*scalar), rage.Int(y*scalar)), nil
+		}).
+		Neg(func(s *rage.State, self rage.Object) (rage.Value, error) {
+			x, _ := rage.AsInt(self.Get("x"))
+			y, _ := rage.AsInt(self.Get("y"))
+			return rage.List(rage.Int(-x), rage.Int(-y)), nil
+		}).
+		Abs(func(s *rage.State, self rage.Object) (rage.Value, error) {
+			x, _ := rage.AsInt(self.Get("x"))
+			y, _ := rage.AsInt(self.Get("y"))
+			if x < 0 {
+				x = -x
+			}
+			if y < 0 {
+				y = -y
+			}
+			return rage.List(rage.Int(x), rage.Int(y)), nil
 		}).
 		Str(func(s *rage.State, self rage.Object) (string, error) {
 			x, _ := rage.AsInt(self.Get("x"))
@@ -500,6 +533,104 @@ func registerGoClasses(t *testing.T, state *rage.State) {
 		}).
 		Build(state)
 	state.SetGlobal("ErrorRaiser", errRaiser)
+
+	// Formattable(v) — __format__ and __int__, __float__
+	formattable := rage.NewClass("Formattable").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Format(func(s *rage.State, self rage.Object, spec string) (string, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			switch spec {
+			case "hex":
+				return fmt.Sprintf("0x%x", n), nil
+			case "bin":
+				return fmt.Sprintf("0b%b", n), nil
+			default:
+				return fmt.Sprintf("%d", n), nil
+			}
+		}).
+		IntConv(func(s *rage.State, self rage.Object) (int64, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			return n, nil
+		}).
+		FloatConv(func(s *rage.State, self rage.Object) (float64, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			return float64(n) + 0.5, nil
+		}).
+		Index(func(s *rage.State, self rage.Object) (int64, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			return n, nil
+		}).
+		Str(func(s *rage.State, self rage.Object) (string, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			return fmt.Sprintf("Formattable(%d)", n), nil
+		}).
+		Build(state)
+	state.SetGlobal("Formattable", formattable)
+
+	// Accumulator(start) — __iadd__, __isub__
+	accumulator := rage.NewClass("Accumulator").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		IAdd(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+			a, _ := rage.AsInt(self.Get("v"))
+			b, _ := rage.AsInt(other)
+			self.Set("v", rage.Int(a+b))
+			return self, nil
+		}).
+		ISub(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+			a, _ := rage.AsInt(self.Get("v"))
+			b, _ := rage.AsInt(other)
+			self.Set("v", rage.Int(a-b))
+			return self, nil
+		}).
+		Str(func(s *rage.State, self rage.Object) (string, error) {
+			n, _ := rage.AsInt(self.Get("v"))
+			return fmt.Sprintf("Accumulator(%d)", n), nil
+		}).
+		Build(state)
+	state.SetGlobal("Accumulator", accumulator)
+
+	// DynObj() — __getattr__ (dynamic attributes)
+	dynObj := rage.NewClass("DynObj").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			return nil
+		}).
+		GetAttr(func(s *rage.State, self rage.Object, name string) (rage.Value, error) {
+			return rage.String("dynamic:" + name), nil
+		}).
+		Build(state)
+	state.SetGlobal("DynObj", dynObj)
+
+	// WithAttrs — class with Attr() for constants
+	withAttrs := rage.NewClass("WithAttrs").
+		Attr("VERSION", rage.Int(1)).
+		Attr("NAME", rage.String("WithAttrs")).
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			return nil
+		}).
+		Build(state)
+	state.SetGlobal("WithAttrs", withAttrs)
+
+	// CustomNew — class with custom __new__
+	customNew := rage.NewClass("CustomNew").
+		New(func(s *rage.State, cls rage.ClassValue, args ...rage.Value) (rage.Object, error) {
+			inst := cls.NewInstance()
+			inst.Set("from_new", rage.True)
+			return inst, nil
+		}).
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			if len(args) > 0 {
+				self.Set("v", args[0])
+			}
+			return nil
+		}).
+		Build(state)
+	state.SetGlobal("CustomNew", customNew)
 }
 
 // goRangeIter is set during registerGoClasses so GoRange's Iter can reference it.
