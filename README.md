@@ -13,10 +13,11 @@ standard library you can pick and choose which modules are made available to scr
 
 - Pure Go implementation - no CGO, no external Python installation required
 - Embeddable - designed to be used as a library in Go applications
+- ClassBuilder API - define full-featured Python classes in Go with operators, properties, methods, and protocols
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
 - Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, io, base64, abc, dataclasses, copy, operator
-- Go interoperability - call Go functions from Python and vice versa
+- Go interoperability - call Go functions from Python, define Python classes in Go, exchange values bidirectionally
 
 ## Installation
 
@@ -132,6 +133,96 @@ func main() {
 }
 ```
 
+### Defining Python Classes in Go
+
+The ClassBuilder API lets you define Python classes entirely in Go — with operators, properties, methods, context managers, and more. The resulting classes are used from Python like any native class.
+
+```go
+package main
+
+import (
+    "fmt"
+    "math"
+
+    "github.com/ATSOTECK/rage/pkg/rage"
+)
+
+func main() {
+    state := rage.NewState()
+    defer state.Close()
+
+    // Define a Vec2 class with operators, methods, and properties
+    vec2 := rage.NewClass("Vec2").
+        Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+            self.Set("x", args[0])
+            self.Set("y", args[1])
+            return nil
+        }).
+        Str(func(s *rage.State, self rage.Object) (string, error) {
+            x, _ := rage.AsFloat(self.Get("x"))
+            y, _ := rage.AsFloat(self.Get("y"))
+            return fmt.Sprintf("Vec2(%g, %g)", x, y), nil
+        }).
+        Add(func(s *rage.State, self rage.Object, other rage.Value) (rage.Value, error) {
+            o, _ := rage.AsObject(other)
+            x1, _ := rage.AsFloat(self.Get("x"))
+            y1, _ := rage.AsFloat(self.Get("y"))
+            x2, _ := rage.AsFloat(o.Get("x"))
+            y2, _ := rage.AsFloat(o.Get("y"))
+            result := self.Class().NewInstance()
+            result.Set("x", rage.Float(x1+x2))
+            result.Set("y", rage.Float(y1+y2))
+            return result, nil
+        }).
+        Property("length", func(s *rage.State, self rage.Object) (rage.Value, error) {
+            x, _ := rage.AsFloat(self.Get("x"))
+            y, _ := rage.AsFloat(self.Get("y"))
+            return rage.Float(math.Sqrt(x*x + y*y)), nil
+        }).
+        Method("distance_to", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
+            o, _ := rage.AsObject(args[0])
+            x1, _ := rage.AsFloat(self.Get("x"))
+            y1, _ := rage.AsFloat(self.Get("y"))
+            x2, _ := rage.AsFloat(o.Get("x"))
+            y2, _ := rage.AsFloat(o.Get("y"))
+            dx, dy := x2-x1, y2-y1
+            return rage.Float(math.Sqrt(dx*dx + dy*dy)), nil
+        }).
+        Build(state)
+
+    state.SetGlobal("Vec2", vec2)
+
+    state.Run(`
+a = Vec2(3, 4)
+b = Vec2(6, 8)
+print(a + b)              # Vec2(9, 12)
+print(a.length)            # 5.0
+print(a.distance_to(b))   # 5.0
+    `)
+}
+```
+
+The ClassBuilder supports 60+ methods covering the full Python data model:
+
+| Category | ClassBuilder Methods |
+|---|---|
+| Initialization | `Init`, `InitKw`, `New`, `NewKw` |
+| Operators | `Add`, `Sub`, `Mul`, `TrueDiv`, `FloorDiv`, `Mod`, `Pow`, `MatMul`, `LShift`, `RShift`, `And`, `Or`, `Xor` (+ reflected `R*` and in-place `I*` variants) |
+| Unary | `Neg`, `Pos`, `Abs`, `Invert` |
+| Comparison | `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, `Hash` |
+| Container | `Len`, `GetItem`, `SetItem`, `DelItem`, `Contains`, `Missing`, `Bool` |
+| Iteration | `Iter`, `Next`, `Reversed` |
+| String | `Str`, `Repr`, `Format` |
+| Numeric | `IntConv`, `FloatConv`, `ComplexConv`, `BytesConv`, `Index`, `Round` |
+| Attributes | `GetAttr`, `SetAttr`, `DelAttr` |
+| Descriptors | `DescGet`, `DescSet`, `DescDelete`, `SetName` |
+| Context manager | `Enter`, `Exit` |
+| Callable | `Call`, `CallKw` |
+| Methods | `Method`, `MethodKw`, `StaticMethod`, `ClassMethod`, `Property`, `PropertyWithSetter` |
+| Class-level | `Attr`, `ClassGetItem`, `Base`, `Bases` |
+
+See the [demo](demo/README.md) for a complete example with four Go-defined classes (Vec2, Color, Inventory, GameSession).
+
 ### Timeouts and Context
 
 ```go
@@ -169,9 +260,9 @@ while True:
 }
 ```
 
-## Demo: Python as Configuration
+## Demo: Python as Configuration + Go-Defined Classes
 
-The `demo/` directory contains a complete example of RAGE's core use case: **replacing static config files (TOML, JSON, YAML) with Python scripts**. A Go "game server" loads its configuration from Python, showcasing things static formats can't do:
+The `demo/` directory contains a complete example of RAGE's core use cases: **replacing static config files with Python scripts** and **defining rich Python classes in Go**. A Go "game server" loads its configuration from Python, showcasing things static formats can't do:
 
 ```bash
 go run demo/main.go                       # development settings
@@ -241,6 +332,24 @@ import math
 from common import zones
 
 xp_for_level = [math.floor(100 * math.pow(1.15, level)) for level in range(50)]
+```
+
+The demo also registers Go-defined classes using the ClassBuilder API. Python scripts use them like native types:
+
+```python
+# config/entities.py — uses Go-defined Vec2, Color, Inventory, GameSession
+center = Vec2(400, 300)
+tower_positions = [center + offset for offset in offsets]
+
+sunset = Color(255, 100, 50).mix(Color(100, 0, 150), t=0.4)
+gold = Color.from_hex("#ffd700")
+
+starter = Inventory(10)
+starter["sword"] = {"damage": 5, "weight": 3}
+carry_weight = starter.total_weight()
+
+with GameSession("config_load") as session:
+    session(event="spawn_loaded", count=len(spawn_points))
 ```
 
 See [`demo/README.md`](demo/README.md) for the full walkthrough.
