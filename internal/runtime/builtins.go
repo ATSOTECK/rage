@@ -334,6 +334,122 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	vm.builtins["__import__"] = &PyBuiltinFunc{
+		Name: "__import__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			// __import__(name, globals=None, locals=None, fromlist=(), level=0)
+			if len(args) < 1 {
+				return nil, fmt.Errorf("TypeError: __import__() missing required argument: 'name'")
+			}
+			nameStr, ok := args[0].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: __import__() argument 1 must be str, not %s", vm.typeName(args[0]))
+			}
+			moduleName := nameStr.Value
+
+			// Extract globals (arg 1 or kwarg) for relative import resolution
+			var globalsDict map[string]Value
+			if len(args) > 1 {
+				if d, ok := args[1].(*PyDict); ok {
+					globalsDict = make(map[string]Value)
+					for k, v := range d.Items {
+						if ks, ok := k.(*PyString); ok {
+							globalsDict[ks.Value] = v
+						}
+					}
+				}
+			}
+			if globalsDict == nil && vm.frame != nil {
+				globalsDict = vm.frame.Globals
+			}
+
+			// Extract fromlist (arg 3 or kwarg)
+			var fromlistItems []string
+			var fromlistVal Value
+			if len(args) > 3 {
+				fromlistVal = args[3]
+			}
+			if v, ok := kwargs["fromlist"]; ok {
+				fromlistVal = v
+			}
+			if fromlistVal != nil && fromlistVal != None {
+				switch fl := fromlistVal.(type) {
+				case *PyTuple:
+					for _, item := range fl.Items {
+						if s, ok := item.(*PyString); ok {
+							fromlistItems = append(fromlistItems, s.Value)
+						}
+					}
+				case *PyList:
+					for _, item := range fl.Items {
+						if s, ok := item.(*PyString); ok {
+							fromlistItems = append(fromlistItems, s.Value)
+						}
+					}
+				}
+			}
+
+			// Extract level (arg 4 or kwarg)
+			level := 0
+			if len(args) > 4 {
+				if li, ok := args[4].(*PyInt); ok {
+					level = int(li.Value)
+				}
+			}
+			if v, ok := kwargs["level"]; ok {
+				if li, ok := v.(*PyInt); ok {
+					level = int(li.Value)
+				}
+			}
+
+			// Resolve relative imports
+			resolvedName := moduleName
+			if level > 0 {
+				packageName := ""
+				if globalsDict != nil {
+					if pkgVal, ok := globalsDict["__package__"]; ok {
+						if pkgStr, ok := pkgVal.(*PyString); ok {
+							packageName = pkgStr.Value
+						}
+					}
+					if packageName == "" {
+						if nameVal, ok := globalsDict["__name__"]; ok {
+							if nameStr, ok := nameVal.(*PyString); ok {
+								packageName = nameStr.Value
+							}
+						}
+					}
+				}
+				resolved, err := ResolveRelativeImport(moduleName, level, packageName)
+				if err != nil {
+					return nil, err
+				}
+				resolvedName = resolved
+			}
+
+			// Import each part of dotted name
+			var rootMod, targetMod *PyModule
+			parts := splitModuleName(resolvedName)
+			for i := range parts {
+				partialName := joinModuleName(parts[:i+1])
+				mod, err := vm.ImportModule(partialName)
+				if err != nil {
+					return nil, err
+				}
+				if i == 0 {
+					rootMod = mod
+				}
+				targetMod = mod
+			}
+
+			// fromlist non-empty → return target module; empty → return root module
+			if len(fromlistItems) > 0 {
+				return targetMod, nil
+			}
+			return rootMod, nil
+		},
+	}
+
 	vm.builtins["format"] = &PyBuiltinFunc{
 		Name: "format",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
