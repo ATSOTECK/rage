@@ -447,6 +447,12 @@ func (b *ClassBuilder) Call(fn func(s *State, self Object, args ...Value) (Value
 	return b
 }
 
+// CallKw sets the __call__ method with keyword argument support.
+func (b *ClassBuilder) CallKw(fn func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error)) *ClassBuilder {
+	b.methods["__call__"] = methodDef{fn: fn}
+	return b
+}
+
 // Iter sets the __iter__ method. Return self for objects that are their own iterator.
 func (b *ClassBuilder) Iter(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
 	b.methods["__iter__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
@@ -994,6 +1000,60 @@ func (b *ClassBuilder) DescDelete(fn func(s *State, self Object, instance Value)
 			return nil, TypeError("__delete__ requires an instance argument")
 		}
 		err := fn(s, self, args[0])
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
+// --- Iteration extras ---
+
+// Reversed sets __reversed__. Called by the reversed() builtin.
+func (b *ClassBuilder) Reversed(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__reversed__", fn)
+}
+
+// --- Numeric rounding ---
+
+// Round sets __round__. Called by the round() builtin.
+// ndigits is None when round() is called with one argument.
+func (b *ClassBuilder) Round(fn func(s *State, self Object, ndigits Value) (Value, error)) *ClassBuilder {
+	b.methods["__round__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		var ndigits Value = None
+		if len(args) > 0 {
+			ndigits = args[0]
+		}
+		return fn(s, self, ndigits)
+	}}
+	return b
+}
+
+// --- Class-level special methods ---
+
+// ClassGetItem sets __class_getitem__. Called for MyClass[key] syntax (e.g. generics).
+// Installed as a class method.
+func (b *ClassBuilder) ClassGetItem(fn func(s *State, cls ClassValue, key Value) (Value, error)) *ClassBuilder {
+	b.classMethods["__class_getitem__"] = classMethodDef{fn: func(s *State, cls ClassValue, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__class_getitem__ requires a key argument")
+		}
+		return fn(s, cls, args[0])
+	}}
+	return b
+}
+
+// --- Descriptor lifecycle ---
+
+// SetName sets __set_name__. Called when a descriptor is assigned to a class attribute.
+func (b *ClassBuilder) SetName(fn func(s *State, self Object, owner Value, name string) error) *ClassBuilder {
+	b.methods["__set_name__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 2 {
+			return nil, TypeError("__set_name__ requires owner and name arguments")
+		}
+		name, _ := AsString(args[1])
+		err := fn(s, self, args[0], name)
 		if err != nil {
 			return nil, err
 		}

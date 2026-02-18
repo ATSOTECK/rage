@@ -1421,3 +1421,148 @@ func TestClassBuilder_ReverseOps(t *testing.T) {
 		t.Errorf("expected 15, got %v", result)
 	}
 }
+
+func TestClassBuilder_CallKw(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("KwCallable").
+		CallKw(func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+			// Return the value of the "key" kwarg, or the first arg
+			if v, ok := kwargs["key"]; ok {
+				return v, nil
+			}
+			if len(args) > 0 {
+				return args[0], nil
+			}
+			return None, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("KwCallable", cls)
+
+	result := eval(t, state, `KwCallable()(key=42)`)
+	if n, ok := AsInt(result); !ok || n != 42 {
+		t.Errorf("expected 42, got %v", result)
+	}
+
+	result = eval(t, state, `KwCallable()(99)`)
+	if n, ok := AsInt(result); !ok || n != 99 {
+		t.Errorf("expected 99, got %v", result)
+	}
+}
+
+func TestClassBuilder_Reversed(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("RevList").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("items", args[0])
+			self.Set("_idx", None)
+			return nil
+		}).
+		Reversed(func(s *State, self Object) (Value, error) {
+			items, _ := AsList(self.Get("items"))
+			reversed := make([]Value, len(items))
+			for i, v := range items {
+				reversed[len(items)-1-i] = v
+			}
+			return List(reversed...), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("RevList", cls)
+
+	result := eval(t, state, `list(reversed(RevList([1, 2, 3])))`)
+	items, ok := AsList(result)
+	if !ok || len(items) != 3 {
+		t.Fatalf("expected list of 3, got %v", result)
+	}
+	for i, want := range []int64{3, 2, 1} {
+		n, _ := AsInt(items[i])
+		if n != want {
+			t.Errorf("item %d: expected %d, got %d", i, want, n)
+		}
+	}
+}
+
+func TestClassBuilder_Round(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("RoundNum").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Round(func(s *State, self Object, ndigits Value) (Value, error) {
+			f, _ := AsFloat(self.Get("v"))
+			if IsNone(ndigits) {
+				return Int(int64(f + 0.5)), nil
+			}
+			// For simplicity, just return the int version
+			return Int(int64(f + 0.5)), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("RoundNum", cls)
+
+	result := eval(t, state, `round(RoundNum(3.7))`)
+	if n, ok := AsInt(result); !ok || n != 4 {
+		t.Errorf("expected 4, got %v", result)
+	}
+}
+
+func TestClassBuilder_ClassGetItem(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Generic").
+		ClassGetItem(func(s *State, cls ClassValue, key Value) (Value, error) {
+			k, _ := AsString(key)
+			return String(cls.Name() + "[" + k + "]"), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Generic", cls)
+
+	result := eval(t, state, `Generic["int"]`)
+	if s, ok := AsString(result); !ok || s != "Generic[int]" {
+		t.Errorf("expected 'Generic[int]', got %v", result)
+	}
+}
+
+func TestClassBuilder_SetName(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("NamedDesc").
+		Init(func(s *State, self Object, args ...Value) error {
+			return nil
+		}).
+		SetName(func(s *State, self Object, owner Value, name string) error {
+			self.Set("attr_name", String(name))
+			return nil
+		}).
+		DescGet(func(s *State, self Object, instance, owner Value) (Value, error) {
+			return self.Get("attr_name"), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("NamedDesc", cls)
+
+	_, err := state.Run(`
+class Host:
+    my_field = NamedDesc()
+
+_setname_result = Host().my_field
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_setname_result")
+	if s, ok := AsString(result); !ok || s != "my_field" {
+		t.Errorf("expected 'my_field', got %v", result)
+	}
+}

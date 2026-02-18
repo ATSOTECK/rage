@@ -631,6 +631,75 @@ func registerGoClasses(t *testing.T, state *rage.State) {
 		}).
 		Build(state)
 	state.SetGlobal("CustomNew", customNew)
+
+	// Roundable(v) — __round__
+	roundable := rage.NewClass("Roundable").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Round(func(s *rage.State, self rage.Object, ndigits rage.Value) (rage.Value, error) {
+			f, _ := rage.AsFloat(self.Get("v"))
+			if rage.IsNone(ndigits) {
+				return rage.Int(int64(f + 0.5)), nil
+			}
+			return rage.Int(int64(f + 0.5)), nil
+		}).
+		Build(state)
+	state.SetGlobal("Roundable", roundable)
+
+	// RevList(items) — __reversed__
+	revList := rage.NewClass("RevList").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			self.Set("items", args[0])
+			return nil
+		}).
+		Reversed(func(s *rage.State, self rage.Object) (rage.Value, error) {
+			items, _ := rage.AsList(self.Get("items"))
+			reversed := make([]rage.Value, len(items))
+			for i, v := range items {
+				reversed[len(items)-1-i] = v
+			}
+			return rage.List(reversed...), nil
+		}).
+		Build(state)
+	state.SetGlobal("RevList", revList)
+
+	// GenericBox — __class_getitem__
+	genericBox := rage.NewClass("GenericBox").
+		ClassGetItem(func(s *rage.State, cls rage.ClassValue, key rage.Value) (rage.Value, error) {
+			k, _ := rage.AsString(key)
+			return rage.String(cls.Name() + "[" + k + "]"), nil
+		}).
+		Build(state)
+	state.SetGlobal("GenericBox", genericBox)
+
+	// KwCall — __call__ with kwargs
+	kwCall := rage.NewClass("KwCall").
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			self.Set("prefix", args[0])
+			return nil
+		}).
+		CallKw(func(s *rage.State, self rage.Object, args []rage.Value, kwargs map[string]rage.Value) (rage.Value, error) {
+			prefix, _ := rage.AsString(self.Get("prefix"))
+			if sep, ok := kwargs["sep"]; ok {
+				s, _ := rage.AsString(sep)
+				result := prefix
+				for _, a := range args {
+					as, _ := rage.AsString(a)
+					result += s + as
+				}
+				return rage.String(result), nil
+			}
+			result := prefix
+			for _, a := range args {
+				as, _ := rage.AsString(a)
+				result += " " + as
+			}
+			return rage.String(result), nil
+		}).
+		Build(state)
+	state.SetGlobal("KwCall", kwCall)
 }
 
 // goRangeIter is set during registerGoClasses so GoRange's Iter can reference it.

@@ -17,6 +17,10 @@
 #   DynObj()               — __getattr__ (dynamic attributes)
 #   WithAttrs              — class-level attributes via Attr()
 #   CustomNew              — custom __new__
+#   Roundable(v)           — __round__
+#   RevList(items)         — __reversed__
+#   GenericBox             — __class_getitem__
+#   KwCall(prefix)         — __call__ with kwargs
 
 from test_framework import test, expect
 
@@ -741,5 +745,70 @@ def test_custom_new_no_args():
 
 test("custom_new", test_custom_new)
 test("custom_new_no_args", test_custom_new_no_args)
+
+# ===========================================================================
+# __round__
+# ===========================================================================
+
+def test_round_basic():
+    r = Roundable(3.7)
+    expect(round(r)).to_be(4)
+
+def test_round_exact():
+    r = Roundable(5.0)
+    expect(round(r)).to_be(5)
+
+test("round_basic", test_round_basic)
+test("round_exact", test_round_exact)
+
+# ===========================================================================
+# __reversed__
+# ===========================================================================
+
+def test_reversed_basic():
+    r = RevList([1, 2, 3])
+    expect(list(reversed(r))).to_be([3, 2, 1])
+
+def test_reversed_empty():
+    r = RevList([])
+    expect(list(reversed(r))).to_be([])
+
+def test_reversed_single():
+    r = RevList([42])
+    expect(list(reversed(r))).to_be([42])
+
+test("reversed_basic", test_reversed_basic)
+test("reversed_empty", test_reversed_empty)
+test("reversed_single", test_reversed_single)
+
+# ===========================================================================
+# __class_getitem__ (generics syntax)
+# ===========================================================================
+
+def test_class_getitem():
+    result = GenericBox["int"]
+    expect(result).to_be("GenericBox[int]")
+
+def test_class_getitem_str():
+    result = GenericBox["str"]
+    expect(result).to_be("GenericBox[str]")
+
+test("class_getitem", test_class_getitem)
+test("class_getitem_str", test_class_getitem_str)
+
+# ===========================================================================
+# __call__ with kwargs (CallKw)
+# ===========================================================================
+
+def test_callkw_no_kwargs():
+    c = KwCall("hello")
+    expect(c("world")).to_be("hello world")
+
+def test_callkw_with_sep():
+    c = KwCall("a")
+    expect(c("b", "c", sep="-")).to_be("a-b-c")
+
+test("callkw_no_kwargs", test_callkw_no_kwargs)
+test("callkw_with_sep", test_callkw_with_sep)
 
 print("Go-defined classes tests completed")
