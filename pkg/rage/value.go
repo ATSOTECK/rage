@@ -543,6 +543,10 @@ func fromRuntime(v runtime.Value) Value {
 		return FunctionValue{name: val.Name, rv: val}
 	case *runtime.PyGoFunc:
 		return FunctionValue{name: val.Name, rv: val}
+	case *runtime.PyClass:
+		return ClassValue{class: val}
+	case *runtime.PyInstance:
+		return Object{inst: val}
 	default:
 		// For other types, wrap as userdata
 		return UserDataValue{value: v}

@@ -831,6 +831,23 @@ func (s *State) RegisterBuiltin(name string, fn GoFunc) {
 	s.vm.RegisterBuiltin(name, wrapper)
 }
 
+// Call invokes a callable Python value (function, class, etc.) with the given arguments.
+// This allows Go code to call Python functions or instantiate classes directly.
+func (s *State) Call(callable Value, args ...Value) (Value, error) {
+	if err := s.checkClosed(); err != nil {
+		return nil, err
+	}
+	rtArgs := make([]runtime.Value, len(args))
+	for i, a := range args {
+		rtArgs[i] = toRuntime(a)
+	}
+	result, err := s.vm.Call(toRuntime(callable), rtArgs, nil)
+	if err != nil {
+		return nil, err
+	}
+	return fromRuntime(result), nil
+}
+
 // Code represents compiled Python bytecode.
 type Code struct {
 	code *runtime.CodeObject
