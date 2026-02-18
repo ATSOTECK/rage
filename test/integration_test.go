@@ -696,18 +696,19 @@ func TestClassBuilder_PersonEndToEnd(t *testing.T) {
 	defer state.Close()
 
 	person := rage.NewClass("Person").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("name", args[0])
 			self.Set("age", args[1])
+			return nil
 		}).
-		Method("greet", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("greet", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			name, _ := rage.AsString(self.Get("name"))
-			return rage.String("Hello, I'm " + name)
+			return rage.String("Hello, I'm " + name), nil
 		}).
-		Str(func(s *rage.State, self rage.Object) string {
+		Str(func(s *rage.State, self rage.Object) (string, error) {
 			name, _ := rage.AsString(self.Get("name"))
 			age, _ := rage.AsInt(self.Get("age"))
-			return fmt.Sprintf("Person(%s, %d)", name, age)
+			return fmt.Sprintf("Person(%s, %d)", name, age), nil
 		}).
 		Build(state)
 
@@ -750,27 +751,28 @@ func TestClassBuilder_InheritanceEndToEnd(t *testing.T) {
 	defer state.Close()
 
 	animal := rage.NewClass("Animal").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("name", args[0])
+			return nil
 		}).
-		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
-			return rage.String("...")
+		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
+			return rage.String("..."), nil
 		}).
 		Build(state)
 
 	dog := rage.NewClass("Dog").
 		Base(animal).
-		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			name, _ := rage.AsString(self.Get("name"))
-			return rage.String(name + " says Woof!")
+			return rage.String(name + " says Woof!"), nil
 		}).
 		Build(state)
 
 	cat := rage.NewClass("Cat").
 		Base(animal).
-		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("speak", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			name, _ := rage.AsString(self.Get("name"))
-			return rage.String(name + " says Meow!")
+			return rage.String(name + " says Meow!"), nil
 		}).
 		Build(state)
 
@@ -829,60 +831,61 @@ func TestClassBuilder_DunderProtocols(t *testing.T) {
 
 	// A container class that implements multiple dunder protocols
 	container := rage.NewClass("Container").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("items", args[0])
+			return nil
 		}).
-		Len(func(s *rage.State, self rage.Object) int64 {
+		Len(func(s *rage.State, self rage.Object) (int64, error) {
 			items, _ := rage.AsList(self.Get("items"))
-			return int64(len(items))
+			return int64(len(items)), nil
 		}).
-		GetItem(func(s *rage.State, self rage.Object, key rage.Value) rage.Value {
+		GetItem(func(s *rage.State, self rage.Object, key rage.Value) (rage.Value, error) {
 			items, _ := rage.AsList(self.Get("items"))
 			idx, _ := rage.AsInt(key)
 			if int(idx) < len(items) {
-				return items[idx]
+				return items[idx], nil
 			}
-			return rage.None
+			return rage.None, nil
 		}).
-		Contains(func(s *rage.State, self rage.Object, item rage.Value) bool {
+		Contains(func(s *rage.State, self rage.Object, item rage.Value) (bool, error) {
 			items, _ := rage.AsList(self.Get("items"))
 			itemInt, ok := rage.AsInt(item)
 			if !ok {
-				return false
+				return false, nil
 			}
 			for _, v := range items {
 				if n, ok := rage.AsInt(v); ok && n == itemInt {
-					return true
+					return true, nil
 				}
 			}
-			return false
+			return false, nil
 		}).
-		Eq(func(s *rage.State, self rage.Object, other rage.Value) bool {
+		Eq(func(s *rage.State, self rage.Object, other rage.Value) (bool, error) {
 			otherObj, ok := other.(rage.Object)
 			if !ok {
-				return false
+				return false, nil
 			}
 			selfItems, _ := rage.AsList(self.Get("items"))
 			otherItems, _ := rage.AsList(otherObj.Get("items"))
 			if len(selfItems) != len(otherItems) {
-				return false
+				return false, nil
 			}
 			for i := range selfItems {
 				a, _ := rage.AsInt(selfItems[i])
 				b, _ := rage.AsInt(otherItems[i])
 				if a != b {
-					return false
+					return false, nil
 				}
 			}
-			return true
+			return true, nil
 		}).
-		Bool(func(s *rage.State, self rage.Object) bool {
+		Bool(func(s *rage.State, self rage.Object) (bool, error) {
 			items, _ := rage.AsList(self.Get("items"))
-			return len(items) > 0
+			return len(items) > 0, nil
 		}).
-		Str(func(s *rage.State, self rage.Object) string {
+		Str(func(s *rage.State, self rage.Object) (string, error) {
 			items, _ := rage.AsList(self.Get("items"))
-			return fmt.Sprintf("Container(%d items)", len(items))
+			return fmt.Sprintf("Container(%d items)", len(items)), nil
 		}).
 		Build(state)
 
@@ -957,13 +960,14 @@ func TestClassBuilder_Callable(t *testing.T) {
 	defer state.Close()
 
 	multiplier := rage.NewClass("Multiplier").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("factor", args[0])
+			return nil
 		}).
-		Call(func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Call(func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			factor, _ := rage.AsInt(self.Get("factor"))
 			n, _ := rage.AsInt(args[0])
-			return rage.Int(factor * n)
+			return rage.Int(factor * n), nil
 		}).
 		Build(state)
 
@@ -997,21 +1001,23 @@ func TestClassBuilder_PropertyAccess(t *testing.T) {
 	defer state.Close()
 
 	rect := rage.NewClass("Rect").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("_w", args[0])
 			self.Set("_h", args[1])
+			return nil
 		}).
-		Property("area", func(s *rage.State, self rage.Object) rage.Value {
+		Property("area", func(s *rage.State, self rage.Object) (rage.Value, error) {
 			w, _ := rage.AsInt(self.Get("_w"))
 			h, _ := rage.AsInt(self.Get("_h"))
-			return rage.Int(w * h)
+			return rage.Int(w * h), nil
 		}).
 		PropertyWithSetter("width",
-			func(s *rage.State, self rage.Object) rage.Value {
-				return self.Get("_w")
+			func(s *rage.State, self rage.Object) (rage.Value, error) {
+				return self.Get("_w"), nil
 			},
-			func(s *rage.State, self rage.Object, val rage.Value) {
+			func(s *rage.State, self rage.Object, val rage.Value) error {
 				self.Set("_w", val)
+				return nil
 			},
 		).
 		Build(state)
@@ -1053,29 +1059,30 @@ func TestClassBuilder_StaticAndClassMethods(t *testing.T) {
 	defer state.Close()
 
 	counter := rage.NewClass("Counter").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			if len(args) > 0 {
 				self.Set("count", args[0])
 			} else {
 				self.Set("count", rage.Int(0))
 			}
+			return nil
 		}).
-		Method("increment", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("increment", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			n, _ := rage.AsInt(self.Get("count"))
 			self.Set("count", rage.Int(n+1))
-			return rage.None
+			return rage.None, nil
 		}).
-		StaticMethod("from_string", func(s *rage.State, args ...rage.Value) rage.Value {
+		StaticMethod("from_string", func(s *rage.State, args ...rage.Value) (rage.Value, error) {
 			str, _ := rage.AsString(args[0])
 			n := int64(0)
 			for _, c := range str {
 				_ = c
 				n++
 			}
-			return rage.Int(n)
+			return rage.Int(n), nil
 		}).
-		ClassMethod("class_info", func(s *rage.State, cls rage.ClassValue, args ...rage.Value) rage.Value {
-			return rage.String("class=" + cls.Name())
+		ClassMethod("class_info", func(s *rage.State, cls rage.ClassValue, args ...rage.Value) (rage.Value, error) {
+			return rage.String("class=" + cls.Name()), nil
 		}).
 		Build(state)
 
@@ -1108,26 +1115,27 @@ func TestClassBuilder_DunderAdd(t *testing.T) {
 	defer state.Close()
 
 	vec := rage.NewClass("Vec2").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("x", args[0])
 			self.Set("y", args[1])
+			return nil
 		}).
-		Dunder("__add__", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Dunder("__add__", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			other, ok := args[0].(rage.Object)
 			if !ok {
-				return rage.None
+				return rage.None, nil
 			}
 			x1, _ := rage.AsInt(self.Get("x"))
 			y1, _ := rage.AsInt(self.Get("y"))
 			x2, _ := rage.AsInt(other.Get("x"))
 			y2, _ := rage.AsInt(other.Get("y"))
 			// Return a list [x1+x2, y1+y2] since we can't easily create a new Vec2 here
-			return rage.List(rage.Int(x1+x2), rage.Int(y1+y2))
+			return rage.List(rage.Int(x1+x2), rage.Int(y1+y2)), nil
 		}).
-		Str(func(s *rage.State, self rage.Object) string {
+		Str(func(s *rage.State, self rage.Object) (string, error) {
 			x, _ := rage.AsInt(self.Get("x"))
 			y, _ := rage.AsInt(self.Get("y"))
-			return fmt.Sprintf("Vec2(%d, %d)", x, y)
+			return fmt.Sprintf("Vec2(%d, %d)", x, y), nil
 		}).
 		Build(state)
 
@@ -1158,11 +1166,12 @@ func TestClassBuilder_GoDefinedUsedInPythonClass(t *testing.T) {
 
 	// Define a Go-backed base class
 	base := rage.NewClass("GoBase").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("value", args[0])
+			return nil
 		}).
-		Method("get_value", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
-			return self.Get("value")
+		Method("get_value", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
+			return self.Get("value"), nil
 		}).
 		Build(state)
 
@@ -1187,13 +1196,14 @@ func TestClassBuilder_StateCall(t *testing.T) {
 	defer state.Close()
 
 	cls := rage.NewClass("Greeter").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("prefix", args[0])
+			return nil
 		}).
-		Method("greet", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("greet", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			prefix, _ := rage.AsString(self.Get("prefix"))
 			name, _ := rage.AsString(args[0])
-			return rage.String(prefix + " " + name)
+			return rage.String(prefix + " " + name), nil
 		}).
 		Build(state)
 
@@ -1234,22 +1244,23 @@ func TestClassBuilder_SetItemProtocol(t *testing.T) {
 	defer state.Close()
 
 	store := rage.NewClass("Store").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
-			// nothing
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
+			return nil
 		}).
-		SetItem(func(s *rage.State, self rage.Object, key, val rage.Value) {
+		SetItem(func(s *rage.State, self rage.Object, key, val rage.Value) error {
 			k, _ := rage.AsString(key)
 			self.Set("_item_"+k, val)
+			return nil
 		}).
-		GetItem(func(s *rage.State, self rage.Object, key rage.Value) rage.Value {
+		GetItem(func(s *rage.State, self rage.Object, key rage.Value) (rage.Value, error) {
 			k, _ := rage.AsString(key)
-			return self.Get("_item_" + k)
+			return self.Get("_item_" + k), nil
 		}).
-		Len(func(s *rage.State, self rage.Object) int64 {
+		Len(func(s *rage.State, self rage.Object) (int64, error) {
 			count := int64(0)
 			// Count attributes starting with _item_
 			// This is a simple approximation
-			return count
+			return count, nil
 		}).
 		Build(state)
 
@@ -1274,14 +1285,15 @@ func TestClassBuilder_ReprDunder(t *testing.T) {
 	state.EnableBuiltin(rage.BuiltinRepr)
 
 	cls := rage.NewClass("Token").
-		Init(func(s *rage.State, self rage.Object, args ...rage.Value) {
+		Init(func(s *rage.State, self rage.Object, args ...rage.Value) error {
 			self.Set("kind", args[0])
 			self.Set("val", args[1])
+			return nil
 		}).
-		Repr(func(s *rage.State, self rage.Object) string {
+		Repr(func(s *rage.State, self rage.Object) (string, error) {
 			kind, _ := rage.AsString(self.Get("kind"))
 			val, _ := rage.AsString(self.Get("val"))
-			return fmt.Sprintf("Token(%s, %q)", kind, val)
+			return fmt.Sprintf("Token(%s, %q)", kind, val), nil
 		}).
 		Build(state)
 
@@ -1298,9 +1310,9 @@ func TestClassBuilder_NewInstanceFromGo(t *testing.T) {
 	defer state.Close()
 
 	cls := rage.NewClass("Config").
-		Method("get", func(s *rage.State, self rage.Object, args ...rage.Value) rage.Value {
+		Method("get", func(s *rage.State, self rage.Object, args ...rage.Value) (rage.Value, error) {
 			key, _ := rage.AsString(args[0])
-			return self.Get(key)
+			return self.Get(key), nil
 		}).
 		Build(state)
 

@@ -101,7 +101,8 @@ func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
 			if bf, ok := val.(*PyBuiltinFunc); ok {
 				boundInst := Value(o)
 				return &PyBuiltinFunc{
-					Name: bf.Name,
+					Name:  bf.Name,
+					Bound: true,
 					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 						allArgs := append([]Value{boundInst}, args...)
 						return bf.Fn(allArgs, kwargs)

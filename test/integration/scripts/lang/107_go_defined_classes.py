@@ -402,4 +402,204 @@ test("go_instances_as_function_args", test_go_instances_as_function_args)
 test("go_instances_filtered", test_go_instances_filtered)
 test("go_instances_sorted", test_go_instances_sorted)
 
+# ===========================================================================
+# Iterator protocol: __iter__ / __next__
+# ===========================================================================
+
+def test_iter_basic():
+    r = GoRange(0, 5)
+    result = []
+    for x in r:
+        result.append(x)
+    expect(result).to_be([0, 1, 2, 3, 4])
+
+def test_iter_empty():
+    r = GoRange(5, 5)
+    result = []
+    for x in r:
+        result.append(x)
+    expect(result).to_be([])
+
+def test_iter_in_list_comprehension():
+    result = [x * 2 for x in GoRange(1, 4)]
+    expect(result).to_be([2, 4, 6])
+
+def test_iter_sum():
+    total = 0
+    for x in GoRange(1, 6):
+        total += x
+    expect(total).to_be(15)
+
+def test_iter_multiple_passes():
+    r = GoRange(0, 3)
+    first = [x for x in r]
+    second = [x for x in r]
+    expect(first).to_be([0, 1, 2])
+    expect(second).to_be([0, 1, 2])
+
+test("iter_basic", test_iter_basic)
+test("iter_empty", test_iter_empty)
+test("iter_in_list_comprehension", test_iter_in_list_comprehension)
+test("iter_sum", test_iter_sum)
+test("iter_multiple_passes", test_iter_multiple_passes)
+
+# ===========================================================================
+# Comparison operators: __eq__, __lt__, __le__, __gt__, __ge__
+# ===========================================================================
+
+def test_temp_eq():
+    expect(Temperature(100) == Temperature(100)).to_be(True)
+    expect(Temperature(100) == Temperature(200)).to_be(False)
+
+def test_temp_lt():
+    expect(Temperature(50) < Temperature(100)).to_be(True)
+    expect(Temperature(100) < Temperature(50)).to_be(False)
+    expect(Temperature(50) < Temperature(50)).to_be(False)
+
+def test_temp_le():
+    expect(Temperature(50) <= Temperature(100)).to_be(True)
+    expect(Temperature(50) <= Temperature(50)).to_be(True)
+    expect(Temperature(100) <= Temperature(50)).to_be(False)
+
+def test_temp_gt():
+    expect(Temperature(100) > Temperature(50)).to_be(True)
+    expect(Temperature(50) > Temperature(100)).to_be(False)
+    expect(Temperature(50) > Temperature(50)).to_be(False)
+
+def test_temp_ge():
+    expect(Temperature(100) >= Temperature(50)).to_be(True)
+    expect(Temperature(50) >= Temperature(50)).to_be(True)
+    expect(Temperature(50) >= Temperature(100)).to_be(False)
+
+def test_temp_sorting():
+    temps = [Temperature(30), Temperature(10), Temperature(20)]
+    sorted_temps = sorted(temps, key=lambda t: t.value)
+    expect([t.value for t in sorted_temps]).to_be([10, 20, 30])
+
+test("temp_eq", test_temp_eq)
+test("temp_lt", test_temp_lt)
+test("temp_le", test_temp_le)
+test("temp_gt", test_temp_gt)
+test("temp_ge", test_temp_ge)
+test("temp_sorting", test_temp_sorting)
+
+# ===========================================================================
+# __hash__
+# ===========================================================================
+
+def test_temp_hash():
+    t1 = Temperature(100)
+    t2 = Temperature(100)
+    expect(hash(t1)).to_be(hash(t2))
+
+def test_temp_in_dict_as_key():
+    d = {}
+    d[Temperature(100)] = "boiling"
+    d[Temperature(0)] = "freezing"
+    expect(d[Temperature(100)]).to_be("boiling")
+    expect(d[Temperature(0)]).to_be("freezing")
+
+def test_temp_in_set():
+    s = {Temperature(10), Temperature(20), Temperature(10)}
+    expect(len(s)).to_be(2)
+
+test("temp_hash", test_temp_hash)
+test("temp_in_dict_as_key", test_temp_in_dict_as_key)
+test("temp_in_set", test_temp_in_set)
+
+# ===========================================================================
+# __delitem__
+# ===========================================================================
+
+def test_delitem_basic():
+    l = Ledger()
+    l["x"] = 10
+    l["y"] = 20
+    expect(l["x"]).to_be(10)
+    del l["x"]
+    # After deletion, accessing deleted key returns None (our Get fallback)
+    expect(l["x"]).to_be(None)
+    expect(l["y"]).to_be(20)
+
+def test_delitem_missing_key():
+    l = Ledger()
+    caught = False
+    try:
+        del l["nonexistent"]
+    except KeyError:
+        caught = True
+    expect(caught).to_be(True)
+
+test("delitem_basic", test_delitem_basic)
+test("delitem_missing_key", test_delitem_missing_key)
+
+# ===========================================================================
+# Context manager: __enter__ / __exit__
+# ===========================================================================
+
+def test_context_manager_basic():
+    cm = GoContextManager("test")
+    expect(cm.status()).to_be("entered=False exited=False error=False")
+    with cm as ctx:
+        expect(cm.status()).to_be("entered=True exited=False error=False")
+    expect(cm.status()).to_be("entered=True exited=True error=False")
+
+def test_context_manager_with_exception():
+    cm = GoContextManager("err_test")
+    caught = False
+    try:
+        with cm:
+            raise ValueError("test error")
+    except ValueError:
+        caught = True
+    expect(caught).to_be(True)
+    expect(cm.status()).to_be("entered=True exited=True error=True")
+
+def test_context_manager_returns_self():
+    cm = GoContextManager("self_test")
+    with cm as ctx:
+        expect(ctx.name).to_be("self_test")
+
+test("context_manager_basic", test_context_manager_basic)
+test("context_manager_with_exception", test_context_manager_with_exception)
+test("context_manager_returns_self", test_context_manager_returns_self)
+
+# ===========================================================================
+# Error raising from Go methods
+# ===========================================================================
+
+def test_go_raises_value_error():
+    er = ErrorRaiser()
+    caught = False
+    msg = ""
+    try:
+        er.raise_value_error()
+    except ValueError as e:
+        caught = True
+        msg = str(e)
+    expect(caught).to_be(True)
+    expect("bad value from Go" in msg).to_be(True)
+
+def test_go_raises_type_error():
+    er = ErrorRaiser()
+    caught = False
+    try:
+        er.raise_type_error()
+    except TypeError:
+        caught = True
+    expect(caught).to_be(True)
+
+def test_go_raises_key_error():
+    er = ErrorRaiser()
+    caught = False
+    try:
+        er.raise_key_error()
+    except KeyError:
+        caught = True
+    expect(caught).to_be(True)
+
+test("go_raises_value_error", test_go_raises_value_error)
+test("go_raises_type_error", test_go_raises_type_error)
+test("go_raises_key_error", test_go_raises_key_error)
+
 print("Go-defined classes tests completed")

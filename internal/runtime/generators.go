@@ -996,7 +996,13 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		obj := vm.pop()
 		var result Value
 		var err error
+		alreadyBound := false
 		if _, isBound := method.(*PyMethod); isBound {
+			alreadyBound = true
+		} else if bf, ok := method.(*PyBuiltinFunc); ok && bf.Bound {
+			alreadyBound = true
+		}
+		if alreadyBound {
 			result, err = vm.call(method, args, nil)
 		} else {
 			allArgs := append([]Value{obj}, args...)

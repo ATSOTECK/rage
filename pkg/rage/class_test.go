@@ -20,13 +20,14 @@ func TestClassBuilder_BasicClass(t *testing.T) {
 	defer state.Close()
 
 	person := NewClass("Person").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("name", args[0])
 			self.Set("age", args[1])
+			return nil
 		}).
-		Method("greet", func(s *State, self Object, args ...Value) Value {
+		Method("greet", func(s *State, self Object, args ...Value) (Value, error) {
 			name, _ := AsString(self.Get("name"))
-			return String("Hello, I'm " + name)
+			return String("Hello, I'm " + name), nil
 		}).
 		Build(state)
 
@@ -48,14 +49,15 @@ func TestClassBuilder_Str(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Point").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("x", args[0])
 			self.Set("y", args[1])
+			return nil
 		}).
-		Str(func(s *State, self Object) string {
+		Str(func(s *State, self Object) (string, error) {
 			x, _ := AsInt(self.Get("x"))
 			y, _ := AsInt(self.Get("y"))
-			return fmt.Sprintf("Point(%d, %d)", x, y)
+			return fmt.Sprintf("Point(%d, %d)", x, y), nil
 		}).
 		Build(state)
 
@@ -73,8 +75,8 @@ func TestClassBuilder_Repr(t *testing.T) {
 	state.EnableBuiltin(BuiltinRepr)
 
 	cls := NewClass("Foo").
-		Repr(func(s *State, self Object) string {
-			return "Foo()"
+		Repr(func(s *State, self Object) (string, error) {
+			return "Foo()", nil
 		}).
 		Build(state)
 
@@ -91,17 +93,18 @@ func TestClassBuilder_Eq(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Val").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("v", args[0])
+			return nil
 		}).
-		Eq(func(s *State, self Object, other Value) bool {
-			otherObj, ok := other.(Object)
+		Eq(func(s *State, self Object, other Value) (bool, error) {
+			otherObj, ok := AsObject(other)
 			if !ok {
-				return false
+				return false, nil
 			}
 			a, _ := AsInt(self.Get("v"))
 			b, _ := AsInt(otherObj.Get("v"))
-			return a == b
+			return a == b, nil
 		}).
 		Build(state)
 
@@ -123,12 +126,13 @@ func TestClassBuilder_Len(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Bag").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("count", args[0])
+			return nil
 		}).
-		Len(func(s *State, self Object) int64 {
+		Len(func(s *State, self Object) (int64, error) {
 			n, _ := AsInt(self.Get("count"))
-			return n
+			return n, nil
 		}).
 		Build(state)
 
@@ -145,16 +149,17 @@ func TestClassBuilder_GetItem(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("MyList").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("items", args[0])
+			return nil
 		}).
-		GetItem(func(s *State, self Object, key Value) Value {
+		GetItem(func(s *State, self Object, key Value) (Value, error) {
 			items, _ := AsList(self.Get("items"))
 			idx, _ := AsInt(key)
 			if int(idx) < len(items) {
-				return items[idx]
+				return items[idx], nil
 			}
-			return None
+			return nil, IndexError("index out of range")
 		}).
 		Build(state)
 
@@ -171,9 +176,9 @@ func TestClassBuilder_Contains(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Set3").
-		Contains(func(s *State, self Object, item Value) bool {
+		Contains(func(s *State, self Object, item Value) (bool, error) {
 			n, _ := AsInt(item)
-			return n >= 1 && n <= 3
+			return n >= 1 && n <= 3, nil
 		}).
 		Build(state)
 
@@ -195,8 +200,8 @@ func TestClassBuilder_BoolDunder(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Falsy").
-		Bool(func(s *State, self Object) bool {
-			return false
+		Bool(func(s *State, self Object) (bool, error) {
+			return false, nil
 		}).
 		Build(state)
 
@@ -213,13 +218,14 @@ func TestClassBuilder_CallDunder(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Adder").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("base", args[0])
+			return nil
 		}).
-		Call(func(s *State, self Object, args ...Value) Value {
+		Call(func(s *State, self Object, args ...Value) (Value, error) {
 			base, _ := AsInt(self.Get("base"))
 			n, _ := AsInt(args[0])
-			return Int(base + n)
+			return Int(base + n), nil
 		}).
 		Build(state)
 
@@ -236,11 +242,12 @@ func TestClassBuilder_Property(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Circle").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("_radius", args[0])
+			return nil
 		}).
-		Property("radius", func(s *State, self Object) Value {
-			return self.Get("_radius")
+		Property("radius", func(s *State, self Object) (Value, error) {
+			return self.Get("_radius"), nil
 		}).
 		Build(state)
 
@@ -257,15 +264,17 @@ func TestClassBuilder_PropertyWithSetter(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Box").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("_size", args[0])
+			return nil
 		}).
 		PropertyWithSetter("size",
-			func(s *State, self Object) Value {
-				return self.Get("_size")
+			func(s *State, self Object) (Value, error) {
+				return self.Get("_size"), nil
 			},
-			func(s *State, self Object, val Value) {
+			func(s *State, self Object, val Value) error {
 				self.Set("_size", val)
+				return nil
 			},
 		).
 		Build(state)
@@ -291,10 +300,10 @@ func TestClassBuilder_StaticMethod(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("MathHelper").
-		StaticMethod("add", func(s *State, args ...Value) Value {
+		StaticMethod("add", func(s *State, args ...Value) (Value, error) {
 			a, _ := AsInt(args[0])
 			b, _ := AsInt(args[1])
-			return Int(a + b)
+			return Int(a + b), nil
 		}).
 		Build(state)
 
@@ -311,8 +320,8 @@ func TestClassBuilder_ClassMethod(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Named").
-		ClassMethod("class_name", func(s *State, cls ClassValue, args ...Value) Value {
-			return String(cls.Name())
+		ClassMethod("class_name", func(s *State, cls ClassValue, args ...Value) (Value, error) {
+			return String(cls.Name()), nil
 		}).
 		Build(state)
 
@@ -342,32 +351,31 @@ func TestClassBuilder_Inheritance(t *testing.T) {
 	defer state.Close()
 
 	animal := NewClass("Animal").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("name", args[0])
+			return nil
 		}).
-		Method("speak", func(s *State, self Object, args ...Value) Value {
-			return String("...")
+		Method("speak", func(s *State, self Object, args ...Value) (Value, error) {
+			return String("..."), nil
 		}).
 		Build(state)
 
 	dog := NewClass("Dog").
 		Base(animal).
-		Method("speak", func(s *State, self Object, args ...Value) Value {
+		Method("speak", func(s *State, self Object, args ...Value) (Value, error) {
 			name, _ := AsString(self.Get("name"))
-			return String(name + " says Woof!")
+			return String(name + " says Woof!"), nil
 		}).
 		Build(state)
 
 	state.SetGlobal("Animal", animal)
 	state.SetGlobal("Dog", dog)
 
-	// Dog inherits Animal's __init__
 	result := eval(t, state, `Dog("Rex").speak()`)
 	if str, ok := AsString(result); !ok || str != "Rex says Woof!" {
 		t.Errorf("expected 'Rex says Woof!', got %v", result)
 	}
 
-	// isinstance check
 	result = eval(t, state, `isinstance(Dog("Rex"), Animal)`)
 	if b, ok := AsBool(result); !ok || !b {
 		t.Errorf("expected isinstance(Dog, Animal) = True, got %v", result)
@@ -379,16 +387,17 @@ func TestClassBuilder_DunderArbitrary(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Addable").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("val", args[0])
+			return nil
 		}).
-		Dunder("__add__", func(s *State, self Object, args ...Value) Value {
+		Dunder("__add__", func(s *State, self Object, args ...Value) (Value, error) {
 			a, _ := AsInt(self.Get("val"))
-			if other, ok := args[0].(Object); ok {
+			if other, ok := AsObject(args[0]); ok {
 				b, _ := AsInt(other.Get("val"))
-				return Int(a + b)
+				return Int(a + b), nil
 			}
-			return None
+			return None, nil
 		}).
 		Build(state)
 
@@ -437,6 +446,18 @@ func TestObject_ClassName(t *testing.T) {
 	}
 }
 
+func TestObject_Class(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("TestClass").Build(state)
+	obj := cls.NewInstance()
+
+	if obj.Class().Name() != "TestClass" {
+		t.Errorf("expected Class().Name() = 'TestClass', got %q", obj.Class().Name())
+	}
+}
+
 func TestClassValue_Name(t *testing.T) {
 	state := NewState()
 	defer state.Close()
@@ -462,12 +483,13 @@ func TestState_Call(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Doubler").
-		Init(func(s *State, self Object, args ...Value) {
+		Init(func(s *State, self Object, args ...Value) error {
 			self.Set("v", args[0])
+			return nil
 		}).
-		Method("double", func(s *State, self Object, args ...Value) Value {
+		Method("double", func(s *State, self Object, args ...Value) (Value, error) {
 			n, _ := AsInt(self.Get("v"))
-			return Int(n * 2)
+			return Int(n * 2), nil
 		}).
 		Build(state)
 
@@ -512,16 +534,17 @@ func TestClassBuilder_SetItem(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Store").
-		Init(func(s *State, self Object, args ...Value) {
-			// nothing
+		Init(func(s *State, self Object, args ...Value) error {
+			return nil
 		}).
-		SetItem(func(s *State, self Object, key, val Value) {
+		SetItem(func(s *State, self Object, key, val Value) error {
 			k, _ := AsString(key)
 			self.Set("_item_"+k, val)
+			return nil
 		}).
-		GetItem(func(s *State, self Object, key Value) Value {
+		GetItem(func(s *State, self Object, key Value) (Value, error) {
 			k, _ := AsString(key)
-			return self.Get("_item_" + k)
+			return self.Get("_item_" + k), nil
 		}).
 		Build(state)
 
@@ -555,13 +578,13 @@ obj = Foo()
 	}
 
 	fooClass := state.GetGlobal("Foo")
-	if _, ok := fooClass.(ClassValue); !ok {
-		t.Errorf("expected ClassValue for Foo, got %T", fooClass)
+	if !IsClass(fooClass) {
+		t.Errorf("expected IsClass(Foo) = true, got %T", fooClass)
 	}
 
 	fooObj := state.GetGlobal("obj")
-	if _, ok := fooObj.(Object); !ok {
-		t.Errorf("expected Object for obj, got %T", fooObj)
+	if !IsObject(fooObj) {
+		t.Errorf("expected IsObject(obj) = true, got %T", fooObj)
 	}
 }
 
@@ -570,34 +593,341 @@ func TestClassBuilder_MethodAccessesState(t *testing.T) {
 	defer state.Close()
 
 	cls := NewClass("Runner").
-		Method("run_code", func(s *State, self Object, args ...Value) Value {
+		Method("run_code", func(s *State, self Object, args ...Value) (Value, error) {
 			code, _ := AsString(args[0])
-			result, err := s.Run(code)
+			_, err := s.Run(code)
 			if err != nil {
-				return None
+				return None, nil
 			}
-			if result == nil {
-				return None
-			}
-			return result
+			return None, nil
 		}).
 		Build(state)
 
 	state.SetGlobal("Runner", cls)
 
-	// Use Run to assign to a variable, since Run on statements returns nil
-	_, err := state.Run(`_runner_result = Runner().run_code("1 + 2")`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// run_code runs "1 + 2" as a statement which returns None because there's no assignment
-	// So let's test with something that uses State properly
-	_, err = state.Run(`_runner_result = Runner().run_code("__x = 1 + 2")`)
+	_, err := state.Run(`_runner_result = Runner().run_code("__x = 1 + 2")`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	result := state.GetGlobal("__x")
 	if n, ok := AsInt(result); !ok || n != 3 {
 		t.Errorf("expected 3, got %v", result)
+	}
+}
+
+func TestClassBuilder_ErrorReturn(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Strict").
+		Init(func(s *State, self Object, args ...Value) error {
+			if len(args) == 0 {
+				return ValueError("requires at least one argument")
+			}
+			self.Set("v", args[0])
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Strict", cls)
+
+	// Should raise ValueError
+	_, err := state.Run(`
+try:
+    Strict()
+    _err_result = "no error"
+except ValueError as e:
+    _err_result = "caught: " + str(e)
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_err_result")
+	str, ok := AsString(result)
+	if !ok || str != "caught: requires at least one argument" {
+		t.Errorf("expected 'caught: requires at least one argument', got %v", result)
+	}
+}
+
+func TestClassBuilder_Comparisons(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Num").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Lt(func(s *State, self Object, other Value) (bool, error) {
+			o, ok := AsObject(other)
+			if !ok {
+				return false, TypeError("unsupported operand type")
+			}
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(o.Get("v"))
+			return a < b, nil
+		}).
+		Le(func(s *State, self Object, other Value) (bool, error) {
+			o, ok := AsObject(other)
+			if !ok {
+				return false, TypeError("unsupported operand type")
+			}
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(o.Get("v"))
+			return a <= b, nil
+		}).
+		Gt(func(s *State, self Object, other Value) (bool, error) {
+			o, ok := AsObject(other)
+			if !ok {
+				return false, TypeError("unsupported operand type")
+			}
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(o.Get("v"))
+			return a > b, nil
+		}).
+		Ge(func(s *State, self Object, other Value) (bool, error) {
+			o, ok := AsObject(other)
+			if !ok {
+				return false, TypeError("unsupported operand type")
+			}
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(o.Get("v"))
+			return a >= b, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Num", cls)
+
+	tests := []struct {
+		expr string
+		want bool
+	}{
+		{`Num(1) < Num(2)`, true},
+		{`Num(2) < Num(1)`, false},
+		{`Num(1) <= Num(1)`, true},
+		{`Num(2) <= Num(1)`, false},
+		{`Num(2) > Num(1)`, true},
+		{`Num(1) > Num(2)`, false},
+		{`Num(1) >= Num(1)`, true},
+		{`Num(1) >= Num(2)`, false},
+	}
+	for _, tt := range tests {
+		result := eval(t, state, tt.expr)
+		b, ok := AsBool(result)
+		if !ok || b != tt.want {
+			t.Errorf("%s: expected %v, got %v", tt.expr, tt.want, result)
+		}
+	}
+}
+
+func TestClassBuilder_Hash(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Hashable").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("v", args[0])
+			return nil
+		}).
+		Hash(func(s *State, self Object) (int64, error) {
+			n, _ := AsInt(self.Get("v"))
+			return n * 31, nil
+		}).
+		Eq(func(s *State, self Object, other Value) (bool, error) {
+			o, ok := AsObject(other)
+			if !ok {
+				return false, nil
+			}
+			a, _ := AsInt(self.Get("v"))
+			b, _ := AsInt(o.Get("v"))
+			return a == b, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Hashable", cls)
+
+	result := eval(t, state, `hash(Hashable(10))`)
+	n, ok := AsInt(result)
+	if !ok || n != 310 {
+		t.Errorf("expected 310, got %v", result)
+	}
+}
+
+func TestClassBuilder_Iterator(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("Range3").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("_idx", Int(0))
+			return nil
+		}).
+		Iter(func(s *State, self Object) (Value, error) {
+			return self, nil
+		}).
+		Next(func(s *State, self Object) (Value, error) {
+			idx, _ := AsInt(self.Get("_idx"))
+			if idx >= 3 {
+				return nil, ErrStopIteration
+			}
+			self.Set("_idx", Int(idx+1))
+			return Int(idx), nil
+		}).
+		Build(state)
+
+	state.SetGlobal("Range3", cls)
+
+	_, err := state.Run(`_iter_result = [x for x in Range3()]`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_iter_result")
+	items, ok := AsList(result)
+	if !ok || len(items) != 3 {
+		t.Fatalf("expected list of 3, got %v", result)
+	}
+	for i, want := range []int64{0, 1, 2} {
+		n, _ := AsInt(items[i])
+		if n != want {
+			t.Errorf("item %d: expected %d, got %d", i, want, n)
+		}
+	}
+}
+
+func TestClassBuilder_DelItem(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("DStore").
+		Init(func(s *State, self Object, args ...Value) error {
+			return nil
+		}).
+		SetItem(func(s *State, self Object, key, val Value) error {
+			k, _ := AsString(key)
+			self.Set("_"+k, val)
+			return nil
+		}).
+		GetItem(func(s *State, self Object, key Value) (Value, error) {
+			k, _ := AsString(key)
+			return self.Get("_" + k), nil
+		}).
+		DelItem(func(s *State, self Object, key Value) error {
+			k, _ := AsString(key)
+			self.Delete("_" + k)
+			return nil
+		}).
+		Build(state)
+
+	state.SetGlobal("DStore", cls)
+
+	_, err := state.Run(`
+ds = DStore()
+ds["x"] = 42
+del ds["x"]
+_del_result = ds["x"]
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result := state.GetGlobal("_del_result")
+	if !IsNone(result) {
+		t.Errorf("expected None after del, got %v", result)
+	}
+}
+
+func TestClassBuilder_ContextManager(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("CM").
+		Init(func(s *State, self Object, args ...Value) error {
+			self.Set("entered", False)
+			self.Set("exited", False)
+			return nil
+		}).
+		Enter(func(s *State, self Object) (Value, error) {
+			self.Set("entered", True)
+			return self, nil
+		}).
+		Exit(func(s *State, self Object, excType, excVal, excTb Value) (bool, error) {
+			self.Set("exited", True)
+			return false, nil
+		}).
+		Build(state)
+
+	state.SetGlobal("CM", cls)
+
+	_, err := state.Run(`
+cm = CM()
+with cm as ctx:
+    _in_with = cm.entered
+_after_with = cm.exited
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	inWith := state.GetGlobal("_in_with")
+	if b, ok := AsBool(inWith); !ok || !b {
+		t.Error("expected entered=True inside with block")
+	}
+	afterWith := state.GetGlobal("_after_with")
+	if b, ok := AsBool(afterWith); !ok || !b {
+		t.Error("expected exited=True after with block")
+	}
+}
+
+func TestClassBuilder_MultipleBases(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	flyable := NewClass("Flyable").
+		Method("fly", func(s *State, self Object, args ...Value) (Value, error) {
+			return String("flying"), nil
+		}).
+		Build(state)
+
+	swimmable := NewClass("Swimmable").
+		Method("swim", func(s *State, self Object, args ...Value) (Value, error) {
+			return String("swimming"), nil
+		}).
+		Build(state)
+
+	duck := NewClass("Duck").
+		Bases(flyable, swimmable).
+		Build(state)
+
+	state.SetGlobal("Flyable", flyable)
+	state.SetGlobal("Swimmable", swimmable)
+	state.SetGlobal("Duck", duck)
+
+	result := eval(t, state, `Duck().fly()`)
+	if str, ok := AsString(result); !ok || str != "flying" {
+		t.Errorf("expected 'flying', got %v", result)
+	}
+
+	result = eval(t, state, `Duck().swim()`)
+	if str, ok := AsString(result); !ok || str != "swimming" {
+		t.Errorf("expected 'swimming', got %v", result)
+	}
+}
+
+func TestAsObjectAsClass(t *testing.T) {
+	state := NewState()
+	defer state.Close()
+
+	cls := NewClass("X").Build(state)
+	obj := cls.NewInstance()
+
+	if _, ok := AsObject(obj); !ok {
+		t.Error("AsObject should succeed on Object")
+	}
+	if _, ok := AsClass(cls); !ok {
+		t.Error("AsClass should succeed on ClassValue")
+	}
+	if _, ok := AsObject(cls); ok {
+		t.Error("AsObject should fail on ClassValue")
+	}
+	if _, ok := AsClass(obj); ok {
+		t.Error("AsClass should fail on Object")
 	}
 }

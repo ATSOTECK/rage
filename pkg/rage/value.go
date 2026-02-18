@@ -402,6 +402,18 @@ func IsUserData(v Value) bool {
 	return ok
 }
 
+// IsObject returns true if the value is a Python instance (Object)
+func IsObject(v Value) bool {
+	_, ok := v.(Object)
+	return ok
+}
+
+// IsClass returns true if the value is a Python class (ClassValue)
+func IsClass(v Value) bool {
+	_, ok := v.(ClassValue)
+	return ok
+}
+
 // =====================================
 // Type Assertion Helpers
 // =====================================
@@ -480,6 +492,22 @@ func AsUserData(v Value) (any, bool) {
 		return uv.value, true
 	}
 	return nil, false
+}
+
+// AsObject returns the Object or zero value if not an Object
+func AsObject(v Value) (Object, bool) {
+	if o, ok := v.(Object); ok {
+		return o, true
+	}
+	return Object{}, false
+}
+
+// AsClass returns the ClassValue or zero value if not a ClassValue
+func AsClass(v Value) (ClassValue, bool) {
+	if c, ok := v.(ClassValue); ok {
+		return c, true
+	}
+	return ClassValue{}, false
 }
 
 // =====================================
