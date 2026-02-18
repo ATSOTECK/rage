@@ -324,6 +324,16 @@ func (vm *VM) initBuiltins() {
 		},
 	}
 
+	vm.builtins["ascii"] = &PyBuiltinFunc{
+		Name: "ascii",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("ascii() takes exactly 1 argument (%d given)", len(args))
+			}
+			return &PyString{Value: vm.ascii(args[0])}, nil
+		},
+	}
+
 	vm.builtins["format"] = &PyBuiltinFunc{
 		Name: "format",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

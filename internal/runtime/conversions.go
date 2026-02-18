@@ -636,6 +636,78 @@ func bytesRepr(data []byte) string {
 	return b.String()
 }
 
+// asciiRepr returns a string representation with non-ASCII characters escaped.
+func asciiRepr(s string) string {
+	var b strings.Builder
+	b.WriteByte('\'')
+	for _, r := range s {
+		switch {
+		case r == '\\':
+			b.WriteString("\\\\")
+		case r == '\'':
+			b.WriteString("\\'")
+		case r == '\t':
+			b.WriteString("\\t")
+		case r == '\n':
+			b.WriteString("\\n")
+		case r == '\r':
+			b.WriteString("\\r")
+		case r >= 32 && r < 127:
+			b.WriteRune(r)
+		case r <= 0xff:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		case r <= 0xffff:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		default:
+			fmt.Fprintf(&b, "\\U%08x", r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
+func (vm *VM) ascii(v Value) string {
+	switch val := v.(type) {
+	case *PyString:
+		return asciiRepr(val.Value)
+	case *PyList:
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.ascii(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case *PyTuple:
+		parts := make([]string, len(val.Items))
+		for i, item := range val.Items {
+			parts[i] = vm.ascii(item)
+		}
+		if len(parts) == 1 {
+			return "(" + parts[0] + ",)"
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	case *PyDict:
+		orderedKeys := val.Keys(vm)
+		parts := make([]string, 0, len(orderedKeys))
+		for _, k := range orderedKeys {
+			if v, ok := val.DictGet(k, vm); ok {
+				parts = append(parts, vm.ascii(k)+": "+vm.ascii(v))
+			}
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case *PySet:
+		if len(val.Items) == 0 {
+			return "set()"
+		}
+		parts := make([]string, 0, len(val.Items))
+		for k := range val.Items {
+			parts = append(parts, vm.ascii(k))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	default:
+		return vm.repr(v)
+	}
+}
+
 func (vm *VM) typeName(v Value) string {
 	switch val := v.(type) {
 	case *PyNone:

@@ -1600,7 +1600,7 @@ func (vm *VM) stringFormat(format string, args Value) (Value, error) {
 					s = s[:precision]
 				}
 			case 'a':
-				s = vm.repr(arg) // approximate ascii() with repr()
+				s = vm.ascii(arg)
 				if precision >= 0 && len(s) > precision {
 					s = s[:precision]
 				}
