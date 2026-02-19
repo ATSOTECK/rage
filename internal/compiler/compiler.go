@@ -296,6 +296,7 @@ type Compiler struct {
 	optimizer      *Optimizer
 	currentLine    int // Current source line being compiled
 	lineStartOffset int // Bytecode offset where current line started
+	finallyDepth   int // Number of enclosing try/finally blocks (for continue/break through finally)
 }
 
 type loopInfo struct {
@@ -577,9 +578,17 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.error(s.StartPos, "'continue' outside loop")
 			return
 		}
-		jump := c.emitJump(runtime.OpJump)
-		c.loopStack[len(c.loopStack)-1].continueJumps = append(
-			c.loopStack[len(c.loopStack)-1].continueJumps, jump)
+		if c.finallyDepth > 0 {
+			// Inside a try/finally — use OpContinueLoop so the generator can
+			// run the finally block before jumping to the loop target
+			jump := c.emitJump(runtime.OpContinueLoop)
+			c.loopStack[len(c.loopStack)-1].continueJumps = append(
+				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
+		} else {
+			jump := c.emitJump(runtime.OpJump)
+			c.loopStack[len(c.loopStack)-1].continueJumps = append(
+				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
+		}
 
 	case *model.Global:
 		for _, name := range s.Names {
@@ -1051,27 +1060,123 @@ func (c *Compiler) compileCompare(e *model.Compare) {
 }
 
 func (c *Compiler) compileCall(e *model.Call) {
-	c.compileExpr(e.Func)
-
-	// Compile positional arguments
+	// Check if we need the extended call protocol (for *args or **kwargs unpacking)
+	hasStar := false
+	hasDoubleStar := false
 	for _, arg := range e.Args {
-		c.compileExpr(arg)
+		if _, ok := arg.(*model.Starred); ok {
+			hasStar = true
+			break
+		}
+	}
+	for _, kw := range e.Keywords {
+		if kw.Arg == nil {
+			// **kwargs unpacking
+			hasDoubleStar = true
+			break
+		}
 	}
 
-	if len(e.Keywords) > 0 {
-		// Compile keyword argument values
-		kwNames := make([]string, 0, len(e.Keywords))
-		for _, kw := range e.Keywords {
-			c.compileExpr(kw.Value)
-			if kw.Arg != nil {
-				kwNames = append(kwNames, kw.Arg.Name)
+	if hasStar || hasDoubleStar {
+		// Extended call: build args tuple and optional kwargs dict, use OpCallEx
+		c.compileExpr(e.Func)
+
+		// Build the args tuple by concatenating normal args and *starred args
+		// Strategy: collect segments, then concatenate
+		// Each segment is either a tuple of normal args or the unpacked iterable
+		segments := 0
+		normalCount := 0
+		for _, arg := range e.Args {
+			if starred, ok := arg.(*model.Starred); ok {
+				// Flush any accumulated normal args as a tuple
+				if normalCount > 0 {
+					c.emitArg(runtime.OpBuildTuple, normalCount)
+					segments++
+					normalCount = 0
+				}
+				// Compile the starred expression (should be an iterable)
+				c.compileExpr(starred.Value)
+				// Convert to tuple if needed
+				starIdx := c.addName("tuple")
+				c.emitArg(runtime.OpLoadGlobal, starIdx)
+				c.emit(runtime.OpRot2)
+				c.emitArg(runtime.OpCall, 1)
+				segments++
+			} else {
+				c.compileExpr(arg)
+				normalCount++
 			}
 		}
-		// Push tuple of keyword names at the end
-		c.emitLoadConst(kwNames)
-		c.emitArg(runtime.OpCallKw, len(e.Args)+len(e.Keywords))
+		// Flush remaining normal args
+		if normalCount > 0 {
+			c.emitArg(runtime.OpBuildTuple, normalCount)
+			segments++
+		}
+		if segments == 0 {
+			// No positional args at all
+			c.emitArg(runtime.OpBuildTuple, 0)
+		} else if segments > 1 {
+			// Concatenate all tuple segments: use binary add
+			for i := 1; i < segments; i++ {
+				c.emit(runtime.OpBinaryAdd)
+			}
+		}
+
+		// Build kwargs dict if needed
+		flags := 0
+		if len(e.Keywords) > 0 {
+			flags = 1
+			kwCount := 0
+			for _, kw := range e.Keywords {
+				if kw.Arg == nil {
+					// **kwargs unpacking - merge into dict
+					if kwCount > 0 {
+						c.emitArg(runtime.OpBuildMap, kwCount)
+						// Merge with the unpacked dict
+						c.compileExpr(kw.Value)
+						// Use dict merge (build empty + update + update pattern)
+						// Simple approach: build our map, then update with unpacked
+						c.emit(runtime.OpCopyDict)
+						kwCount = 0
+					} else {
+						c.compileExpr(kw.Value)
+					}
+				} else {
+					c.emitLoadConst(kw.Arg.Name)
+					c.compileExpr(kw.Value)
+					kwCount++
+				}
+			}
+			if kwCount > 0 {
+				c.emitArg(runtime.OpBuildMap, kwCount)
+			}
+		}
+
+		c.emitArg(runtime.OpCallEx, flags)
 	} else {
-		c.emitArg(runtime.OpCall, len(e.Args))
+		// Standard call path (no unpacking)
+		c.compileExpr(e.Func)
+
+		// Compile positional arguments
+		for _, arg := range e.Args {
+			c.compileExpr(arg)
+		}
+
+		if len(e.Keywords) > 0 {
+			// Compile keyword argument values
+			kwNames := make([]string, 0, len(e.Keywords))
+			for _, kw := range e.Keywords {
+				c.compileExpr(kw.Value)
+				if kw.Arg != nil {
+					kwNames = append(kwNames, kw.Arg.Name)
+				}
+			}
+			// Push tuple of keyword names at the end
+			c.emitLoadConst(kwNames)
+			c.emitArg(runtime.OpCallKw, len(e.Args)+len(e.Keywords))
+		} else {
+			c.emitArg(runtime.OpCall, len(e.Args))
+		}
 	}
 }
 
@@ -1139,15 +1244,15 @@ func (c *Compiler) compileLoad(name string) {
 		c.emitArg(runtime.OpLoadFast, sym.Index)
 	case ScopeGlobal, ScopeBuiltin:
 		idx := c.addName(name)
-		// In class scope, use OpLoadName so EnclosingGlobals is checked
-		// (class body's Globals is the class namespace, not module globals)
-		if c.symbolTable.scopeType == ScopeClass {
+		// In class scope, use OpLoadName for normal names (checks class namespace + enclosing globals),
+		// but use OpLoadGlobal for explicitly global-declared names (checks module globals directly)
+		if c.symbolTable.scopeType == ScopeClass && !c.symbolTable.globals[name] {
 			c.emitArg(runtime.OpLoadName, idx)
 		} else {
 			c.emitArg(runtime.OpLoadGlobal, idx)
 		}
 	case ScopeFree:
-		c.emitArg(runtime.OpLoadDeref, sym.Index)
+		c.emitArg(runtime.OpLoadDeref, len(c.symbolTable.cellSyms)+sym.Index)
 	case ScopeCell:
 		c.emitArg(runtime.OpLoadDeref, sym.Index)
 	}
@@ -1173,7 +1278,12 @@ func (c *Compiler) compileStore(target model.Expr) {
 			c.emitArg(runtime.OpStoreFast, sym.Index)
 		case ScopeGlobal:
 			idx := c.addName(t.Name)
-			c.emitArg(runtime.OpStoreGlobal, idx)
+			if c.symbolTable.scopeType == ScopeClass && !c.symbolTable.globals[t.Name] {
+				// In class scope, non-explicitly-global names are class attributes
+				c.emitArg(runtime.OpStoreName, idx)
+			} else {
+				c.emitArg(runtime.OpStoreGlobal, idx)
+			}
 		case ScopeFree, ScopeCell:
 			// In class scope, assignments create class attributes (OpStoreName),
 			// not modifications to the enclosing scope (OpStoreDeref),
@@ -1182,7 +1292,11 @@ func (c *Compiler) compileStore(target model.Expr) {
 				idx := c.addName(t.Name)
 				c.emitArg(runtime.OpStoreName, idx)
 			} else {
-				c.emitArg(runtime.OpStoreDeref, sym.Index)
+				derefIdx := sym.Index
+				if sym.Scope == ScopeFree {
+					derefIdx = len(c.symbolTable.cellSyms) + sym.Index
+				}
+				c.emitArg(runtime.OpStoreDeref, derefIdx)
 			}
 		default:
 			// New variable in module scope
@@ -1243,6 +1357,12 @@ func (c *Compiler) compileDelete(target model.Expr) {
 		case ScopeGlobal:
 			idx := c.addName(t.Name)
 			c.emitArg(runtime.OpDeleteGlobal, idx)
+		case ScopeFree, ScopeCell:
+			derefIdx := sym.Index
+			if sym.Scope == ScopeFree {
+				derefIdx = len(c.symbolTable.cellSyms) + sym.Index
+			}
+			c.emitArg(runtime.OpDeleteDeref, derefIdx)
 		default:
 			idx := c.addName(t.Name)
 			c.emitArg(runtime.OpDeleteName, idx)
@@ -1417,6 +1537,7 @@ func (c *Compiler) compileTry(s *model.Try) {
 	var finallyJump int
 	if hasFinally {
 		finallyJump = c.emitJump(runtime.OpSetupFinally)
+		c.finallyDepth++
 	}
 
 	// Setup exception handler only if we have except clauses
@@ -1472,6 +1593,9 @@ func (c *Compiler) compileTry(s *model.Try) {
 					c.compileStore(handler.Name)
 				}
 
+				// Mark end of except handler (pops excHandlerStack)
+				c.emit(runtime.OpPopExceptHandler)
+
 				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 				c.patchJump(nextHandler, c.currentOffset())
 			} else {
@@ -1481,6 +1605,8 @@ func (c *Compiler) compileTry(s *model.Try) {
 				for _, stmt := range handler.Body {
 					c.compileStmt(stmt)
 				}
+				// Mark end of except handler (pops excHandlerStack)
+				c.emit(runtime.OpPopExceptHandler)
 				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 			}
 		}
@@ -1503,7 +1629,14 @@ func (c *Compiler) compileTry(s *model.Try) {
 
 	// Finally clause
 	if hasFinally {
-		// Patch the finally setup to jump here
+		c.finallyDepth--
+
+		// Pop the BlockFinally from the block stack in the normal (no-exception) flow.
+		// The exception flow enters at the handler address below, skipping this PopBlock,
+		// because handleException already popped the block.
+		c.emit(runtime.OpPopBlock)
+
+		// Patch the finally setup to jump here (exception flow entry point)
 		c.patchJump(finallyJump, c.currentOffset())
 
 		// Compile finally body
@@ -1874,6 +2007,276 @@ func collectNamesFromExpr(expr model.Expr, names map[string]bool) {
 	// Attribute, Subscript — not simple names, skip
 }
 
+// prescanCapturedVariables pre-marks local variables as cell variables if they
+// are referenced by any inner scope (function, lambda, class, comprehension).
+// This must run after predefineAssignedLocals but before body compilation,
+// so that assignments to captured variables emit OpStoreDeref from the start.
+func prescanCapturedVariables(st *SymbolTable, stmts []model.Stmt) {
+	refs := make(map[string]bool)
+	for _, stmt := range stmts {
+		captureWalkStmt(stmt, refs, false)
+	}
+	for name := range refs {
+		if sym, ok := st.symbols[name]; ok && sym.Scope == ScopeLocal {
+			st.MarkAsCell(name)
+		}
+	}
+}
+
+// captureWalkStmt walks an AST subtree. When collecting is true, all identifier
+// references are gathered. When false, it recurses through control flow but only
+// starts collecting when it hits an inner scope boundary (function/class/lambda/comprehension).
+func captureWalkStmt(stmt model.Stmt, refs map[string]bool, collecting bool) {
+	switch s := stmt.(type) {
+	case *model.FunctionDef:
+		// Inner scope boundary — collect all ident refs from body
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, true)
+		}
+		// Default values run in our scope, not inner
+		if s.Args != nil {
+			for _, d := range s.Args.Defaults {
+				captureWalkExpr(d, refs, collecting)
+			}
+			for _, d := range s.Args.KwDefaults {
+				if d != nil {
+					captureWalkExpr(d, refs, collecting)
+				}
+			}
+		}
+		// Decorators run in our scope
+		for _, dec := range s.Decorators {
+			captureWalkExpr(dec, refs, collecting)
+		}
+	case *model.ClassDef:
+		// Class body is an inner scope
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, true)
+		}
+		for _, dec := range s.Decorators {
+			captureWalkExpr(dec, refs, collecting)
+		}
+		for _, base := range s.Bases {
+			captureWalkExpr(base, refs, collecting)
+		}
+	case *model.ExprStmt:
+		captureWalkExpr(s.Value, refs, collecting)
+	case *model.Assign:
+		for _, t := range s.Targets {
+			captureWalkExpr(t, refs, collecting)
+		}
+		captureWalkExpr(s.Value, refs, collecting)
+	case *model.AugAssign:
+		captureWalkExpr(s.Target, refs, collecting)
+		captureWalkExpr(s.Value, refs, collecting)
+	case *model.AnnAssign:
+		if s.Value != nil {
+			captureWalkExpr(s.Value, refs, collecting)
+		}
+	case *model.Return:
+		if s.Value != nil {
+			captureWalkExpr(s.Value, refs, collecting)
+		}
+	case *model.For:
+		captureWalkExpr(s.Target, refs, collecting)
+		captureWalkExpr(s.Iter, refs, collecting)
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, collecting)
+		}
+		for _, elseStmt := range s.OrElse {
+			captureWalkStmt(elseStmt, refs, collecting)
+		}
+	case *model.While:
+		captureWalkExpr(s.Test, refs, collecting)
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, collecting)
+		}
+		for _, elseStmt := range s.OrElse {
+			captureWalkStmt(elseStmt, refs, collecting)
+		}
+	case *model.If:
+		captureWalkExpr(s.Test, refs, collecting)
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, collecting)
+		}
+		for _, elseStmt := range s.OrElse {
+			captureWalkStmt(elseStmt, refs, collecting)
+		}
+	case *model.With:
+		for _, item := range s.Items {
+			captureWalkExpr(item.ContextExpr, refs, collecting)
+			if item.OptionalVar != nil {
+				captureWalkExpr(item.OptionalVar, refs, collecting)
+			}
+		}
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, collecting)
+		}
+	case *model.Try:
+		for _, bodyStmt := range s.Body {
+			captureWalkStmt(bodyStmt, refs, collecting)
+		}
+		for _, handler := range s.Handlers {
+			for _, bodyStmt := range handler.Body {
+				captureWalkStmt(bodyStmt, refs, collecting)
+			}
+		}
+		for _, elseStmt := range s.OrElse {
+			captureWalkStmt(elseStmt, refs, collecting)
+		}
+		for _, finalStmt := range s.FinalBody {
+			captureWalkStmt(finalStmt, refs, collecting)
+		}
+	case *model.Raise:
+		if s.Exc != nil {
+			captureWalkExpr(s.Exc, refs, collecting)
+		}
+		if s.Cause != nil {
+			captureWalkExpr(s.Cause, refs, collecting)
+		}
+	case *model.Assert:
+		if s.Test != nil {
+			captureWalkExpr(s.Test, refs, collecting)
+		}
+		if s.Msg != nil {
+			captureWalkExpr(s.Msg, refs, collecting)
+		}
+	case *model.Delete:
+		for _, target := range s.Targets {
+			captureWalkExpr(target, refs, collecting)
+		}
+	case *model.Match:
+		captureWalkExpr(s.Subject, refs, collecting)
+		for _, c := range s.Cases {
+			for _, bodyStmt := range c.Body {
+				captureWalkStmt(bodyStmt, refs, collecting)
+			}
+		}
+	}
+}
+
+// captureWalkExpr walks an expression subtree. When collecting is true, identifiers
+// are gathered. Lambda and comprehension boundaries always start collecting.
+func captureWalkExpr(expr model.Expr, refs map[string]bool, collecting bool) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *model.Identifier:
+		if collecting {
+			refs[e.Name] = true
+		}
+	case *model.Lambda:
+		// Lambda body is always an inner scope
+		captureWalkExpr(e.Body, refs, true)
+	case *model.ListComp:
+		captureWalkExpr(e.Elt, refs, true)
+		for _, gen := range e.Generators {
+			captureWalkExpr(gen.Iter, refs, true)
+			for _, cond := range gen.Ifs {
+				captureWalkExpr(cond, refs, true)
+			}
+		}
+	case *model.SetComp:
+		captureWalkExpr(e.Elt, refs, true)
+		for _, gen := range e.Generators {
+			captureWalkExpr(gen.Iter, refs, true)
+			for _, cond := range gen.Ifs {
+				captureWalkExpr(cond, refs, true)
+			}
+		}
+	case *model.DictComp:
+		captureWalkExpr(e.Key, refs, true)
+		captureWalkExpr(e.Value, refs, true)
+		for _, gen := range e.Generators {
+			captureWalkExpr(gen.Iter, refs, true)
+			for _, cond := range gen.Ifs {
+				captureWalkExpr(cond, refs, true)
+			}
+		}
+	case *model.GeneratorExpr:
+		captureWalkExpr(e.Elt, refs, true)
+		for _, gen := range e.Generators {
+			captureWalkExpr(gen.Iter, refs, true)
+			for _, cond := range gen.Ifs {
+				captureWalkExpr(cond, refs, true)
+			}
+		}
+	case *model.Call:
+		captureWalkExpr(e.Func, refs, collecting)
+		for _, arg := range e.Args {
+			captureWalkExpr(arg, refs, collecting)
+		}
+		for _, kw := range e.Keywords {
+			captureWalkExpr(kw.Value, refs, collecting)
+		}
+	case *model.BinaryOp:
+		captureWalkExpr(e.Left, refs, collecting)
+		captureWalkExpr(e.Right, refs, collecting)
+	case *model.UnaryOp:
+		captureWalkExpr(e.Operand, refs, collecting)
+	case *model.BoolOp:
+		for _, v := range e.Values {
+			captureWalkExpr(v, refs, collecting)
+		}
+	case *model.Compare:
+		captureWalkExpr(e.Left, refs, collecting)
+		for _, comp := range e.Comparators {
+			captureWalkExpr(comp, refs, collecting)
+		}
+	case *model.IfExpr:
+		captureWalkExpr(e.Test, refs, collecting)
+		captureWalkExpr(e.Body, refs, collecting)
+		captureWalkExpr(e.OrElse, refs, collecting)
+	case *model.Attribute:
+		captureWalkExpr(e.Value, refs, collecting)
+	case *model.Subscript:
+		captureWalkExpr(e.Value, refs, collecting)
+		captureWalkExpr(e.Slice, refs, collecting)
+	case *model.Slice:
+		captureWalkExpr(e.Lower, refs, collecting)
+		captureWalkExpr(e.Upper, refs, collecting)
+		captureWalkExpr(e.Step, refs, collecting)
+	case *model.List:
+		for _, elt := range e.Elts {
+			captureWalkExpr(elt, refs, collecting)
+		}
+	case *model.Tuple:
+		for _, elt := range e.Elts {
+			captureWalkExpr(elt, refs, collecting)
+		}
+	case *model.Dict:
+		for _, k := range e.Keys {
+			captureWalkExpr(k, refs, collecting)
+		}
+		for _, v := range e.Values {
+			captureWalkExpr(v, refs, collecting)
+		}
+	case *model.Set:
+		for _, elt := range e.Elts {
+			captureWalkExpr(elt, refs, collecting)
+		}
+	case *model.Starred:
+		captureWalkExpr(e.Value, refs, collecting)
+	case *model.Await:
+		captureWalkExpr(e.Value, refs, collecting)
+	case *model.NamedExpr:
+		captureWalkExpr(e.Value, refs, collecting)
+	case *model.Yield:
+		if e.Value != nil {
+			captureWalkExpr(e.Value, refs, collecting)
+		}
+	case *model.YieldFrom:
+		captureWalkExpr(e.Value, refs, collecting)
+	case *model.FStringLit:
+		for _, part := range e.Parts {
+			if part.Expr != nil {
+				captureWalkExpr(part.Expr, refs, collecting)
+			}
+		}
+	}
+}
+
 // containsYield checks if statements contain yield or yield from expressions.
 // Does not descend into comprehensions or nested function/class definitions,
 // as those create their own scope.
@@ -1889,6 +2292,20 @@ func containsYield(stmts []model.Stmt) bool {
 		enterComprehensionElts: false,
 	}
 	return w.walkStmts(stmts)
+}
+
+func containsYieldExpr(expr model.Expr) bool {
+	w := astWalker{
+		exprMatch: func(e model.Expr) bool {
+			switch e.(type) {
+			case *model.Yield, *model.YieldFrom:
+				return true
+			}
+			return false
+		},
+		enterComprehensionElts: false,
+	}
+	return w.walkExpr(expr)
 }
 
 func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
@@ -1937,6 +2354,12 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	// from the enclosing scope instead of raising UnboundLocalError.
 	predefineAssignedLocals(funcCompiler.symbolTable, s.Body)
 
+	// Pre-scan for captured variables: identify locals that are referenced by
+	// inner functions/lambdas/comprehensions and mark them as cell variables
+	// BEFORE body compilation. This ensures assignments to captured variables
+	// emit OpStoreDeref from the start, enabling proper closure sharing.
+	prescanCapturedVariables(funcCompiler.symbolTable, s.Body)
+
 	// Compile function body
 	for _, stmt := range s.Body {
 		funcCompiler.compileStmt(stmt)
@@ -1980,6 +2403,24 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		c.emitArg(runtime.OpBuildTuple, len(s.Args.Defaults))
 	}
 
+	// Load kwonly defaults as a dict
+	hasKwDefaults := false
+	if s.Args != nil && len(s.Args.KwDefaults) > 0 {
+		// Build a dict of kwonly param name -> default value
+		count := 0
+		for i, def := range s.Args.KwDefaults {
+			if def != nil && i < len(s.Args.KwOnlyArgs) {
+				c.emitLoadConst(s.Args.KwOnlyArgs[i].Arg.Name)
+				c.compileExpr(def)
+				count++
+			}
+		}
+		if count > 0 {
+			c.emitArg(runtime.OpBuildMap, count)
+			hasKwDefaults = true
+		}
+	}
+
 	// Load code object and make function
 	c.emitLoadConst(funcCode)
 	c.emitLoadConst(s.Name.Name)
@@ -1987,6 +2428,9 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 	flags := 0
 	if s.Args != nil && len(s.Args.Defaults) > 0 {
 		flags |= 1 // Has defaults
+	}
+	if hasKwDefaults {
+		flags |= 2 // Has kwonly defaults
 	}
 	c.emitArg(runtime.OpMakeFunction, flags)
 
@@ -2094,6 +2538,11 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 		lambdaCode.ArgCount = len(e.Args.Args)
 	}
 
+	// Check if the lambda body contains yield (making it a generator lambda)
+	if containsYieldExpr(e.Body) {
+		lambdaCode.Flags |= runtime.FlagGenerator
+	}
+
 	// Load defaults
 	if e.Args != nil && len(e.Args.Defaults) > 0 {
 		for _, def := range e.Args.Defaults {
@@ -2123,10 +2572,39 @@ func (c *Compiler) compileComprehension(
 	flags runtime.CodeFlags,
 	generators []*model.Comprehension,
 	firstIter model.Expr,
+	eltExprs []model.Expr, // element expressions for prescan (capture detection)
 	setupBody func(cc *Compiler, stackOffset int),
 ) {
 	cc := c.newChildCompiler(name, firstLine, ScopeComprehension, flags)
 	cc.symbolTable.Define(".0")
+
+	// Pre-define generator target variables so prescan can mark them as cells
+	for _, gen := range generators {
+		assigned := make(map[string]bool)
+		collectNamesFromExpr(gen.Target, assigned)
+		for aName := range assigned {
+			if _, exists := cc.symbolTable.symbols[aName]; !exists {
+				cc.symbolTable.Define(aName)
+			}
+		}
+	}
+
+	// Prescan element expressions and conditions for lambdas/inner functions
+	// that capture comprehension-local variables
+	refs := make(map[string]bool)
+	for _, elt := range eltExprs {
+		captureWalkExpr(elt, refs, false)
+	}
+	for _, gen := range generators {
+		for _, cond := range gen.Ifs {
+			captureWalkExpr(cond, refs, false)
+		}
+	}
+	for rName := range refs {
+		if sym, ok := cc.symbolTable.symbols[rName]; ok && sym.Scope == ScopeLocal {
+			cc.symbolTable.MarkAsCell(rName)
+		}
+	}
 
 	stackOffset := len(generators)
 	setupBody(cc, stackOffset)
@@ -2151,6 +2629,7 @@ func (c *Compiler) compileComprehension(
 
 func (c *Compiler) compileListComp(e *model.ListComp) {
 	c.compileComprehension("<listcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		[]model.Expr{e.Elt},
 		func(cc *Compiler, stackOffset int) {
 			cc.emitArg(runtime.OpBuildList, 0)
 			c.compileComprehensionGenerators(cc, e.Generators, func() {
@@ -2162,6 +2641,7 @@ func (c *Compiler) compileListComp(e *model.ListComp) {
 
 func (c *Compiler) compileSetComp(e *model.SetComp) {
 	c.compileComprehension("<setcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		[]model.Expr{e.Elt},
 		func(cc *Compiler, stackOffset int) {
 			cc.emitArg(runtime.OpBuildSet, 0)
 			c.compileComprehensionGenerators(cc, e.Generators, func() {
@@ -2173,6 +2653,7 @@ func (c *Compiler) compileSetComp(e *model.SetComp) {
 
 func (c *Compiler) compileDictComp(e *model.DictComp) {
 	c.compileComprehension("<dictcomp>", e.StartPos.Line, 0, e.Generators, e.Generators[0].Iter,
+		[]model.Expr{e.Key, e.Value},
 		func(cc *Compiler, stackOffset int) {
 			cc.emitArg(runtime.OpBuildMap, 0)
 			c.compileComprehensionGenerators(cc, e.Generators, func() {
@@ -2185,6 +2666,7 @@ func (c *Compiler) compileDictComp(e *model.DictComp) {
 
 func (c *Compiler) compileGeneratorExpr(e *model.GeneratorExpr) {
 	c.compileComprehension("<genexpr>", e.StartPos.Line, runtime.FlagGenerator, e.Generators, e.Generators[0].Iter,
+		[]model.Expr{e.Elt},
 		func(cc *Compiler, stackOffset int) {
 			c.compileComprehensionGenerators(cc, e.Generators, func() {
 				cc.compileExpr(e.Elt)
@@ -2218,10 +2700,12 @@ func (c *Compiler) compileComprehensionGenerators(
 	loopStart := comp.currentOffset()
 	exitJump := comp.emitJump(runtime.OpForIter)
 
-	// Define and store target
+	// Define and store target (only if not already defined by prescan)
 	switch t := gen.Target.(type) {
 	case *model.Identifier:
-		comp.symbolTable.Define(t.Name)
+		if _, exists := comp.symbolTable.symbols[t.Name]; !exists {
+			comp.symbolTable.Define(t.Name)
+		}
 	}
 	comp.compileStore(gen.Target)
 

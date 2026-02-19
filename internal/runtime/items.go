@@ -8,9 +8,14 @@ import (
 // Item access
 
 func (vm *VM) getItem(obj Value, index Value) (Value, error) {
-	// Handle slice objects
+	// Handle slice objects for built-in types (not PyInstance, which should dispatch to __getitem__)
 	if slice, ok := index.(*PySlice); ok {
-		return vm.sliceSequence(obj, slice)
+		switch obj.(type) {
+		case *PyInstance:
+			// Fall through to PyInstance handling below, passing the slice to __getitem__
+		default:
+			return vm.sliceSequence(obj, slice)
+		}
 	}
 
 	switch o := obj.(type) {

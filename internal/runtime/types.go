@@ -717,9 +717,11 @@ type PyFunction struct {
 	Code       *CodeObject
 	Globals    map[string]Value
 	Defaults   *PyTuple
+	KwDefaults map[string]Value // Keyword-only argument defaults
 	Closure    []*PyCell
 	Name       string
-	IsAbstract bool // Set by @abstractmethod decorator
+	IsAbstract bool             // Set by @abstractmethod decorator
+	Dict       map[string]Value // Custom attributes (e.g. func._name)
 }
 
 func (f *PyFunction) Type() string   { return "function" }
@@ -813,15 +815,16 @@ func (s *PySuper) String() string { return "<super object>" }
 
 // PyException represents a Python exception
 type PyException struct {
-	ExcType   *PyClass         // Exception class (e.g., ValueError, TypeError)
-	TypeName  string           // Exception type name (used when ExcType is nil)
-	Args      *PyTuple         // Exception arguments
-	Message   string           // String representation
-	Cause     *PyException     // __cause__ for chained exceptions (raise X from Y)
-	Context   *PyException     // __context__ for implicit chaining
-	Traceback []TracebackEntry // Traceback frames
-	Instance  *PyInstance      // non-nil for ExceptionGroup instances
-	Notes     *PyList          // __notes__ list (nil until add_note is called)
+	ExcType        *PyClass         // Exception class (e.g., ValueError, TypeError)
+	TypeName       string           // Exception type name (used when ExcType is nil)
+	Args           *PyTuple         // Exception arguments
+	Message        string           // String representation
+	Cause          *PyException     // __cause__ for chained exceptions (raise X from Y)
+	Context        *PyException     // __context__ for implicit chaining
+	SuppressContext bool            // __suppress_context__ - set True when __cause__ is assigned
+	Traceback      []TracebackEntry // Traceback frames
+	Instance       *PyInstance      // non-nil for ExceptionGroup instances
+	Notes          *PyList          // __notes__ list (nil until add_note is called)
 }
 
 // exceptStarState tracks the remaining unmatched exceptions during except* handling
@@ -952,9 +955,10 @@ type Frame struct {
 
 // Block represents a control flow block
 type Block struct {
-	Type    BlockType
-	Handler int // Handler address
-	Level   int // Stack level
+	Type          BlockType
+	Handler       int // Handler address
+	Level         int // Stack level
+	ExcStackLevel int // excHandlerStack level at block setup time
 }
 
 // BlockType identifies the type of block
@@ -1036,8 +1040,9 @@ func (s *PySlice) String() string {
 
 // PyIterator wraps an iterator
 type PyIterator struct {
-	Items []Value
-	Index int
+	Items  []Value
+	Index  int
+	Source *PyList // Optional: if set, Items is dynamically read from Source.Items (for live mutation visibility)
 }
 
 func (i *PyIterator) Type() string   { return "iterator" }
@@ -1060,6 +1065,15 @@ type PyGenerator struct {
 	Name       string         // Generator function name
 	State      GeneratorState // Current state
 	YieldValue Value          // Value to send into generator on resume
+
+	// Saved VM exception state (isolated per-generator)
+	SavedCurrentException    *PyException
+	SavedLastException       *PyException
+	SavedExcHandlerStack     []*PyException
+	SavedPendingReturn       Value
+	SavedHasPendingReturn    bool
+	SavedPendingJump         int
+	SavedHasPendingJump      bool
 }
 
 func (g *PyGenerator) Type() string   { return "generator" }

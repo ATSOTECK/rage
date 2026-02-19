@@ -20,11 +20,18 @@ type VM struct {
 	checkInterval int64 // Check context every N instructions
 
 	// Exception handling state
-	currentException *PyException // Currently active exception being handled
-	lastException    *PyException // Last raised exception (for bare raise)
+	currentException *PyException   // Currently active exception being handled
+	lastException    *PyException   // Last raised exception (for bare raise)
+	excHandlerStack  []*PyException // Stack of exceptions being handled (for __context__)
 
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
+
+	// Generator return/continue-through-finally state
+	generatorPendingReturn    Value // Return value pending while finally block executes
+	generatorHasPendingReturn bool  // Whether a return is pending
+	generatorPendingJump      int   // Jump target pending while finally block executes (continue/break)
+	generatorHasPendingJump   bool  // Whether a jump is pending
 
 	// except* state stack
 	exceptStarStack []ExceptStarState
@@ -165,6 +172,13 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 	} else {
 		pyExc = vm.wrapGoError(err)
 	}
+	// Set implicit __context__ from the exception handler stack
+	if len(vm.excHandlerStack) > 0 {
+		handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+		if pyExc != handledException {
+			pyExc.Context = handledException
+		}
+	}
 	_, handleErr := vm.handleException(pyExc)
 	if handleErr != nil {
 		return false, handleErr
@@ -297,6 +311,23 @@ func (vm *VM) run() (Value, error) {
 			if arg < len(frame.Cells) {
 				cell := frame.Cells[arg]
 				if cell != nil {
+					if cell.Value == nil {
+						// Cell exists but value is nil — variable deleted or not yet assigned
+						varName := frame.Code.CellOrFreeName(arg)
+						if arg < len(frame.Code.CellVars) {
+							// CellVar (our own local) → UnboundLocalError
+							err = fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+						} else {
+							// FreeVar (from enclosing scope) → NameError
+							err = fmt.Errorf("NameError: free variable '%s' referenced before assignment in enclosing scope", varName)
+						}
+						if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
+						return nil, err
+					}
 					vm.push(cell.Value)
 				} else {
 					return nil, fmt.Errorf("cell is nil at index %d", arg)
@@ -315,6 +346,12 @@ func (vm *VM) run() (Value, error) {
 				frame.Cells[arg].Value = val
 			} else {
 				return nil, fmt.Errorf("cell index %d out of range for store (have %d cells)", arg, len(frame.Cells))
+			}
+
+		case OpDeleteDeref:
+			// Delete cell variable (set to nil) - for 'del' on closure variables
+			if arg < len(frame.Cells) && frame.Cells[arg] != nil {
+				frame.Cells[arg].Value = nil
 			}
 
 		case OpLoadClosure:
@@ -1011,6 +1048,14 @@ func (vm *VM) run() (Value, error) {
 			name := frame.Code.Names[arg]
 			if val, ok := frame.Globals[name]; ok {
 				vm.push(val)
+			} else if frame.EnclosingGlobals != nil {
+				if val, ok := frame.EnclosingGlobals[name]; ok {
+					vm.push(val)
+				} else if val, ok := frame.Builtins[name]; ok {
+					vm.push(val)
+				} else {
+					return nil, fmt.Errorf("name '%s' is not defined", name)
+				}
 			} else if val, ok := frame.Builtins[name]; ok {
 				vm.push(val)
 			} else {
@@ -1019,12 +1064,23 @@ func (vm *VM) run() (Value, error) {
 
 		case OpStoreGlobal:
 			name := frame.Code.Names[arg]
-			frame.Globals[name] = vm.pop()
+			val := vm.pop()
+			if frame.EnclosingGlobals != nil {
+				// In class body, explicit 'global' declaration writes to module globals
+				frame.EnclosingGlobals[name] = val
+			} else {
+				frame.Globals[name] = val
+			}
 
 		case OpDeleteGlobal:
 			name := frame.Code.Names[arg]
-			vm.callDel(frame.Globals[name])
-			delete(frame.Globals, name)
+			if frame.EnclosingGlobals != nil {
+				vm.callDel(frame.EnclosingGlobals[name])
+				delete(frame.EnclosingGlobals, name)
+			} else {
+				vm.callDel(frame.Globals[name])
+				delete(frame.Globals, name)
+			}
 
 		case OpLoadAttr:
 			name := frame.Code.Names[arg]
@@ -1104,17 +1160,15 @@ func (vm *VM) run() (Value, error) {
 
 		case OpUnaryPositive:
 			a := vm.pop()
-			// Check for __pos__ on instances
-			if inst, ok := a.(*PyInstance); ok {
-				if result, found, err := vm.callDunder(inst, "__pos__"); found {
-					if err != nil {
-						return nil, err
-					}
-					vm.push(result)
-					break
+			result, err := vm.unaryOp(op, a)
+			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
 				}
 			}
-			vm.push(a) // Usually a no-op for numbers
+			vm.push(result)
 
 		case OpUnaryNegative:
 			a := vm.pop()
@@ -1130,7 +1184,17 @@ func (vm *VM) run() (Value, error) {
 
 		case OpUnaryNot:
 			a := vm.pop()
-			if vm.truthy(a) {
+			result := vm.truthy(a)
+			if handled, r, err := vm.checkCurrentException(); handled {
+				if err != nil {
+					return nil, err
+				}
+				if r != nil {
+					return r, nil
+				}
+				break
+			}
+			if result {
 				vm.push(False)
 			} else {
 				vm.push(True)
@@ -1241,6 +1305,52 @@ func (vm *VM) run() (Value, error) {
 			b := vm.pop()
 			a := vm.pop()
 
+			// Handle list += (extend in place) and list *= (repeat in place)
+			if lst, ok := a.(*PyList); ok {
+				if op == OpInplaceAdd {
+					items, err := vm.toList(b)
+					if err != nil {
+						if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
+					}
+					lst.Items = append(lst.Items, items...)
+					vm.push(lst)
+					continue
+				}
+				if op == OpInplaceMultiply {
+					if n, ok := b.(*PyInt); ok {
+						count := int(n.Value)
+						if count <= 0 {
+							lst.Items = []Value{}
+						} else {
+							original := make([]Value, len(lst.Items))
+							copy(original, lst.Items)
+							for i := 1; i < count; i++ {
+								lst.Items = append(lst.Items, original...)
+							}
+						}
+						vm.push(lst)
+						continue
+					}
+					if n, ok := b.(*PyBool); ok {
+						count := 0
+						if n.Value {
+							count = 1
+						}
+						if count <= 0 {
+							lst.Items = []Value{}
+						} else {
+							// count == 1, no change
+						}
+						vm.push(lst)
+						continue
+					}
+				}
+			}
+
 			// Try inplace dunder method on PyInstance first
 			var result Value
 			var err error
@@ -1261,6 +1371,27 @@ func (vm *VM) run() (Value, error) {
 					OpInplaceXor - OpInplaceAdd:       "__ixor__",
 				}
 				dunder := inplaceDunders[op-OpInplaceAdd]
+
+				// Check if the dunder is explicitly set to None (blocks inheritance and fallback)
+				dunderIsNone := false
+				for _, cls := range inst.Class.Mro {
+					if method, ok := cls.Dict[dunder]; ok {
+						if _, isNone := method.(*PyNone); isNone {
+							dunderIsNone = true
+						}
+						break
+					}
+				}
+				if dunderIsNone {
+					err = fmt.Errorf("TypeError: unsupported operand type(s) for %s: '%s' and '%s'",
+						dunder, vm.typeName(a), vm.typeName(b))
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+				}
+
 				var found bool
 				result, found, err = vm.callDunder(inst, dunder, b)
 				if err != nil {
@@ -1271,8 +1402,11 @@ func (vm *VM) run() (Value, error) {
 					}
 				}
 				if found && result != nil {
-					vm.push(result)
-					continue
+					// Check if result is NotImplemented - if so, fall through to __add__
+					if _, isNotImpl := result.(*PyNotImplementedType); !isNotImpl {
+						vm.push(result)
+						continue
+					}
 				}
 			}
 
@@ -1338,6 +1472,10 @@ func (vm *VM) run() (Value, error) {
 		case OpJump:
 			frame.IP = arg
 
+		case OpContinueLoop:
+			// Continue loop - same as jump in regular VM, handled specially in generators
+			frame.IP = arg
+
 		case OpJumpIfTrue:
 			if vm.truthy(vm.top()) {
 				frame.IP = arg
@@ -1391,6 +1529,12 @@ func (vm *VM) run() (Value, error) {
 			iter := vm.top()
 			val, done, err := vm.iterNext(iter)
 			if err != nil {
+				vm.pop() // Pop iterator before handling error
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			if done {
@@ -1560,6 +1704,7 @@ func (vm *VM) run() (Value, error) {
 			name := vm.pop().(*PyString).Value
 			code := vm.pop().(*CodeObject)
 			var defaults *PyTuple
+			var kwDefaults map[string]Value
 			var closure []*PyCell
 			if arg&8 != 0 {
 				// Has closure - pop tuple of cells
@@ -1567,6 +1712,16 @@ func (vm *VM) run() (Value, error) {
 				closure = make([]*PyCell, len(closureTuple.Items))
 				for i, item := range closureTuple.Items {
 					closure[i] = item.(*PyCell)
+				}
+			}
+			if arg&2 != 0 {
+				// Has kwonly defaults dict
+				kwDefaultsDict := vm.pop().(*PyDict)
+				kwDefaults = make(map[string]Value)
+				for _, key := range kwDefaultsDict.Keys(vm) {
+					if ks, ok := key.(*PyString); ok {
+						kwDefaults[ks.Value], _ = kwDefaultsDict.DictGet(key, vm)
+					}
 				}
 			}
 			if arg&1 != 0 {
@@ -1649,11 +1804,12 @@ func (vm *VM) run() (Value, error) {
 				fnGlobals = frame.EnclosingGlobals
 			}
 			fn := &PyFunction{
-				Code:     code,
-				Globals:  fnGlobals,
-				Defaults: defaults,
-				Closure:  closure,
-				Name:     name,
+				Code:       code,
+				Globals:    fnGlobals,
+				Defaults:   defaults,
+				KwDefaults: kwDefaults,
+				Closure:    closure,
+				Name:       name,
 			}
 			vm.push(fn)
 
@@ -1740,6 +1896,83 @@ func (vm *VM) run() (Value, error) {
 					continue
 				}
 				// Convert Go error to Python exception so try/except can catch it
+				pyExc := vm.wrapGoError(err)
+				_, handleErr := vm.handleException(pyExc)
+				if handleErr != nil {
+					return nil, handleErr
+				}
+				if vm.frame != frame {
+					return nil, errExceptionHandledInOuterFrame
+				}
+				continue
+			}
+			vm.push(result)
+
+		case OpCallEx:
+			// Call with *args/**kwargs unpacking
+			// Stack: callable, args_tuple [, kwargs_dict if arg&1]
+			var kwargs map[string]Value
+			if arg&1 != 0 {
+				kwargsVal := vm.pop()
+				if kwargsDict, ok := kwargsVal.(*PyDict); ok {
+					kwargs = make(map[string]Value)
+					for _, key := range kwargsDict.Keys(vm) {
+						if ks, ok := key.(*PyString); ok {
+							val, _ := kwargsDict.DictGet(key, vm)
+							kwargs[ks.Value] = val
+						}
+					}
+				}
+			}
+			argsTuple := vm.pop()
+			callable := vm.pop()
+			var args []Value
+			switch at := argsTuple.(type) {
+			case *PyTuple:
+				args = at.Items
+			case *PyList:
+				args = at.Items
+			default:
+				// Try to iterate
+				iter, iterErr := vm.getIter(argsTuple)
+				if iterErr != nil {
+					err = fmt.Errorf("TypeError: argument after * must be an iterable")
+					pyExc := vm.wrapGoError(err)
+					_, handleErr := vm.handleException(pyExc)
+					if handleErr != nil {
+						return nil, handleErr
+					}
+					if vm.frame != frame {
+						return nil, errExceptionHandledInOuterFrame
+					}
+					continue
+				}
+				for {
+					val, ok, _ := vm.iterNext(iter)
+					if !ok {
+						break
+					}
+					args = append(args, val)
+				}
+			}
+			result, err := vm.call(callable, args, kwargs)
+			if err != nil {
+				if err == errExceptionHandledInOuterFrame {
+					if vm.frame == frame {
+						continue
+					}
+					return nil, err
+				}
+				if pyExc, ok := err.(*PyException); ok {
+					_, handleErr := vm.handleException(pyExc)
+					if handleErr != nil {
+						return nil, handleErr
+					}
+					if vm.frame != frame {
+						return nil, errExceptionHandledInOuterFrame
+					}
+					continue
+				}
 				pyExc := vm.wrapGoError(err)
 				_, handleErr := vm.handleException(pyExc)
 				if handleErr != nil {
@@ -2171,9 +2404,10 @@ func (vm *VM) run() (Value, error) {
 		case OpSetupExcept:
 			// Push exception handler block onto block stack
 			block := Block{
-				Type:    BlockExcept,
-				Handler: arg,
-				Level:   frame.SP,
+				Type:          BlockExcept,
+				Handler:       arg,
+				Level:         frame.SP,
+				ExcStackLevel: len(vm.excHandlerStack),
 			}
 			frame.BlockStack = append(frame.BlockStack, block)
 
@@ -2187,15 +2421,32 @@ func (vm *VM) run() (Value, error) {
 			frame.BlockStack = append(frame.BlockStack, block)
 
 		case OpPopExcept:
-			// Pop exception handler from block stack (try block completed normally)
+			// No-exception path: pop BlockExcept from block stack
 			if len(frame.BlockStack) > 0 {
 				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 			}
 			vm.currentException = nil
 
+		case OpPopBlock:
+			// Pop top block from block stack (used before normal finally entry)
+			if len(frame.BlockStack) > 0 {
+				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			}
+
+		case OpPopExceptHandler:
+			// End of except handler body: pop excHandlerStack entry
+			vm.currentException = nil
+			if len(vm.excHandlerStack) > 0 {
+				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			}
+
 		case OpClearException:
 			// Clear the current exception state (when handler catches exception)
 			// Does NOT pop the block stack (block was already popped by handleException)
+			// Push onto handler stack so new exceptions in this handler get __context__
+			if vm.currentException != nil {
+				vm.excHandlerStack = append(vm.excHandlerStack, vm.currentException)
+			}
 			vm.currentException = nil
 
 		case OpSetupExceptStar:
@@ -2323,6 +2574,10 @@ func (vm *VM) run() (Value, error) {
 
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
+			// Pop the handler stack entry that was pushed when entering finally
+			if len(vm.excHandlerStack) > 0 {
+				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err
 			}
@@ -2345,8 +2600,10 @@ func (vm *VM) run() (Value, error) {
 		case OpRaiseVarargs:
 			var exc *PyException
 			if arg == 0 {
-				// Bare raise - re-raise current/last exception
-				if vm.lastException != nil {
+				// Bare raise - re-raise the exception from the current handler
+				if len(vm.excHandlerStack) > 0 {
+					exc = vm.excHandlerStack[len(vm.excHandlerStack)-1]
+				} else if vm.lastException != nil {
 					exc = vm.lastException
 				} else {
 					return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
@@ -2360,6 +2617,16 @@ func (vm *VM) run() (Value, error) {
 				cause := vm.pop()
 				excVal := vm.pop()
 				exc = vm.createException(excVal, cause)
+			}
+
+			// Set implicit __context__ from the exception handler stack.
+			// When we're inside an except block, the handled exception is on
+			// the excHandlerStack. Bare raise re-raises, so skip for arg==0.
+			if arg != 0 && len(vm.excHandlerStack) > 0 {
+				handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+				if exc != handledException {
+					exc.Context = handledException
+				}
 			}
 
 			// Build traceback

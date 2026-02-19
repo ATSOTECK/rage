@@ -212,4 +212,289 @@ test("comprehension_scope_isolation", test_comprehension_scope_isolation)
 test("comprehension_with_type_conversion", test_comprehension_with_type_conversion)
 test("comprehension_building_dicts", test_comprehension_building_dicts)
 
+# =============================================================================
+# Ported from CPython test_genexps.py
+# =============================================================================
+
+def test_genexp_sum_with_condition():
+    """sum of squares of odd numbers from 0..99"""
+    result = sum(i * i for i in range(100) if i & 1 == 1)
+    expect(result).to_be(166650)
+
+def test_genexp_simple_nesting():
+    """Cartesian product with two for clauses."""
+    result = list((i, j) for i in range(3) for j in range(4))
+    expect(result).to_be([
+        (0, 0), (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
+        (2, 0), (2, 1), (2, 2), (2, 3),
+    ])
+
+def test_genexp_inner_depends_on_outer():
+    """Inner for clause depends on outer loop variable."""
+    result = list((i, j) for i in range(4) for j in range(i))
+    expect(result).to_be([(1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2)])
+
+def test_genexp_temp_variable_idiom():
+    """Temporary variable assignment idiom using inner for-in-list."""
+    result = list(j * j for i in range(4) for j in [i + 1])
+    expect(result).to_be([1, 4, 9, 16])
+
+def test_genexp_temp_variable_two_levels():
+    """Two levels of temporary variable assignment."""
+    result = list(j * k for i in range(4) for j in [i + 1] for k in [j + 1])
+    expect(result).to_be([2, 6, 12, 20])
+
+def test_genexp_temp_variable_tuple_unpack():
+    """Temporary variable via tuple unpacking in inner for."""
+    result = list(j * k for i in range(4) for j, k in [(i + 1, i + 2)])
+    expect(result).to_be([2, 6, 12, 20])
+
+def test_genexp_scope_no_leak():
+    """Generator expression loop variable does not leak into outer scope."""
+    i = 20
+    result = sum(i * i for i in range(100))
+    expect(result).to_be(328350)
+    expect(i).to_be(20)
+
+def test_genexp_first_class():
+    """Generator expression is a first-class object."""
+    g = (i * i for i in range(4))
+    expect(list(g)).to_be([0, 1, 4, 9])
+
+def test_genexp_next_calls():
+    """Direct calls to next() on a generator expression."""
+    g = (i * i for i in range(3))
+    expect(next(g)).to_be(0)
+    expect(next(g)).to_be(1)
+    expect(next(g)).to_be(4)
+    caught = False
+    try:
+        next(g)
+    except StopIteration:
+        caught = True
+    expect(caught).to_be(True)
+
+def test_genexp_stays_stopped():
+    """Once exhausted, genexp keeps raising StopIteration."""
+    g = (i * i for i in range(3))
+    expect(next(g)).to_be(0)
+    expect(next(g)).to_be(1)
+    expect(next(g)).to_be(4)
+    caught1 = False
+    try:
+        next(g)
+    except StopIteration:
+        caught1 = True
+    expect(caught1).to_be(True)
+    # Still stopped
+    caught2 = False
+    try:
+        next(g)
+    except StopIteration:
+        caught2 = True
+    expect(caught2).to_be(True)
+    expect(list(g)).to_be([])
+
+def test_genexp_defining_function_out_of_scope():
+    """Genexp works even after defining function is out of scope."""
+    def f(n):
+        return (i * i for i in range(n))
+    expect(list(f(10))).to_be([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
+
+def test_genexp_nested_from_function():
+    """Nested genexp returned from function."""
+    def f(n):
+        return ((i, j) for i in range(3) for j in range(n))
+    expect(list(f(4))).to_be([
+        (0, 0), (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
+        (2, 0), (2, 1), (2, 2), (2, 3),
+    ])
+
+def test_genexp_with_filter_from_function():
+    """Genexp with filter from function, called with different args."""
+    def f(n):
+        return ((i, j) for i in range(3) for j in range(4) if j in range(n))
+    expect(list(f(4))).to_be([
+        (0, 0), (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
+        (2, 0), (2, 1), (2, 2), (2, 3),
+    ])
+    expect(list(f(2))).to_be([
+        (0, 0), (0, 1),
+        (1, 0), (1, 1),
+        (2, 0), (2, 1),
+    ])
+
+def test_genexp_early_binding_outermost():
+    """Outermost for-expression is evaluated eagerly (early binding)."""
+    x = 10
+    g = (i * i for i in range(x))
+    x = 5
+    # range(x) was captured when x=10, so we get 10 items not 5
+    expect(list(g)).to_be([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
+
+def test_genexp_late_binding_if():
+    """Outermost if-expression is evaluated lazily (late binding)."""
+    include = (2, 4, 6, 8)
+    g = (i * i for i in range(10) if i in include)
+    include = (1, 3, 5, 7, 9)
+    # The if-condition uses the NEW value of include
+    expect(list(g)).to_be([1, 9, 25, 49, 81])
+
+def test_genexp_late_binding_inner_for():
+    """Innermost for-expression is evaluated lazily (late binding)."""
+    x = 5
+    g = ((i, j) for i in range(3) for j in range(x))
+    x = 4
+    # Inner range(x) uses x=4 (late binding)
+    expect(list(g)).to_be([
+        (0, 0), (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
+        (2, 0), (2, 1), (2, 2), (2, 3),
+    ])
+
+def test_genexp_lambda_yrange():
+    """Lambda-based range using generator expression (from CPython tests)."""
+    yrange = lambda n: (i for i in range(n))
+    expect(list(yrange(10))).to_be([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+def test_genexp_creator_caller():
+    """Genexp returns to most recent caller, not creator."""
+    yrange = lambda n: (i for i in range(n))
+    log = []
+    def creator():
+        r = yrange(5)
+        log.append("creator " + str(next(r)))
+        return r
+    def caller():
+        r = creator()
+        for i in r:
+            log.append("caller " + str(i))
+    caller()
+    expect(log).to_be(["creator 0", "caller 1", "caller 2", "caller 3", "caller 4"])
+
+def test_genexp_exception_propagation():
+    """Exception propagation stops the genexp."""
+    g = (10 // i for i in (5, 0, 2))
+    expect(next(g)).to_be(2)
+    caught = False
+    try:
+        next(g)
+    except ZeroDivisionError:
+        caught = True
+    expect(caught).to_be(True)
+    # After exception, genexp is dead
+    stopped = False
+    try:
+        next(g)
+    except StopIteration:
+        stopped = True
+    expect(stopped).to_be(True)
+
+def test_genexp_none_values():
+    """Generator expression yielding None."""
+    expect(list(None for i in range(10))).to_be(
+        [None, None, None, None, None, None, None, None, None, None]
+    )
+
+def test_genexp_iter_is_self():
+    """iter(genexp) is genexp."""
+    g = (i * i for i in range(3))
+    expect(iter(g) is g).to_be(True)
+
+def test_genexp_in_sorted():
+    """Generator expression passed to sorted()."""
+    result = sorted(x * x for x in [3, 1, 4, 1, 5])
+    expect(result).to_be([1, 1, 9, 16, 25])
+
+def test_genexp_in_enumerate():
+    """Generator expression with enumerate."""
+    g = (x * 2 for x in range(5))
+    result = list(enumerate(g))
+    expect(result).to_be([(0, 0), (1, 2), (2, 4), (3, 6), (4, 8)])
+
+def test_genexp_chained_conditions():
+    """Generator expression with multiple chained conditions."""
+    result = list(x for x in range(50) if x % 2 == 0 if x % 5 == 0)
+    expect(result).to_be([0, 10, 20, 30, 40])
+
+def test_genexp_with_string_methods():
+    """Generator expression using string methods."""
+    words = ["Hello", "WORLD", "pyThOn"]
+    result = list(w.lower() for w in words)
+    expect(result).to_be(["hello", "world", "python"])
+
+def test_genexp_nested_three_levels():
+    """Three-level nested generator expression."""
+    result = list((i, j, k) for i in range(2) for j in range(2) for k in range(2))
+    expect(result).to_be([
+        (0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
+        (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1),
+    ])
+
+def test_genexp_with_complex_expression():
+    """Generator expression with complex transformation."""
+    data = [1, 2, 3, 4, 5]
+    result = list(
+        "big" if x > 3 else "small" for x in data
+    )
+    expect(result).to_be(["small", "small", "small", "big", "big"])
+
+def test_genexp_early_binding_with_mutation():
+    """Early binding: mutating the list after genexp creation."""
+    source = [1, 2, 3]
+    g = (x * 10 for x in source)
+    source.append(4)
+    source.append(5)
+    # Outermost iterable was already evaluated, so we get items from original list iterator
+    # Note: list iterators see mutations, so this gets all 5 items
+    result = list(g)
+    expect(result).to_be([10, 20, 30, 40, 50])
+
+def test_genexp_dict_from_genexp():
+    """Build a dict from a generator expression of pairs."""
+    result = dict((k, v) for k, v in [("a", 1), ("b", 2), ("c", 3)])
+    expect(result).to_be({"a": 1, "b": 2, "c": 3})
+
+def test_genexp_max_with_key_like():
+    """Use genexp to find max based on derived value."""
+    data = [-5, -1, 3, 2, -4]
+    # Find max absolute value
+    result = max(abs(x) for x in data)
+    expect(result).to_be(5)
+
+# Register all genexp tests
+test("genexp_sum_with_condition", test_genexp_sum_with_condition)
+test("genexp_simple_nesting", test_genexp_simple_nesting)
+test("genexp_inner_depends_on_outer", test_genexp_inner_depends_on_outer)
+test("genexp_temp_variable_idiom", test_genexp_temp_variable_idiom)
+test("genexp_temp_variable_two_levels", test_genexp_temp_variable_two_levels)
+test("genexp_temp_variable_tuple_unpack", test_genexp_temp_variable_tuple_unpack)
+test("genexp_scope_no_leak", test_genexp_scope_no_leak)
+test("genexp_first_class", test_genexp_first_class)
+test("genexp_next_calls", test_genexp_next_calls)
+test("genexp_stays_stopped", test_genexp_stays_stopped)
+test("genexp_defining_function_out_of_scope", test_genexp_defining_function_out_of_scope)
+test("genexp_nested_from_function", test_genexp_nested_from_function)
+test("genexp_with_filter_from_function", test_genexp_with_filter_from_function)
+test("genexp_early_binding_outermost", test_genexp_early_binding_outermost)
+test("genexp_late_binding_if", test_genexp_late_binding_if)
+test("genexp_late_binding_inner_for", test_genexp_late_binding_inner_for)
+test("genexp_lambda_yrange", test_genexp_lambda_yrange)
+test("genexp_creator_caller", test_genexp_creator_caller)
+test("genexp_exception_propagation", test_genexp_exception_propagation)
+test("genexp_none_values", test_genexp_none_values)
+test("genexp_iter_is_self", test_genexp_iter_is_self)
+test("genexp_in_sorted", test_genexp_in_sorted)
+test("genexp_in_enumerate", test_genexp_in_enumerate)
+test("genexp_chained_conditions", test_genexp_chained_conditions)
+test("genexp_with_string_methods", test_genexp_with_string_methods)
+test("genexp_nested_three_levels", test_genexp_nested_three_levels)
+test("genexp_with_complex_expression", test_genexp_with_complex_expression)
+test("genexp_early_binding_with_mutation", test_genexp_early_binding_with_mutation)
+test("genexp_dict_from_genexp", test_genexp_dict_from_genexp)
+test("genexp_max_with_key_like", test_genexp_max_with_key_like)
+
 print("CPython comprehension tests completed")

@@ -138,4 +138,201 @@ test("custom_iter_fallback", test_custom_iter_fallback)
 test("not_in_various", test_not_in_various)
 test("membership_type_mismatch", test_membership_type_mismatch)
 
+# Ported from CPython test_contains.py
+
+# === __contains__ protocol on class hierarchy ===
+def test_contains_class_hierarchy():
+    """Test __contains__ with inheritance and __getitem__ fallback (CPython test_common_tests)"""
+    class base_set:
+        def __init__(self, el):
+            self.el = el
+
+    class myset(base_set):
+        def __contains__(self, el):
+            return self.el == el
+
+    class seq(base_set):
+        def __getitem__(self, n):
+            return [self.el][n]
+
+    b = myset(1)
+    c = seq(1)
+    # myset uses __contains__
+    expect(1 in b).to_be(True)
+    expect(0 in b).to_be(False)
+    expect(1 not in b).to_be(False)
+    expect(0 not in b).to_be(True)
+    # seq uses __getitem__ fallback
+    expect(1 in c).to_be(True)
+    expect(0 in c).to_be(False)
+
+test("contains_class_hierarchy", test_contains_class_hierarchy)
+
+# === TypeError for non-iterable ===
+def test_contains_typeerror_non_iterable():
+    """Test that 'in' raises TypeError for objects with no __contains__/__iter__/__getitem__"""
+    class base_set:
+        def __init__(self, el):
+            self.el = el
+
+    a = base_set(1)
+    raised = False
+    try:
+        1 in a
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+    raised2 = False
+    try:
+        1 not in a
+    except TypeError:
+        raised2 = True
+    expect(raised2).to_be(True)
+
+test("contains_typeerror_non_iterable", test_contains_typeerror_non_iterable)
+
+# === None in string raises TypeError ===
+def test_none_in_string_typeerror():
+    """Test that None in 'abc' raises TypeError (CPython test_common_tests)"""
+    raised = False
+    try:
+        None in "abc"
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("none_in_string_typeerror", test_none_in_string_typeerror)
+
+# === __contains__ returning non-bool ===
+def test_contains_nonbool_return():
+    """Test that __contains__ returning truthy/falsy non-bool values works correctly"""
+    class TruthyContainer:
+        def __contains__(self, item):
+            # Return a non-bool truthy value
+            return 42
+
+    class FalsyContainer:
+        def __contains__(self, item):
+            # Return a non-bool falsy value
+            return 0
+
+    class StringContainer:
+        def __contains__(self, item):
+            return "yes"
+
+    class EmptyStringContainer:
+        def __contains__(self, item):
+            return ""
+
+    tc = TruthyContainer()
+    fc = FalsyContainer()
+    sc = StringContainer()
+    esc = EmptyStringContainer()
+    # 'in' should coerce to bool
+    expect(1 in tc).to_be(True)
+    expect(1 in fc).to_be(False)
+    expect(1 in sc).to_be(True)
+    expect(1 in esc).to_be(False)
+    # 'not in' should also work
+    expect(1 not in tc).to_be(False)
+    expect(1 not in fc).to_be(True)
+
+test("contains_nonbool_return", test_contains_nonbool_return)
+
+# === Range membership ===
+def test_range_membership():
+    """Test membership in range objects (CPython test_builtin_sequence_types)"""
+    a = range(10)
+    for i in a:
+        expect(i in a).to_be(True)
+    expect(16 in a).to_be(False)
+    expect(-1 in a).to_be(False)
+
+test("range_membership", test_range_membership)
+
+# === Tuple membership from range ===
+def test_tuple_from_range_membership():
+    """Test membership in tuple created from range (CPython test_builtin_sequence_types)"""
+    a = tuple(range(10))
+    for i in a:
+        expect(i in a).to_be(True)
+    expect(16 in a).to_be(False)
+
+test("tuple_from_range_membership", test_tuple_from_range_membership)
+
+# === __contains__ = None blocks fallback ===
+def test_contains_none_blocks_fallback():
+    """Test that __contains__ = None blocks iteration fallback (CPython test_block_fallback)"""
+    class ByContains:
+        def __contains__(self, other):
+            return False
+
+    c = ByContains()
+    expect(0 in c).to_be(False)
+
+    class BlockContains(ByContains):
+        def __iter__(self):
+            while False:
+                yield None
+        __contains__ = None
+
+    bc = BlockContains()
+    # list(bc) should work since __iter__ is defined
+    expect(list(bc)).to_be([])
+    # But 'in' should raise TypeError because __contains__ = None blocks fallback
+    raised = False
+    try:
+        0 in bc
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("contains_none_blocks_fallback", test_contains_none_blocks_fallback)
+
+# === __getitem__ fallback with IndexError ===
+def test_getitem_fallback_membership():
+    """Test that __getitem__ fallback works correctly for membership (stops at IndexError)"""
+    class SeqContainer:
+        def __init__(self, *items):
+            self.items = list(items)
+        def __getitem__(self, index):
+            return self.items[index]
+
+    sc = SeqContainer(10, 20, 30)
+    expect(10 in sc).to_be(True)
+    expect(20 in sc).to_be(True)
+    expect(30 in sc).to_be(True)
+    expect(40 in sc).to_be(False)
+    expect(10 not in sc).to_be(False)
+    expect(40 not in sc).to_be(True)
+
+test("getitem_fallback_membership", test_getitem_fallback_membership)
+
+# === __contains__ with identity check ===
+def test_contains_identity():
+    """Test that 'in' works with identity (same object) in lists and tuples"""
+    class AlwaysNotEqual:
+        def __eq__(self, other):
+            return False
+    obj = AlwaysNotEqual()
+    # Even though __eq__ always returns False, identity check should find it
+    expect(obj in [obj]).to_be(True)
+    expect(obj in (obj,)).to_be(True)
+    expect(obj in [1, 2, obj, 3]).to_be(True)
+
+test("contains_identity", test_contains_identity)
+
+# === Membership with boolean/int equivalence ===
+def test_contains_bool_int_equivalence():
+    """Test membership with True==1 and False==0 equivalence"""
+    expect(True in [1]).to_be(True)
+    expect(1 in [True]).to_be(True)
+    expect(False in [0]).to_be(True)
+    expect(0 in [False]).to_be(True)
+    expect(True in {1}).to_be(True)
+    expect(1 in {True}).to_be(True)
+
+test("contains_bool_int_equivalence", test_contains_bool_int_equivalence)
+
 print("CPython membership tests completed")

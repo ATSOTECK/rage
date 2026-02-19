@@ -92,7 +92,7 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 		}
 		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
 	}
-	return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
+	return nil, fmt.Errorf("TypeError: '%s' object is not callable", vm.typeName(callable))
 }
 
 // callGoFunction calls a Go function with stack-based argument passing
@@ -348,13 +348,17 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 
 	// If any arguments are CellVars (captured by inner functions), initialize cells with args
 	// CellVars contain names of captured parameters - match by name against VarNames
+	// This checks both positional and keyword-only parameters.
+	totalNamedParams := code.ArgCount + code.KwOnlyArgCount
 	for cellIdx, cellName := range code.CellVars {
-		// Find if this cell var corresponds to a parameter (in first ArgCount VarNames)
-		for argIdx := 0; argIdx < code.ArgCount && argIdx < len(code.VarNames); argIdx++ {
-			if code.VarNames[argIdx] == cellName && argIdx < len(args) {
-				// This parameter is captured, initialize its cell with the argument
+		// Find if this cell var corresponds to a parameter
+		for argIdx := 0; argIdx < totalNamedParams && argIdx < len(code.VarNames); argIdx++ {
+			if code.VarNames[argIdx] == cellName {
+				// This parameter is captured, initialize its cell with the local value
 				if cellIdx < len(frame.Cells) && frame.Cells[cellIdx] != nil {
-					frame.Cells[cellIdx].Value = args[argIdx]
+					if argIdx < len(frame.Locals) && frame.Locals[argIdx] != nil {
+						frame.Cells[cellIdx].Value = frame.Locals[argIdx]
+					}
 				}
 				break
 			}
@@ -409,6 +413,31 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 			argIdx := startDefault + i
 			if argIdx < len(frame.Locals) && frame.Locals[argIdx] == nil {
 				frame.Locals[argIdx] = fn.Defaults.Items[i]
+			}
+		}
+	}
+
+	// Apply keyword-only defaults for missing kwonly arguments
+	if fn.KwDefaults != nil {
+		for kwName, kwDefault := range fn.KwDefaults {
+			for i := code.ArgCount; i < code.ArgCount+code.KwOnlyArgCount && i < len(code.VarNames); i++ {
+				if code.VarNames[i] == kwName && i < len(frame.Locals) && frame.Locals[i] == nil {
+					frame.Locals[i] = kwDefault
+					break
+				}
+			}
+		}
+	}
+
+	// Re-initialize cells from locals: kwonly defaults and kwargs may have been applied
+	// after the initial cell initialization, so update cells that still have nil values.
+	for cellIdx, cellName := range code.CellVars {
+		if cellIdx < len(frame.Cells) && frame.Cells[cellIdx] != nil && frame.Cells[cellIdx].Value == nil {
+			for i := 0; i < totalNamedParams && i < len(code.VarNames); i++ {
+				if code.VarNames[i] == cellName && i < len(frame.Locals) && frame.Locals[i] != nil {
+					frame.Cells[cellIdx].Value = frame.Locals[i]
+					break
+				}
 			}
 		}
 	}

@@ -255,4 +255,183 @@ test("augmented_assignment", test_augmented_assignment)
 test("custom_unary", test_custom_unary)
 test("custom_comparison", test_custom_comparison)
 
+# Ported from CPython test_unary.py
+
+# === Negation equivalence (CPython test_negative) ===
+def test_cpython_negative():
+    """Negation matches subtraction from zero"""
+    expect(-2 == 0 - 2).to_be(True)
+    expect(-0).to_be(0)
+    expect(--2).to_be(2)
+    expect(-2.0 == 0 - 2.0).to_be(True)
+    expect(-2j == 0 - 2j).to_be(True)
+
+test("cpython_negative", test_cpython_negative)
+
+# === Positive equivalence (CPython test_positive) ===
+def test_cpython_positive():
+    """Positive operator is identity for numeric types"""
+    expect(+2).to_be(2)
+    expect(+0).to_be(0)
+    expect(++2).to_be(2)
+    expect(+2.0).to_be(2.0)
+    expect(+2j).to_be(2j)
+
+test("cpython_positive", test_cpython_positive)
+
+# === Invert identity (CPython test_invert) ===
+def test_cpython_invert():
+    """Bitwise invert: ~x == -(x+1)"""
+    expect(~2 == -(2 + 1)).to_be(True)
+    expect(~0).to_be(-1)
+    expect(~~2).to_be(2)
+
+test("cpython_invert", test_cpython_invert)
+
+# === Negation of exponentiation / precedence (CPython test_negation_of_exponentiation) ===
+def test_cpython_negation_of_exponentiation():
+    """Make sure ** binds tighter than unary minus (SourceForge bug #456756)"""
+    # -2 ** 3 means -(2**3), not (-2)**3
+    expect(-2 ** 3).to_be(-8)
+    expect((-2) ** 3).to_be(-8)
+    # -2 ** 4 means -(2**4) = -16, but (-2)**4 = 16
+    expect(-2 ** 4).to_be(-16)
+    expect((-2) ** 4).to_be(16)
+
+test("cpython_negation_of_exponentiation", test_cpython_negation_of_exponentiation)
+
+# === Bad types raise TypeError (CPython test_bad_types) ===
+def test_cpython_bad_types_unary_plus():
+    """Unary + on string raises TypeError"""
+    raised = False
+    try:
+        +"a"
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("cpython_bad_types_unary_plus", test_cpython_bad_types_unary_plus)
+
+def test_cpython_bad_types_unary_minus():
+    """Unary - on string raises TypeError"""
+    raised = False
+    try:
+        -"a"
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("cpython_bad_types_unary_minus", test_cpython_bad_types_unary_minus)
+
+def test_cpython_bad_types_invert_string():
+    """Bitwise ~ on string raises TypeError"""
+    raised = False
+    try:
+        ~"a"
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("cpython_bad_types_invert_string", test_cpython_bad_types_invert_string)
+
+def test_cpython_bad_types_invert_complex():
+    """Bitwise ~ on complex raises TypeError"""
+    raised = False
+    try:
+        ~2j
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("cpython_bad_types_invert_complex", test_cpython_bad_types_invert_complex)
+
+def test_cpython_bad_types_invert_float():
+    """Bitwise ~ on float raises TypeError"""
+    raised = False
+    try:
+        ~2.0
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("cpython_bad_types_invert_float", test_cpython_bad_types_invert_float)
+
+# === No overflow with moderately large ints (within int64 range) ===
+def test_cpython_no_overflow():
+    """Unary ops on large (but int64-safe) integers"""
+    big = 999999999999999999  # within int64 range
+    expect(+big).to_be(999999999999999999)
+    expect(-big).to_be(-999999999999999999)
+    expect(~big).to_be(-1000000000000000000)
+
+test("cpython_no_overflow", test_cpython_no_overflow)
+
+# === Custom __invert__ ===
+def test_custom_invert():
+    """Test custom __invert__ dunder method"""
+    class MyInt:
+        def __init__(self, val):
+            self.val = val
+        def __invert__(self):
+            return MyInt(~self.val)
+    n = MyInt(42)
+    expect((~n).val).to_be(-43)
+    expect((~~n).val).to_be(42)
+
+test("custom_invert", test_custom_invert)
+
+# === Float unary operations ===
+def test_float_unary():
+    """Float negation and positive"""
+    expect(-0.0).to_be(0.0)
+    expect(-1.5).to_be(-1.5)
+    expect(--1.5).to_be(1.5)
+    expect(+(-1.5)).to_be(-1.5)
+
+test("float_unary", test_float_unary)
+
+# === Complex unary operations ===
+def test_complex_unary():
+    """Complex negation and positive"""
+    expect(-1j).to_be(-1j)
+    expect(-(1 + 2j)).to_be(-1 - 2j)
+    expect(+(1 + 2j)).to_be(1 + 2j)
+    expect(--1j).to_be(1j)
+
+test("complex_unary", test_complex_unary)
+
+# === Unary plus on list/dict/None raises TypeError ===
+def test_bad_types_unary_plus_list():
+    """Unary + on list raises TypeError"""
+    raised = False
+    try:
+        +[]
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("bad_types_unary_plus_list", test_bad_types_unary_plus_list)
+
+def test_bad_types_unary_minus_none():
+    """Unary - on None raises TypeError"""
+    raised = False
+    try:
+        -None
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("bad_types_unary_minus_none", test_bad_types_unary_minus_none)
+
+def test_bad_types_invert_list():
+    """Bitwise ~ on list raises TypeError"""
+    raised = False
+    try:
+        ~[]
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+test("bad_types_invert_list", test_bad_types_invert_list)
+
 print("CPython unary/comparison tests completed")

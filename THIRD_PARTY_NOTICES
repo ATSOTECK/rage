@@ -13,7 +13,7 @@ adapted from CPython's test suite (https://github.com/python/cpython).
 
 Location: test/integration/scripts/lang/
 
-Files adapted from CPython (43 test files):
+Files adapted from CPython (50 test files):
   16_cpython_closures.py, 19_cpython_scopes.py, 22_cpython_comprehensions.py,
   23_cpython_generators.py, 24_cpython_generators_advanced.py,
   25_cpython_iterators.py, 27_cpython_classes.py, 28_cpython_class_advanced.py,
@@ -29,7 +29,10 @@ Files adapted from CPython (43 test files):
   69_cpython_set.py, 70_cpython_set_methods.py, 71_cpython_slice.py,
   72_cpython_sequence_ops.py, 73_cpython_membership.py, 76_cpython_sort.py,
   77_cpython_format.py, 79_cpython_with.py, 81_cpython_control_flow.py,
-  82_cpython_exception_edge.py
+  82_cpython_exception_edge.py, 109_cpython_scoping.py,
+  110_cpython_generators_extra.py, 111_cpython_iterators_extra.py,
+  112_cpython_class_extra.py, 113_cpython_exception_chaining.py,
+  114_cpython_grammar_edge.py, 115_cpython_super.py
 
 Summary of changes:
   - Test cases were extracted and rewritten to use RAGE's test_framework

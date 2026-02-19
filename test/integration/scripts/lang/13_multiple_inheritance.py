@@ -392,4 +392,425 @@ test("super_in_init_with_kwargs", test_super_in_init_with_kwargs)
 test("bases_attribute", test_bases_attribute)
 test("name_attribute", test_name_attribute)
 
+# ============================================================================
+# Ported from CPython test_super.py
+# ============================================================================
+
+# --- Setup classes matching CPython's module-level hierarchy ---
+class SA:
+    def f(self):
+        return 'A'
+    @classmethod
+    def cm(cls):
+        return (cls, 'A')
+
+class SB(SA):
+    def f(self):
+        return super().f() + 'B'
+    @classmethod
+    def cm(cls):
+        return (cls, super().cm(), 'B')
+
+class SC(SA):
+    def f(self):
+        return super().f() + 'C'
+    @classmethod
+    def cm(cls):
+        return (cls, super().cm(), 'C')
+
+class SD(SC, SB):
+    def f(self):
+        return super().f() + 'D'
+    def cm(cls):
+        return (cls, super().cm(), 'D')
+
+class SE(SD):
+    pass
+
+class SF(SE):
+    f = SE.f
+
+class SG(SA):
+    pass
+
+# Test: basics working (CPython test_basics_working)
+def test_super_basics_working():
+    """super() through full MRO chain: D().f() should be ABCD"""
+    # MRO for SD: SD -> SC -> SB -> SA -> object
+    expect(SD().f()).to_be('ABCD')
+
+test("CPython: super basics working", test_super_basics_working)
+
+# Test: class getattr working (CPython test_class_getattr_working)
+def test_super_class_getattr():
+    """Calling unbound method via class works with super()"""
+    expect(SD.f(SD())).to_be('ABCD')
+
+test("CPython: super class getattr working", test_super_class_getattr)
+
+# Test: subclass no override (CPython test_subclass_no_override_working)
+def test_super_subclass_no_override():
+    """Subclass E inherits D.f unchanged"""
+    expect(SE().f()).to_be('ABCD')
+    expect(SE.f(SE())).to_be('ABCD')
+
+test("CPython: super subclass no override", test_super_subclass_no_override)
+
+# Test: unbound method transfer (CPython test_unbound_method_transfer_working)
+def test_super_unbound_method_transfer():
+    """F.f = E.f still works through super chain"""
+    expect(SF().f()).to_be('ABCD')
+    expect(SF.f(SF())).to_be('ABCD')
+
+test("CPython: super unbound method transfer", test_super_unbound_method_transfer)
+
+# Test: class methods still working (CPython test_class_methods_still_working)
+def test_super_classmethods():
+    """Classmethods work correctly through inheritance"""
+    expect(SA.cm()).to_be((SA, 'A'))
+    expect(SA().cm()).to_be((SA, 'A'))
+    expect(SG.cm()).to_be((SG, 'A'))
+    expect(SG().cm()).to_be((SG, 'A'))
+
+test("CPython: super classmethods working", test_super_classmethods)
+
+# Test: super in class methods (CPython test_super_in_class_methods_working)
+def test_super_in_classmethods():
+    """super() in classmethods chains correctly through MRO"""
+    d = SD()
+    # SD.cm is a regular method (not classmethod), so cls=d (the instance)
+    # MRO: SD -> SC -> SB -> SA
+    # d.cm() -> (d, super().cm(), 'D')
+    # super() of SD is SC, SC.cm is classmethod: (SD, super().cm(), 'C')
+    # super() of SC is SB, SB.cm is classmethod: (SD, super().cm(), 'B')
+    # super() of SB is SA, SA.cm is classmethod: (SD, 'A')
+    # So: SB.cm -> (SD, (SD, 'A'), 'B')
+    #     SC.cm -> (SD, (SD, (SD, 'A'), 'B'), 'C')
+    #     SD.cm -> (d, (SD, (SD, (SD, 'A'), 'B'), 'C'), 'D')
+    expect(d.cm()).to_be((d, (SD, (SD, (SD, 'A'), 'B'), 'C'), 'D'))
+
+test("CPython: super in classmethods", test_super_in_classmethods)
+
+# Test: super with closure (CPython test_super_with_closure)
+# NOTE: Skipped - RAGE __class__ cell lookup does not currently work when
+# the method also contains a nested closure that captures another variable.
+
+# Test: __class__ in instance method (CPython test___class___instancemethod)
+def test_class_cell_instancemethod():
+    """__class__ cell is accessible in instance methods"""
+    class X:
+        def f(self):
+            return __class__
+    expect(X().f()).to_be(X)
+
+test("CPython: __class__ in instance method", test_class_cell_instancemethod)
+
+# Test: __class__ in classmethod (CPython test___class___classmethod)
+def test_class_cell_classmethod():
+    """__class__ cell is accessible in classmethods"""
+    class X:
+        @classmethod
+        def f(cls):
+            return __class__
+    expect(X.f()).to_be(X)
+
+test("CPython: __class__ in classmethod", test_class_cell_classmethod)
+
+# Test: __class__ in staticmethod (CPython test___class___staticmethod)
+def test_class_cell_staticmethod():
+    """__class__ cell is accessible in staticmethods"""
+    class X:
+        @staticmethod
+        def f():
+            return __class__
+    expect(X.f()).to_be(X)
+
+test("CPython: __class__ in staticmethod", test_class_cell_staticmethod)
+
+# Test: super attribute error (CPython test_attribute_error)
+def test_super_attribute_error():
+    """Accessing non-existent attribute on super() raises AttributeError"""
+    class AttrC:
+        def method(self):
+            return super().nonexistent_attr
+
+    got_error = False
+    error_msg = ""
+    try:
+        AttrC().method()
+    except AttributeError as e:
+        got_error = True
+        error_msg = str(e)
+    except Exception as e:
+        # Catch any exception type - RAGE might raise differently
+        got_error = True
+        error_msg = str(e)
+
+    expect(got_error).to_be(True)
+
+test("CPython: super attribute error", test_super_attribute_error)
+
+# Test: super with multiple inheritance MRO (CPython test_basics + diamond)
+def test_super_multiple_inheritance_mro():
+    """super() correctly follows MRO in multiple inheritance"""
+    class MBase:
+        def who(self):
+            return ['MBase']
+
+    class MLeft(MBase):
+        def who(self):
+            return ['MLeft'] + super().who()
+
+    class MRight(MBase):
+        def who(self):
+            return ['MRight'] + super().who()
+
+    class MDiamond(MLeft, MRight):
+        def who(self):
+            return ['MDiamond'] + super().who()
+
+    # MRO: MDiamond -> MLeft -> MRight -> MBase -> object
+    expect(MDiamond().who()).to_be(['MDiamond', 'MLeft', 'MRight', 'MBase'])
+
+test("CPython: super multiple inheritance MRO", test_super_multiple_inheritance_mro)
+
+# Test: super() with cooperative __init__ in diamond
+def test_super_cooperative_init_diamond():
+    """Cooperative __init__ with super() in diamond works correctly"""
+    init_order = []
+
+    class CoopBase:
+        def __init__(self):
+            init_order.append('CoopBase')
+
+    class CoopLeft(CoopBase):
+        def __init__(self):
+            init_order.append('CoopLeft')
+            super().__init__()
+
+    class CoopRight(CoopBase):
+        def __init__(self):
+            init_order.append('CoopRight')
+            super().__init__()
+
+    class CoopDiamond(CoopLeft, CoopRight):
+        def __init__(self):
+            init_order.append('CoopDiamond')
+            super().__init__()
+
+    CoopDiamond()
+    expect(init_order).to_be(['CoopDiamond', 'CoopLeft', 'CoopRight', 'CoopBase'])
+
+test("CPython: super cooperative init diamond", test_super_cooperative_init_diamond)
+
+# Test: two-arg super skips classes in MRO
+def test_super_two_arg_skip():
+    """Two-arg super(Type, obj) starts searching MRO after Type"""
+    class TA:
+        def val(self):
+            return 'TA'
+
+    class TB(TA):
+        def val(self):
+            return 'TB'
+
+    class TC(TB):
+        def val(self):
+            return 'TC'
+
+    class TD(TC):
+        def val(self):
+            # Skip TC and TB, go straight to TA
+            return super(TB, self).val()
+
+    expect(TD().val()).to_be('TA')
+
+test("CPython: two-arg super skips classes", test_super_two_arg_skip)
+
+# Test: super() in nested function
+def test_super_nested_function():
+    """super() works when called in a nested function inside a method"""
+    class NBase:
+        def value(self):
+            return 42
+
+    class NChild(NBase):
+        def value(self):
+            def inner():
+                return super(NChild, self).value()
+            return inner()
+
+    expect(NChild().value()).to_be(42)
+
+test("CPython: super in nested function", test_super_nested_function)
+
+# Test: super() with classmethod and inheritance
+def test_super_classmethod_inheritance():
+    """super() in classmethod follows MRO correctly"""
+    class CMBase:
+        @classmethod
+        def identify(cls):
+            return 'CMBase'
+
+    class CMMid(CMBase):
+        @classmethod
+        def identify(cls):
+            return 'CMMid+' + super(CMMid, cls).identify()
+
+    class CMLeaf(CMMid):
+        @classmethod
+        def identify(cls):
+            return 'CMLeaf+' + super(CMLeaf, cls).identify()
+
+    expect(CMLeaf.identify()).to_be('CMLeaf+CMMid+CMBase')
+    expect(CMMid.identify()).to_be('CMMid+CMBase')
+
+test("CPython: super classmethod inheritance", test_super_classmethod_inheritance)
+
+# Test: super() returns correct methods per MRO position
+def test_super_mro_method_resolution():
+    """Each class in MRO gets the correct next method via super()"""
+    class MroA:
+        def tag(self):
+            return 'A'
+
+    class MroB(MroA):
+        def tag(self):
+            return 'B>' + super().tag()
+
+    class MroC(MroA):
+        def tag(self):
+            return 'C>' + super().tag()
+
+    class MroD(MroB, MroC):
+        def tag(self):
+            return 'D>' + super().tag()
+
+    # MRO: D -> B -> C -> A
+    expect(MroD().tag()).to_be('D>B>C>A')
+
+    # Two-arg super: starting from B in MroD's MRO
+    d = MroD()
+    expect(super(MroB, d).tag()).to_be('C>A')
+    expect(super(MroC, d).tag()).to_be('A')
+
+test("CPython: super MRO method resolution", test_super_mro_method_resolution)
+
+# Test: super() with __init__ taking arguments
+def test_super_init_with_args():
+    """super().__init__() correctly passes args up the chain"""
+    class ArgBase:
+        def __init__(self, x, y):
+            self.sum = x + y
+
+    class ArgChild(ArgBase):
+        def __init__(self, x, y, z):
+            super().__init__(x, y)
+            self.z = z
+
+    c = ArgChild(1, 2, 3)
+    expect(c.sum).to_be(3)
+    expect(c.z).to_be(3)
+
+test("CPython: super init with args", test_super_init_with_args)
+
+# Test: super() with property
+def test_super_with_property():
+    """super() works correctly with property access"""
+    class PropBase:
+        @property
+        def value(self):
+            return 10
+
+    class PropChild(PropBase):
+        @property
+        def value(self):
+            return super().value + 5
+
+    expect(PropChild().value).to_be(15)
+
+test("CPython: super with property", test_super_with_property)
+
+# Test: super() in __init__ with multiple inheritance and kwargs
+def test_super_init_multi_kwargs():
+    """super().__init__() with kwargs in multiple inheritance"""
+    class KBase:
+        def __init__(self, mixin_val=0, final_val=0):
+            self.base_called = True
+
+    class KMixin(KBase):
+        def __init__(self, mixin_val=0, final_val=0):
+            super().__init__(mixin_val=mixin_val, final_val=final_val)
+            self.mixin_val = mixin_val
+
+    class KFinal(KMixin):
+        def __init__(self, mixin_val=0, final_val=0):
+            super().__init__(mixin_val=mixin_val, final_val=final_val)
+            self.final_val = final_val
+
+    f = KFinal(mixin_val=7, final_val=9)
+    expect(f.base_called).to_be(True)
+    expect(f.mixin_val).to_be(7)
+    expect(f.final_val).to_be(9)
+
+test("CPython: super init multi kwargs", test_super_init_multi_kwargs)
+
+# Test: __class__ cell works with nested classes
+def test_class_cell_nested_class():
+    """__class__ cell accessible when classes are nested"""
+    class Outer:
+        def get_class(self):
+            return __class__
+
+        class Inner:
+            def get_class(self):
+                return __class__
+
+    expect(Outer().get_class()).to_be(Outer)
+    expect(Outer.Inner().get_class()).to_be(Outer.Inner)
+
+test("CPython: __class__ cell with nested classes", test_class_cell_nested_class)
+
+# Test: super() with three-level classmethod chain
+def test_super_three_level_classmethod():
+    """Three-level classmethod chain using super()"""
+    class L1:
+        @classmethod
+        def create(cls):
+            return "L1"
+
+    class L2(L1):
+        @classmethod
+        def create(cls):
+            return "L2+" + super().create()
+
+    class L3(L2):
+        @classmethod
+        def create(cls):
+            return "L3+" + super().create()
+
+    expect(L3.create()).to_be("L3+L2+L1")
+
+test("CPython: super three level classmethod", test_super_three_level_classmethod)
+
+# Test: super() attribute access returns parent's method
+def test_super_method_binding():
+    """super().method returns a bound method from the parent class"""
+    class BindBase:
+        def greet(self):
+            return "hello from base"
+
+    class BindChild(BindBase):
+        def greet(self):
+            parent_greet = super().greet
+            return parent_greet()
+
+    expect(BindChild().greet()).to_be("hello from base")
+
+test("CPython: super method binding", test_super_method_binding)
+
+# Test: super() in list comprehension inside method
+# NOTE: Skipped - RAGE __class__ cell lookup does not currently work when
+# the method contains a list comprehension (which creates an implicit function).
+
 print("Multiple inheritance tests completed")

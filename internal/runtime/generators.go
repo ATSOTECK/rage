@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 )
 
 // GeneratorSend resumes a generator with a value and returns the next yielded value
@@ -33,12 +34,26 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	gen.State = GenRunning
 	gen.YieldValue = value
 
-	// Save current frame and switch to generator's frame
+	// Save current frame and VM state, switch to generator's frame
 	oldFrame := vm.frame
 	oldFrames := vm.frames
+	oldCurrentException := vm.currentException
+	oldLastException := vm.lastException
+	oldExcHandlerStack := vm.excHandlerStack
+	oldPendingReturn := vm.generatorPendingReturn
+	oldHasPendingReturn := vm.generatorHasPendingReturn
+	oldPendingJump := vm.generatorPendingJump
+	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
 	vm.frames = []*Frame{gen.Frame}
+	vm.currentException = gen.SavedCurrentException
+	vm.lastException = gen.SavedLastException
+	vm.excHandlerStack = gen.SavedExcHandlerStack
+	vm.generatorPendingReturn = gen.SavedPendingReturn
+	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
+	vm.generatorPendingJump = gen.SavedPendingJump
+	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// If resuming from yield, push the sent value onto the stack
 	if gen.Frame.IP > 0 {
@@ -48,9 +63,25 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	// Run until yield or return
 	result, yielded, err := vm.runGenerator()
 
-	// Restore old frame
+	// Save generator's state
+	gen.SavedCurrentException = vm.currentException
+	gen.SavedLastException = vm.lastException
+	gen.SavedExcHandlerStack = vm.excHandlerStack
+	gen.SavedPendingReturn = vm.generatorPendingReturn
+	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
+	gen.SavedPendingJump = vm.generatorPendingJump
+	gen.SavedHasPendingJump = vm.generatorHasPendingJump
+
+	// Restore caller's frame and VM state
 	vm.frame = oldFrame
 	vm.frames = oldFrames
+	vm.currentException = oldCurrentException
+	vm.lastException = oldLastException
+	vm.excHandlerStack = oldExcHandlerStack
+	vm.generatorPendingReturn = oldPendingReturn
+	vm.generatorHasPendingReturn = oldHasPendingReturn
+	vm.generatorPendingJump = oldPendingJump
+	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		gen.State = GenClosed
@@ -76,6 +107,12 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, bool, error) {
 	if gen.State == GenClosed {
 		// Re-raise the exception
+		if pyExc, ok := excType.(*PyException); ok {
+			return nil, true, pyExc
+		}
+		if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
+			return nil, true, vm.createException(inst, nil)
+		}
 		excMsg := "exception"
 		if str, ok := excValue.(*PyString); ok {
 			excMsg = str.Value
@@ -95,6 +132,9 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 
 	if gen.State == GenCreated {
 		gen.State = GenClosed
+		if pyExc, ok := excType.(*PyException); ok {
+			return nil, true, pyExc
+		}
 		excMsg := "exception"
 		if str, ok := excValue.(*PyString); ok {
 			excMsg = str.Value
@@ -106,41 +146,82 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	}
 
 	// Generator is suspended at a yield point - throw the exception there
-	// Create the exception to throw
-	excMsg := "exception"
-	if str, ok := excValue.(*PyString); ok {
-		excMsg = str.Value
-	} else if excValue != nil && excValue != None {
-		excMsg = fmt.Sprintf("%v", excValue)
-	}
+	var exc *PyException
 
-	exc := &PyException{
-		TypeName: fmt.Sprintf("%v", excType),
-		Message:  excMsg,
-	}
+	// Check if excType is already a PyException
+	if pyExc, ok := excType.(*PyException); ok {
+		exc = pyExc
+	} else if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
+		// Already-instantiated exception instance (e.g., ValueError("xyz"))
+		exc = vm.createException(inst, nil)
+	} else {
+		excMsg := "exception"
+		if str, ok := excValue.(*PyString); ok {
+			excMsg = str.Value
+		} else if excValue != nil && excValue != None {
+			excMsg = fmt.Sprintf("%v", excValue)
+		}
 
-	// Check if excType is a class and set ExcType appropriately
-	if cls, ok := excType.(*PyClass); ok {
-		exc.ExcType = cls
+		exc = &PyException{
+			TypeName: fmt.Sprintf("%v", excType),
+			Message:  excMsg,
+		}
+
+		// Check if excType is a class and set ExcType appropriately
+		if cls, ok := excType.(*PyClass); ok {
+			exc.ExcType = cls
+		}
 	}
 
 	// Set the pending exception on the VM for the generator to handle
 	vm.generatorThrow = exc
 	gen.State = GenRunning
 
-	// Save current frame and switch to generator's frame
+	// Save current frame and VM state, switch to generator's frame
 	oldFrame := vm.frame
 	oldFrames := vm.frames
+	oldCurrentException := vm.currentException
+	oldLastException := vm.lastException
+	oldExcHandlerStack := vm.excHandlerStack
+	oldPendingReturn := vm.generatorPendingReturn
+	oldHasPendingReturn := vm.generatorHasPendingReturn
+	oldPendingJump := vm.generatorPendingJump
+	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
 	vm.frames = []*Frame{gen.Frame}
+	vm.currentException = gen.SavedCurrentException
+	vm.lastException = gen.SavedLastException
+	vm.excHandlerStack = gen.SavedExcHandlerStack
+	vm.generatorPendingReturn = gen.SavedPendingReturn
+	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
+	vm.generatorPendingJump = gen.SavedPendingJump
+	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
 
-	// Restore old frame
+	// Save generator's state
+	gen.SavedCurrentException = vm.currentException
+	gen.SavedLastException = vm.lastException
+	gen.SavedExcHandlerStack = vm.excHandlerStack
+	gen.SavedPendingReturn = vm.generatorPendingReturn
+	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
+	gen.SavedPendingJump = vm.generatorPendingJump
+	gen.SavedHasPendingJump = vm.generatorHasPendingJump
+
+	// Restore caller's frame and VM state
 	vm.frame = oldFrame
 	vm.frames = oldFrames
+	vm.currentException = oldCurrentException
+	vm.lastException = oldLastException
+	vm.excHandlerStack = oldExcHandlerStack
+	vm.generatorPendingReturn = oldPendingReturn
+	vm.generatorHasPendingReturn = oldHasPendingReturn
+	vm.generatorPendingJump = oldPendingJump
+	vm.generatorHasPendingJump = oldHasPendingJump
+	vm.generatorPendingReturn = oldPendingReturn
+	vm.generatorHasPendingReturn = oldHasPendingReturn
 
 	if err != nil {
 		gen.State = GenClosed
@@ -173,12 +254,40 @@ func (vm *VM) GeneratorClose(gen *PyGenerator) error {
 	}
 
 	// Throw GeneratorExit into the generator
-	_, _, err := vm.GeneratorThrow(gen, &PyString{Value: "GeneratorExit"}, None)
+	genExitClass, _ := vm.builtins["GeneratorExit"]
+	genExitExc := &PyException{
+		TypeName: "GeneratorExit",
+		Message:  "generator exit",
+	}
+	if cls, ok := genExitClass.(*PyClass); ok {
+		genExitExc.ExcType = cls
+	}
+	_, _, err := vm.GeneratorThrow(gen, genExitExc, None)
 
 	// GeneratorExit is expected - if we get it back, ignore it
-	if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "GeneratorExit" {
+	if err != nil {
+		if pyErr, ok := err.(*PyException); ok {
+			if pyErr.Type() == "GeneratorExit" {
+				gen.State = GenClosed
+				return nil
+			}
+		}
+		// StopIteration means the generator returned normally after catching
+		// GeneratorExit and not re-raising - this should raise RuntimeError
+		// But for now, just suppress StopIteration from close()
+		if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
+			gen.State = GenClosed
+			return nil
+		}
+	}
+
+	// No error means generator yielded - this is illegal after close
+	if err == nil {
 		gen.State = GenClosed
-		return nil
+		return &PyException{
+			TypeName: "RuntimeError",
+			Message:  "generator ignored GeneratorExit",
+		}
 	}
 
 	// Any other exception should be propagated
@@ -474,12 +583,16 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 				return val, true, nil
 
 			case *PyIterator:
-				if it.Index >= len(it.Items) {
+				items := it.Items
+				if it.Source != nil {
+					items = it.Source.Items
+				}
+				if it.Index >= len(items) {
 					vm.pop()
 					vm.push(None)
 					continue
 				}
-				val := it.Items[it.Index]
+				val := items[it.Index]
 				it.Index++
 				frame.IP -= 1
 				if OpYieldFrom.HasArg() {
@@ -508,7 +621,54 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 		case OpReturn:
 			frame.SP--
 			result := frame.Stack[frame.SP]
+			// Check for finally blocks on the block stack that need to run before returning
+			foundFinally := false
+			for len(frame.BlockStack) > 0 {
+				block := frame.BlockStack[len(frame.BlockStack)-1]
+				if block.Type == BlockFinally {
+					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+					frame.SP = block.Level
+					frame.IP = block.Handler
+					// Push a "return sentinel" so EndFinally knows to complete the return
+					vm.generatorPendingReturn = result
+					vm.generatorHasPendingReturn = true
+					// Push None as the "exception" for finally (no exception, just cleanup)
+					vm.push(None)
+					foundFinally = true
+					break
+				}
+				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			}
+			if foundFinally {
+				continue // Continue the outer opcode execution loop to run the finally block
+			}
 			return result, false, nil
+
+		case OpContinueLoop:
+			// Continue loop - check for finally blocks that need to run first
+			foundFinally := false
+			for len(frame.BlockStack) > 0 {
+				block := frame.BlockStack[len(frame.BlockStack)-1]
+				if block.Type == BlockFinally {
+					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+					frame.SP = block.Level
+					frame.IP = block.Handler
+					// Set pending jump so EndFinally knows to jump to the loop target
+					vm.generatorPendingJump = arg
+					vm.generatorHasPendingJump = true
+					foundFinally = true
+					break
+				}
+				if block.Type == BlockLoop {
+					break // Stop at the loop block
+				}
+				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			}
+			if foundFinally {
+				continue
+			}
+			// No finally block, just jump directly
+			frame.IP = arg
 
 		case OpGenStart:
 			// No-op, just marks generator start
@@ -518,10 +678,24 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 			// Execute regular opcode using the standard dispatcher
 			result, err := vm.executeOpcodeForGenerator(op, arg)
 			if err != nil {
-				return nil, false, err
+				// Try to handle the exception with try/except handlers in the generator
+				var pyExc *PyException
+				if pe, ok := err.(*PyException); ok {
+					pyExc = pe
+				} else {
+					pyExc = vm.wrapGoError(err)
+				}
+				_, handleErr := vm.handleException(pyExc)
+				if handleErr != nil {
+					// No handler found — propagate
+					return nil, false, handleErr
+				}
+				// Handler found — continue execution at handler address
+				frame = vm.frame
+				continue
 			}
 			if result != nil {
-				// Some opcodes return values (shouldn't happen in generator context)
+				// Some opcodes return values (e.g., pending return from EndFinally)
 				return result, false, nil
 			}
 		}
@@ -1050,6 +1224,11 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if vm.contains(container, item) {
 			vm.push(True)
 		} else {
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				return nil, exc
+			}
 			vm.push(False)
 		}
 
@@ -1057,6 +1236,11 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		container := vm.pop()
 		item := vm.pop()
 		if !vm.contains(container, item) {
+			if vm.currentException != nil {
+				exc := vm.currentException
+				vm.currentException = nil
+				return nil, exc
+			}
 			vm.push(True)
 		} else {
 			vm.push(False)
@@ -1470,7 +1654,21 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		vm.currentException = nil
 
+	case OpPopBlock:
+		if len(frame.BlockStack) > 0 {
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+		}
+
+	case OpPopExceptHandler:
+		vm.currentException = nil
+		if len(vm.excHandlerStack) > 0 {
+			vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+		}
+
 	case OpClearException:
+		if vm.currentException != nil {
+			vm.excHandlerStack = append(vm.excHandlerStack, vm.currentException)
+		}
 		vm.currentException = nil
 
 	case OpSetupWith:
@@ -1525,6 +1723,10 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 
 	case OpEndFinally:
+		// Pop the handler stack entry that was pushed when entering finally
+		if len(vm.excHandlerStack) > 0 {
+			vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+		}
 		if vm.currentException != nil {
 			exc := vm.currentException
 			vm.currentException = nil
@@ -1532,6 +1734,18 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+		}
+		// Check for pending return from OpReturn through finally block
+		if vm.generatorHasPendingReturn {
+			vm.generatorHasPendingReturn = false
+			result := vm.generatorPendingReturn
+			vm.generatorPendingReturn = nil
+			return result, nil
+		}
+		// Check for pending jump from OpContinueLoop through finally block
+		if vm.generatorHasPendingJump {
+			vm.generatorHasPendingJump = false
+			frame.IP = vm.generatorPendingJump
 		}
 
 	case OpExceptionMatch:
@@ -1552,8 +1766,10 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpRaiseVarargs:
 		var exc *PyException
 		if arg == 0 {
-			// Bare raise - re-raise current exception
-			if vm.lastException != nil {
+			// Bare raise - re-raise the exception from the current handler
+			if len(vm.excHandlerStack) > 0 {
+				exc = vm.excHandlerStack[len(vm.excHandlerStack)-1]
+			} else if vm.lastException != nil {
 				exc = vm.lastException
 			} else {
 				return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
@@ -1563,10 +1779,17 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			excVal := vm.pop()
 			exc = vm.createException(excVal, nil)
 		} else {
-			// raise exc from cause (ignore cause for now)
+			// raise exc from cause
 			cause := vm.pop()
 			excVal := vm.pop()
 			exc = vm.createException(excVal, cause)
+		}
+		// Set implicit __context__ from the exception handler stack
+		if arg != 0 && len(vm.excHandlerStack) > 0 {
+			handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+			if exc != handledException {
+				exc.Context = handledException
+			}
 		}
 		exc.Traceback = vm.buildTraceback()
 		_, err := vm.handleException(exc)
@@ -1577,6 +1800,362 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if vm.frame != frame {
 			return nil, errExceptionHandledInOuterFrame
 		}
+
+	// ==========================================
+	// Additional opcodes for generator support
+	// ==========================================
+
+	case OpInplaceAdd, OpInplaceSubtract, OpInplaceMultiply, OpInplaceDivide,
+		OpInplaceFloorDiv, OpInplaceModulo, OpInplacePower, OpInplaceMatMul,
+		OpInplaceLShift, OpInplaceRShift, OpInplaceAnd, OpInplaceOr, OpInplaceXor:
+		b := vm.pop()
+		a := vm.pop()
+
+		// Try inplace dunder method on PyInstance first
+		var result Value
+		var err error
+		if inst, ok := a.(*PyInstance); ok {
+			var inplaceDunders = [...]string{
+				OpInplaceAdd - OpInplaceAdd:     "__iadd__",
+				OpInplaceSubtract - OpInplaceAdd: "__isub__",
+				OpInplaceMultiply - OpInplaceAdd: "__imul__",
+				OpInplaceDivide - OpInplaceAdd:   "__itruediv__",
+				OpInplaceFloorDiv - OpInplaceAdd: "__ifloordiv__",
+				OpInplaceModulo - OpInplaceAdd:   "__imod__",
+				OpInplacePower - OpInplaceAdd:    "__ipow__",
+				OpInplaceMatMul - OpInplaceAdd:   "__imatmul__",
+				OpInplaceLShift - OpInplaceAdd:   "__ilshift__",
+				OpInplaceRShift - OpInplaceAdd:   "__irshift__",
+				OpInplaceAnd - OpInplaceAdd:      "__iand__",
+				OpInplaceOr - OpInplaceAdd:       "__ior__",
+				OpInplaceXor - OpInplaceAdd:      "__ixor__",
+			}
+			dunder := inplaceDunders[op-OpInplaceAdd]
+			var found bool
+			result, found, err = vm.callDunder(inst, dunder, b)
+			if err != nil {
+				return nil, err
+			}
+			if found && result != nil {
+				vm.push(result)
+				return nil, nil
+			}
+		}
+
+		// Fall back to regular binary op
+		binOp := op - OpInplaceAdd + OpBinaryAdd
+		result, err = vm.binaryOp(binOp, a, b)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpLoadEmptyList:
+		frame.Stack[frame.SP] = &PyList{Items: []Value{}}
+		frame.SP++
+
+	case OpLoadEmptyTuple:
+		frame.Stack[frame.SP] = &PyTuple{Items: []Value{}}
+		frame.SP++
+
+	case OpLoadEmptyDict:
+		frame.Stack[frame.SP] = &PyDict{Items: make(map[Value]Value)}
+		frame.SP++
+
+	case OpLenGeneric:
+		frame.SP--
+		obj := frame.Stack[frame.SP]
+		var length int64
+		switch v := obj.(type) {
+		case *PyString:
+			length = int64(utf8.RuneCountInString(v.Value))
+		case *PyList:
+			length = int64(len(v.Items))
+		case *PyTuple:
+			length = int64(len(v.Items))
+		case *PyDict:
+			length = int64(len(v.Items))
+		case *PySet:
+			length = int64(len(v.Items))
+		case *PyFrozenSet:
+			length = int64(len(v.Items))
+		case *PyBytes:
+			length = int64(len(v.Value))
+		case *PyInstance:
+			if result, found, err := vm.callDunder(v, "__len__"); found {
+				if err != nil {
+					return nil, err
+				}
+				if i, ok := result.(*PyInt); ok {
+					length = i.Value
+				} else {
+					return nil, fmt.Errorf("__len__() should return an integer")
+				}
+			} else {
+				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+			}
+		default:
+			return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+		}
+		frame.Stack[frame.SP] = MakeInt(length)
+		frame.SP++
+
+	case OpBinaryPower:
+		b := vm.pop()
+		a := vm.pop()
+		result, err := vm.binaryOp(op, a, b)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpBinaryLShift, OpBinaryRShift, OpBinaryAnd, OpBinaryOr, OpBinaryXor:
+		b := vm.pop()
+		a := vm.pop()
+		result, err := vm.binaryOp(op, a, b)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpUnaryPositive:
+		a := vm.pop()
+		result, err := vm.unaryOp(op, a)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpUnaryInvert:
+		a := vm.pop()
+		result, err := vm.unaryOp(op, a)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpDup2:
+		b := vm.top()
+		a := vm.peek(1)
+		vm.push(a)
+		vm.push(b)
+
+	case OpDeleteFast:
+		vm.callDel(frame.Locals[arg])
+		frame.Locals[arg] = nil
+
+	case OpDeleteGlobal:
+		name := frame.Code.Names[arg]
+		vm.callDel(frame.Globals[name])
+		delete(frame.Globals, name)
+
+	case OpDeleteName:
+		name := frame.Code.Names[arg]
+		vm.callDel(frame.Globals[name])
+		delete(frame.Globals, name)
+
+	case OpDeleteSubscr:
+		index := vm.pop()
+		obj := vm.pop()
+		err := vm.delItem(obj, index)
+		if err != nil {
+			return nil, err
+		}
+
+	case OpJumpIfTrue:
+		if vm.truthy(vm.top()) {
+			frame.IP = arg
+		}
+
+	case OpJumpIfFalse:
+		if !vm.truthy(vm.top()) {
+			frame.IP = arg
+		}
+
+	case OpCallKw:
+		kwNames, ok := vm.pop().(*PyTuple)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: internal error: expected keyword names tuple")
+		}
+		totalArgs := arg
+		kwargs := make(map[string]Value)
+		for i := len(kwNames.Items) - 1; i >= 0; i-- {
+			name := kwNames.Items[i].(*PyString).Value
+			kwargs[name] = vm.pop()
+			totalArgs--
+		}
+		args := make([]Value, totalArgs)
+		for i := totalArgs - 1; i >= 0; i-- {
+			args[i] = vm.pop()
+		}
+		callable := vm.pop()
+		result, err := vm.call(callable, args, kwargs)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpCallEx:
+		// Call with *args/**kwargs unpacking in generator context
+		var kwargs map[string]Value
+		if arg&1 != 0 {
+			kwargsVal := vm.pop()
+			if kwargsDict, ok := kwargsVal.(*PyDict); ok {
+				kwargs = make(map[string]Value)
+				for _, key := range kwargsDict.Keys(vm) {
+					if ks, ok := key.(*PyString); ok {
+						val, _ := kwargsDict.DictGet(key, vm)
+						kwargs[ks.Value] = val
+					}
+				}
+			}
+		}
+		argsTuple := vm.pop()
+		callable := vm.pop()
+		var callArgs []Value
+		switch at := argsTuple.(type) {
+		case *PyTuple:
+			callArgs = at.Items
+		case *PyList:
+			callArgs = at.Items
+		default:
+			callArgs = []Value{}
+		}
+		result, err := vm.call(callable, callArgs, kwargs)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
+
+	case OpBuildSet:
+		s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+		for i := 0; i < arg; i++ {
+			val := vm.pop()
+			s.SetAdd(val, vm)
+		}
+		vm.push(s)
+
+	case OpSetAdd:
+		val := vm.pop()
+		set := vm.peek(arg).(*PySet)
+		set.SetAdd(val, vm)
+
+	case OpMapAdd:
+		val := vm.pop()
+		key := vm.pop()
+		dict := vm.peek(arg).(*PyDict)
+		dict.DictSet(key, val, vm)
+
+	case OpCopyDict:
+		keyCount := int(vm.pop().(*PyInt).Value)
+		keysToRemove := make([]Value, keyCount)
+		for i := keyCount - 1; i >= 0; i-- {
+			keysToRemove[i] = vm.pop()
+		}
+		subject := vm.top()
+		dict := subject.(*PyDict)
+		newDict := &PyDict{Items: make(map[Value]Value)}
+		for k, v := range dict.Items {
+			shouldRemove := false
+			for _, removeKey := range keysToRemove {
+				if vm.equal(k, removeKey) {
+					shouldRemove = true
+					break
+				}
+			}
+			if !shouldRemove {
+				newDict.Items[k] = v
+			}
+		}
+		vm.push(newDict)
+
+	case OpLoadBuildClass:
+		vm.push(vm.builtins["__build_class__"])
+
+	case OpLoadClosure:
+		if arg < len(frame.Cells) {
+			vm.push(frame.Cells[arg])
+		} else {
+			return nil, fmt.Errorf("closure cell index %d out of range", arg)
+		}
+
+	case OpLoadLocals:
+		locals := &PyDict{Items: make(map[Value]Value)}
+		for i, name := range frame.Code.VarNames {
+			if frame.Locals[i] != nil {
+				locals.Items[&PyString{Value: name}] = frame.Locals[i]
+			}
+		}
+		vm.push(locals)
+
+	case OpImportName:
+		name := frame.Code.Names[arg]
+		fromlist := vm.pop()
+		levelVal := vm.pop()
+		level := 0
+		if levelInt, ok := levelVal.(*PyInt); ok {
+			level = int(levelInt.Value)
+		}
+		moduleName := name
+		if level > 0 {
+			packageName := ""
+			if pkgVal, ok := frame.Globals["__package__"]; ok {
+				if pkgStr, ok := pkgVal.(*PyString); ok {
+					packageName = pkgStr.Value
+				}
+			}
+			if packageName == "" {
+				if nameVal, ok := frame.Globals["__name__"]; ok {
+					if nameStr, ok := nameVal.(*PyString); ok {
+						packageName = nameStr.Value
+					}
+				}
+			}
+			resolved, err := ResolveRelativeImport(name, level, packageName)
+			if err != nil {
+				return nil, err
+			}
+			moduleName = resolved
+		}
+		var rootMod, targetMod *PyModule
+		parts := splitModuleName(moduleName)
+		for i := range parts {
+			partialName := joinModuleName(parts[:i+1])
+			mod, err := vm.ImportModule(partialName)
+			if err != nil {
+				return nil, err
+			}
+			if i == 0 {
+				rootMod = mod
+			}
+			targetMod = mod
+		}
+		hasFromlist := false
+		if fromlist != nil && fromlist != None {
+			if list, ok := fromlist.(*PyList); ok && len(list.Items) > 0 {
+				hasFromlist = true
+			} else if tuple, ok := fromlist.(*PyTuple); ok && len(tuple.Items) > 0 {
+				hasFromlist = true
+			}
+		}
+		if hasFromlist {
+			vm.push(targetMod)
+		} else {
+			vm.push(rootMod)
+		}
+
+	case OpImportFrom:
+		name := frame.Code.Names[arg]
+		mod := vm.top()
+		pyMod, ok := mod.(*PyModule)
+		if !ok {
+			return nil, fmt.Errorf("import from requires a module, got %s", vm.typeName(mod))
+		}
+		value, exists := pyMod.Get(name)
+		if !exists {
+			return nil, fmt.Errorf("cannot import name '%s' from '%s'", name, pyMod.Name)
+		}
+		vm.push(value)
 
 	default:
 		return nil, fmt.Errorf("unimplemented opcode in generator: %s", op)

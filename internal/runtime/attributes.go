@@ -123,6 +123,138 @@ func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
 }
 
+// builtinTypeDunders maps builtin type names to the set of dunders they support.
+// Used by hasattr() and getAttr() to report dunder availability on builtin types.
+var builtinTypeDunders = map[string]map[string]bool{
+	"list": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__setitem__": true, "__delitem__": true, "__add__": true, "__mul__": true,
+		"__iadd__": true, "__imul__": true, "__eq__": true, "__ne__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__reversed__": true,
+	},
+	"str": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__add__": true, "__mul__": true, "__eq__": true, "__ne__": true,
+		"__lt__": true, "__le__": true, "__gt__": true, "__ge__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__mod__": true,
+	},
+	"dict": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__setitem__": true, "__delitem__": true, "__eq__": true, "__ne__": true,
+		"__str__": true, "__repr__": true, "__class__": true,
+	},
+	"set": {
+		"__len__": true, "__iter__": true, "__contains__": true,
+		"__eq__": true, "__ne__": true, "__sub__": true, "__and__": true,
+		"__or__": true, "__xor__": true,
+		"__str__": true, "__repr__": true, "__class__": true,
+	},
+	"frozenset": {
+		"__len__": true, "__iter__": true, "__contains__": true,
+		"__eq__": true, "__ne__": true, "__sub__": true, "__and__": true,
+		"__or__": true, "__xor__": true, "__hash__": true,
+		"__str__": true, "__repr__": true, "__class__": true,
+	},
+	"tuple": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__add__": true, "__mul__": true, "__eq__": true, "__ne__": true,
+		"__lt__": true, "__le__": true, "__gt__": true, "__ge__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+	},
+	"int": {
+		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
+		"__floordiv__": true, "__mod__": true, "__pow__": true,
+		"__and__": true, "__or__": true, "__xor__": true,
+		"__lshift__": true, "__rshift__": true, "__neg__": true, "__pos__": true,
+		"__abs__": true, "__invert__": true,
+		"__eq__": true, "__ne__": true, "__lt__": true, "__le__": true,
+		"__gt__": true, "__ge__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__int__": true, "__float__": true, "__bool__": true, "__index__": true,
+	},
+	"float": {
+		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
+		"__floordiv__": true, "__mod__": true, "__pow__": true,
+		"__neg__": true, "__pos__": true, "__abs__": true,
+		"__eq__": true, "__ne__": true, "__lt__": true, "__le__": true,
+		"__gt__": true, "__ge__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__int__": true, "__float__": true, "__bool__": true,
+	},
+	"bool": {
+		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
+		"__floordiv__": true, "__mod__": true, "__pow__": true,
+		"__and__": true, "__or__": true, "__xor__": true,
+		"__eq__": true, "__ne__": true, "__lt__": true, "__le__": true,
+		"__gt__": true, "__ge__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__int__": true, "__float__": true, "__bool__": true,
+	},
+	"NoneType": {
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+		"__bool__": true, "__eq__": true, "__ne__": true,
+	},
+	"bytes": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__add__": true, "__mul__": true, "__eq__": true, "__ne__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+	},
+	"range": {
+		"__len__": true, "__iter__": true, "__contains__": true, "__getitem__": true,
+		"__eq__": true, "__ne__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+	},
+	"complex": {
+		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
+		"__pow__": true, "__neg__": true, "__pos__": true, "__abs__": true,
+		"__eq__": true, "__ne__": true,
+		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
+	},
+}
+
+// builtinValueTypeName returns the Python type name for a builtin value, or "" if unknown.
+func builtinValueTypeName(v Value) string {
+	switch v.(type) {
+	case *PyList:
+		return "list"
+	case *PyString:
+		return "str"
+	case *PyDict:
+		return "dict"
+	case *PySet:
+		return "set"
+	case *PyFrozenSet:
+		return "frozenset"
+	case *PyTuple:
+		return "tuple"
+	case *PyBool:
+		return "bool"
+	case *PyInt:
+		return "int"
+	case *PyFloat:
+		return "float"
+	case *PyNone:
+		return "NoneType"
+	case *PyBytes:
+		return "bytes"
+	case *PyRange:
+		return "range"
+	case *PyComplex:
+		return "complex"
+	}
+	return ""
+}
+
+// builtinHasDunder returns true if the given builtin type name supports the given dunder.
+func builtinHasDunder(typeName, dunder string) bool {
+	if dunders, ok := builtinTypeDunders[typeName]; ok {
+		return dunders[dunder]
+	}
+	return false
+}
+
 // Attribute access
 
 func (vm *VM) getAttr(obj Value, name string) (Value, error) {
@@ -258,6 +390,13 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return o.Args, nil
 			}
 			return &PyTuple{Items: []Value{}}, nil
+		case "__class__":
+			if o.ExcType != nil {
+				return o.ExcType, nil
+			}
+			return None, nil
+		case "__name__":
+			return &PyString{Value: o.Type()}, nil
 		case "__cause__":
 			if o.Cause != nil {
 				return o.Cause, nil
@@ -268,6 +407,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return o.Context, nil
 			}
 			return None, nil
+		case "__suppress_context__":
+			if o.SuppressContext {
+				return True, nil
+			}
+			return False, nil
 		case "__traceback__":
 			return None, nil
 		case "__notes__":
@@ -1437,11 +1581,25 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 							return false
 						}
 					}
-					cmp := vm.compare(a, b)
+					// For reverse sort, compare b < a instead of a < b to maintain stability.
+					// Using !less would break stability because equal elements (less=false)
+					// would return true, swapping their order.
+					var cmpA, cmpB Value
 					if reverse {
-						return cmp > 0
+						cmpA, cmpB = b, a
+					} else {
+						cmpA, cmpB = a, b
 					}
-					return cmp < 0
+					result := vm.compareOp(OpCompareLt, cmpA, cmpB)
+					if result == nil {
+						// compareOp set vm.currentException (e.g. TypeError for incompatible types)
+						if vm.currentException != nil {
+							sortErr = vm.currentException
+							vm.currentException = nil
+						}
+						return false
+					}
+					return vm.truthy(result)
 				})
 				if sortErr != nil {
 					return nil, sortErr
@@ -2804,6 +2962,12 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}
 			return nil, fmt.Errorf("'function' object has no attribute '__wrapped__'")
 		}
+		// Check custom attributes
+		if o.Dict != nil {
+			if val, ok := o.Dict[name]; ok {
+				return val, nil
+			}
+		}
 		return nil, fmt.Errorf("'function' object has no attribute '%s'", name)
 	case *PyBuiltinFunc:
 		// Handle class methods on builtin types (e.g., dict.fromkeys)
@@ -2827,7 +2991,12 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return result, nil
 			}}, nil
 		}
+		// Handle dunder attribute queries on builtin type constructors (e.g., hasattr(list, "__iter__"))
+		if builtinHasDunder(o.Name, name) {
+			return &PyBuiltinFunc{Name: o.Name + "." + name}, nil
+		}
 	}
+
 	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
 }
 
@@ -2878,6 +3047,47 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	case *PyClass:
 		o.Dict[name] = val
 		return nil
+	case *PyFunction:
+		// Allow setting arbitrary attributes on functions (Python supports func.__dict__)
+		switch name {
+		case "__name__":
+			if s, ok := val.(*PyString); ok {
+				o.Name = s.Value
+			}
+			return nil
+		case "__isabstractmethod__":
+			o.IsAbstract = vm.truthy(val)
+			return nil
+		default:
+			if o.Dict == nil {
+				o.Dict = make(map[string]Value)
+			}
+			o.Dict[name] = val
+			return nil
+		}
+	case *PyException:
+		switch name {
+		case "__cause__":
+			if val == None || val == nil {
+				o.Cause = nil
+			} else {
+				o.Cause = vm.createException(val, nil)
+			}
+			// Setting __cause__ always sets __suppress_context__ = True (CPython behavior)
+			o.SuppressContext = true
+			return nil
+		case "__context__":
+			if val == None || val == nil {
+				o.Context = nil
+			} else {
+				o.Context = vm.createException(val, nil)
+			}
+			return nil
+		case "__suppress_context__":
+			o.SuppressContext = vm.truthy(val)
+			return nil
+		}
+		return fmt.Errorf("'%s' object attribute '%s' is read-only", o.Type(), name)
 	}
 	return fmt.Errorf("'%s' object attribute '%s' is read-only", vm.typeName(obj), name)
 }

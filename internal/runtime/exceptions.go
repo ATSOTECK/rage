@@ -10,7 +10,15 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 
 	switch v := excVal.(type) {
 	case *PyException:
-		// Already an exception, return as-is
+		// Already an exception — attach cause if provided, then return
+		if cause != nil {
+			if cause == None {
+				v.Cause = nil
+			} else {
+				v.Cause = vm.createException(cause, nil)
+			}
+			v.SuppressContext = true
+		}
 		return v
 	case *PyClass:
 		// Exception class without arguments: raise ValueError
@@ -64,7 +72,12 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 	}
 
 	if cause != nil {
-		exc.Cause = vm.createException(cause, nil)
+		if cause == None {
+			exc.Cause = nil
+		} else {
+			exc.Cause = vm.createException(cause, nil)
+		}
+		exc.SuppressContext = true
 	}
 
 	return exc
@@ -174,6 +187,12 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			// Found exception handler - restore stack and jump to handler
 			frame.SP = block.Level
 			frame.IP = block.Handler
+			// Restore excHandlerStack to the level when this try was set up.
+			// This cleans up entries from any nested handlers that were abandoned
+			// when the exception propagated through them.
+			if block.ExcStackLevel < len(vm.excHandlerStack) {
+				vm.excHandlerStack = vm.excHandlerStack[:block.ExcStackLevel]
+			}
 			vm.push(exc)    // Push exception onto stack for handler
 			return nil, nil // Continue execution at handler
 
@@ -181,7 +200,8 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			// Must execute finally block first
 			frame.SP = block.Level
 			frame.IP = block.Handler
-			vm.push(exc)    // Push exception for finally to potentially re-raise
+			vm.push(exc)                                             // Push exception for finally to potentially re-raise
+			vm.excHandlerStack = append(vm.excHandlerStack, exc)     // Track for __context__ on new exceptions in finally
 			return nil, nil // Continue execution at finally
 
 		case BlockWith:
@@ -243,11 +263,18 @@ var exceptionPrefixes = []struct {
 	fallback string // Optional fallback exception name
 }{
 	{"ModuleNotFoundError", "ModuleNotFoundError", ""},
+	{"UnboundLocalError", "UnboundLocalError", ""},
 	{"ZeroDivisionError", "ZeroDivisionError", ""},
 	{"FileNotFoundError", "FileNotFoundError", ""},
 	{"PermissionError", "PermissionError", ""},
 	{"FileExistsError", "FileExistsError", ""},
+	{"NotImplementedError", "NotImplementedError", ""},
 	{"AttributeError", "AttributeError", ""},
+	{"RuntimeError", "RuntimeError", ""},
+	{"AssertionError", "AssertionError", ""},
+	{"StopIteration", "StopIteration", ""},
+	{"GeneratorExit", "GeneratorExit", ""},
+	{"RecursionError", "RecursionError", ""},
 	{"ImportError", "ImportError", ""},
 	{"IndexError", "IndexError", ""},
 	{"ValueError", "ValueError", ""},
