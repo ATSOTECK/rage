@@ -30,7 +30,7 @@ go get github.com/ATSOTECK/rage
   - In-package runtime tests (`internal/runtime/*_test.go`) — operations, conversions, items/slicing, type primitives
   - External compile+execute tests (`test/*_test.go`) — builtins, stdlib modules
   - Compiler tests (`internal/compiler/*_test.go`)
-- **Integration tests**: 121 scripts with 2262 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, and more
+- **Integration tests**: 124 scripts with 2358 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, exception chaining, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, super(), and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
@@ -523,7 +523,7 @@ RAGE is under active development. Currently supported:
 - Control flow: if/elif/else, for, while, break, continue, pass, match/case
 - Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
 - Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`, `__init_subclass__`, `__set_name__`
-- Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`), exception groups (`ExceptionGroup`, `BaseExceptionGroup`, `except*` syntax with `.subgroup()`, `.split()`, `.derive()`)
+- Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`, `.__suppress_context__`), implicit exception chaining, exception groups (`ExceptionGroup`, `BaseExceptionGroup`, `except*` syntax with `.subgroup()`, `.split()`, `.derive()`)
 - Generators: yield, yield from, generator expressions
 - Decorators: function and class decorators
 - Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
