@@ -501,6 +501,23 @@ func (b *ClassBuilder) Exit(fn func(s *State, self Object, excType, excVal, excT
 	return b
 }
 
+// --- Async protocol ---
+
+// Await sets __await__. Called by the await expression.
+func (b *ClassBuilder) Await(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__await__", fn)
+}
+
+// AIter sets __aiter__. Called by async for to get an async iterator.
+func (b *ClassBuilder) AIter(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__aiter__", fn)
+}
+
+// ANext sets __anext__. Called by async for to get the next value.
+func (b *ClassBuilder) ANext(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__anext__", fn)
+}
+
 // Dunder adds an arbitrary dunder method.
 func (b *ClassBuilder) Dunder(name string, fn func(s *State, self Object, args ...Value) (Value, error)) *ClassBuilder {
 	b.methods[name] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
@@ -814,6 +831,18 @@ func (b *ClassBuilder) Invert(fn func(s *State, self Object) (Value, error)) *Cl
 
 // --- Attribute interception ---
 
+// GetAttribute sets __getattribute__. Called on every attribute access (before __getattr__).
+func (b *ClassBuilder) GetAttribute(fn func(s *State, self Object, name string) (Value, error)) *ClassBuilder {
+	b.methods["__getattribute__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
+		if len(args) < 1 {
+			return nil, TypeError("__getattribute__ requires a name argument")
+		}
+		name, _ := AsString(args[0])
+		return fn(s, self, name)
+	}}
+	return b
+}
+
 // GetAttr sets __getattr__. Called when normal attribute lookup fails.
 func (b *ClassBuilder) GetAttr(fn func(s *State, self Object, name string) (Value, error)) *ClassBuilder {
 	b.methods["__getattr__"] = methodDef{fn: func(s *State, self Object, args []Value, kwargs map[string]Value) (Value, error) {
@@ -961,6 +990,21 @@ func (b *ClassBuilder) Del(fn func(s *State, self Object) error) *ClassBuilder {
 	return b
 }
 
+// --- Class lifecycle ---
+
+// InitSubclass sets __init_subclass__. Called when a class is subclassed.
+// Installed as a class method. kwargs contains keyword arguments from the class statement.
+func (b *ClassBuilder) InitSubclass(fn func(s *State, cls ClassValue, kwargs map[string]Value) error) *ClassBuilder {
+	b.classMethods["__init_subclass__"] = classMethodDef{fn: func(s *State, cls ClassValue, args []Value, kwargs map[string]Value) (Value, error) {
+		err := fn(s, cls, kwargs)
+		if err != nil {
+			return nil, err
+		}
+		return None, nil
+	}}
+	return b
+}
+
 // --- Descriptor protocol ---
 
 // DescGet sets __get__ for the descriptor protocol.
@@ -1013,6 +1057,11 @@ func (b *ClassBuilder) DescDelete(fn func(s *State, self Object, instance Value)
 // Reversed sets __reversed__. Called by the reversed() builtin.
 func (b *ClassBuilder) Reversed(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
 	return b.unaryDunder("__reversed__", fn)
+}
+
+// Dir sets __dir__. Called by the dir() builtin.
+func (b *ClassBuilder) Dir(fn func(s *State, self Object) (Value, error)) *ClassBuilder {
+	return b.unaryDunder("__dir__", fn)
 }
 
 // --- Numeric rounding ---

@@ -30,7 +30,7 @@ go get github.com/ATSOTECK/rage
   - In-package runtime tests (`internal/runtime/*_test.go`) — operations, conversions, items/slicing, type primitives
   - External compile+execute tests (`test/*_test.go`) — builtins, stdlib modules
   - Compiler tests (`internal/compiler/*_test.go`)
-- **Integration tests**: 118 scripts with 2222 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, and more
+- **Integration tests**: 121 scripts with 2262 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start
@@ -210,16 +210,16 @@ The ClassBuilder supports 60+ methods covering the full Python data model:
 | Operators | `Add`, `Sub`, `Mul`, `TrueDiv`, `FloorDiv`, `Mod`, `Pow`, `MatMul`, `LShift`, `RShift`, `And`, `Or`, `Xor` (+ reflected `R*` and in-place `I*` variants) |
 | Unary | `Neg`, `Pos`, `Abs`, `Invert` |
 | Comparison | `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, `Hash` |
-| Container | `Len`, `GetItem`, `SetItem`, `DelItem`, `Contains`, `Missing`, `Bool` |
-| Iteration | `Iter`, `Next`, `Reversed` |
+| Container | `Len`, `GetItem`, `SetItem`, `DelItem`, `Contains`, `Missing`, `Bool`, `Dir` |
+| Iteration | `Iter`, `Next`, `Reversed`, `Await`, `AIter`, `ANext` |
 | String | `Str`, `Repr`, `Format` |
 | Numeric | `IntConv`, `FloatConv`, `ComplexConv`, `BytesConv`, `Index`, `Round` |
-| Attributes | `GetAttr`, `SetAttr`, `DelAttr` |
+| Attributes | `GetAttribute`, `GetAttr`, `SetAttr`, `DelAttr` |
 | Descriptors | `DescGet`, `DescSet`, `DescDelete`, `SetName` |
 | Context manager | `Enter`, `Exit` |
 | Callable | `Call`, `CallKw` |
-| Methods | `Method`, `MethodKw`, `StaticMethod`, `ClassMethod`, `Property`, `PropertyWithSetter` |
-| Class-level | `Attr`, `ClassGetItem`, `Base`, `Bases` |
+| Methods | `Method`, `MethodKw`, `StaticMethod`, `StaticMethodKw`, `ClassMethod`, `ClassMethodKw`, `Property`, `PropertyWithSetter` |
+| Class-level | `Attr`, `ClassGetItem`, `InitSubclass`, `Dunder`, `Base`, `Bases` |
 
 See the [demo](demo/README.md) for a complete example with four Go-defined classes (Vec2, Color, Inventory, GameSession).
 

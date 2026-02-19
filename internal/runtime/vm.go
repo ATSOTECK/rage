@@ -843,7 +843,8 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if vm.equal(a, b) {
+			neResult := vm.compareOp(OpCompareNe, a, b)
+			if neResult == nil || !vm.truthy(neResult) {
 				frame.IP = arg
 			}
 
