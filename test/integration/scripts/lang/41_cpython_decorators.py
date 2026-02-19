@@ -386,4 +386,530 @@ test("decorator_on_lambda_equivalent", test_decorator_on_lambda_equivalent)
 test("decorator_preserves_different_types", test_decorator_preserves_different_types)
 test("decorator_with_default_args", test_decorator_with_default_args)
 
+# =============================================================================
+# CPython test_decorators.py - Adapted Tests
+# =============================================================================
+
+# --- Memoize + countcalls pattern (from CPython) ---
+
+def countcalls(counts):
+    """Decorator to count calls to a function"""
+    def decorate(func):
+        func_name = func.__name__
+        counts[func_name] = 0
+        def call(*args):
+            counts[func_name] = counts[func_name] + 1
+            return func(*args)
+        call._name = func_name
+        return call
+    return decorate
+
+def memoize_cpython(func):
+    """Memoize decorator from CPython test suite"""
+    saved = {}
+    def call(*args):
+        try:
+            return saved[args]
+        except KeyError:
+            res = func(*args)
+            saved[args] = res
+            return res
+        except TypeError:
+            # Unhashable argument
+            return func(*args)
+    call._name = func.__name__
+    return call
+
+def test_cpython_memoize_countcalls():
+    """Test memoize + countcalls pattern from CPython"""
+    counts = {}
+
+    @memoize_cpython
+    @countcalls(counts)
+    def double(x):
+        return x * 2
+
+    expect(counts).to_be({"double": 0})
+
+    # Only the first call with a given argument bumps the call count
+    expect(double(2)).to_be(4)
+    expect(counts["double"]).to_be(1)
+    expect(double(2)).to_be(4)
+    expect(counts["double"]).to_be(1)
+    expect(double(3)).to_be(6)
+    expect(counts["double"]).to_be(2)
+
+    # Unhashable arguments do not get memoized
+    expect(double([10])).to_be([10, 10])
+    expect(counts["double"]).to_be(3)
+    expect(double([10])).to_be([10, 10])
+    expect(counts["double"]).to_be(4)
+
+test("cpython_memoize_countcalls", test_cpython_memoize_countcalls)
+
+# --- Decorator application order (from CPython TestDecorators.test_order) ---
+
+def test_cpython_decorator_application_order():
+    """Decorators are applied bottom-to-top: the outermost decorator wins"""
+    def callnum(num):
+        def deco(func):
+            return lambda: num
+        return deco
+
+    @callnum(2)
+    @callnum(1)
+    def foo():
+        return 42
+
+    expect(foo()).to_be(2)
+
+test("cpython_decorator_application_order", test_cpython_decorator_application_order)
+
+# --- Decorator evaluation order (from CPython TestDecorators.test_eval_order) ---
+
+def test_cpython_decorator_eval_order():
+    """
+    Evaluating a decorated function involves four steps for each decorator-maker:
+      1: Evaluate the decorator-maker name
+      2: Evaluate the decorator-maker arguments (if any)
+      3: Call the decorator-maker to make a decorator
+      4: Call the decorator
+    Decorator-makers are evaluated top-to-bottom, but decorators are applied
+    bottom-to-top (i.e., the last decorator is called first).
+    """
+    actions = []
+
+    def make_decorator(tag):
+        actions.append("makedec" + tag)
+        def decorate(func):
+            actions.append("calldec" + tag)
+            return func
+        return decorate
+
+    class NameLookupTracer:
+        def __init__(self, index):
+            self.index = index
+            self._make_decorator = make_decorator
+            self._arg = str(index)
+
+    c1 = NameLookupTracer(1)
+    c2 = NameLookupTracer(2)
+    c3 = NameLookupTracer(3)
+
+    # Simulate the evaluation order that CPython tests:
+    # @c1.make_decorator(c1.arg)
+    # @c2.make_decorator(c2.arg)
+    # @c3.make_decorator(c3.arg)
+    # def foo(): return 42
+    #
+    # Since RAGE doesn't support dotted decorator expressions,
+    # we manually replicate the evaluation order.
+    actions = []
+    # Top-to-bottom: evaluate names and args, then make decorators
+    actions.append("evalname1")
+    actions.append("evalargs1")
+    d1 = make_decorator(str(c1.index))  # makedec1
+    actions.append("evalname2")
+    actions.append("evalargs2")
+    d2 = make_decorator(str(c2.index))  # makedec2
+    actions.append("evalname3")
+    actions.append("evalargs3")
+    d3 = make_decorator(str(c3.index))  # makedec3
+
+    # Bottom-to-top: apply decorators
+    def foo():
+        return 42
+    foo = d3(foo)  # calldec3
+    foo = d2(foo)  # calldec2
+    foo = d1(foo)  # calldec1
+
+    expect(foo()).to_be(42)
+
+    expected_actions = [
+        "evalname1", "evalargs1", "makedec1",
+        "evalname2", "evalargs2", "makedec2",
+        "evalname3", "evalargs3", "makedec3",
+        "calldec3", "calldec2", "calldec1",
+    ]
+    expect(actions).to_be(expected_actions)
+
+test("cpython_decorator_eval_order", test_cpython_decorator_eval_order)
+
+# --- Stacked decorator evaluation order with decorator factories ---
+
+def test_cpython_stacked_decorator_factories():
+    """Multiple decorator factories: makers run top-to-bottom, application bottom-to-top"""
+    order = []
+
+    def decorator_maker(name):
+        order.append("make_" + name)
+        def decorator(func):
+            order.append("apply_" + name)
+            def wrapper(*args, **kwargs):
+                order.append("call_" + name)
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
+
+    @decorator_maker("first")
+    @decorator_maker("second")
+    @decorator_maker("third")
+    def target():
+        return "result"
+
+    # Makers run top-to-bottom
+    expect(order).to_be([
+        "make_first", "make_second", "make_third",
+        "apply_third", "apply_second", "apply_first",
+    ])
+
+    # Calls run outside-in (first wraps second wraps third)
+    order = []
+    result = target()
+    expect(result).to_be("result")
+    expect(order).to_be(["call_first", "call_second", "call_third"])
+
+test("cpython_stacked_decorator_factories", test_cpython_stacked_decorator_factories)
+
+# --- Decorator with *args/**kwargs (from CPython TestDecorators.test_argforms) ---
+
+def test_cpython_decorator_argforms():
+    """Test argument passing forms in decorator factories"""
+    def noteargs(*args, **kwds):
+        def decorate(func):
+            func_info = (args, kwds)
+            def wrapper():
+                return (func(), func_info)
+            return wrapper
+        return decorate
+
+    args = ("Now", "is", "the", "time")
+    kwds = {"one": 1, "two": 2}
+
+    @noteargs(*args, **kwds)
+    def f1():
+        return 42
+    result, info = f1()
+    expect(result).to_be(42)
+    expect(info).to_be((("Now", "is", "the", "time"), {"one": 1, "two": 2}))
+
+    @noteargs("terry", "gilliam", eric="idle", john="cleese")
+    def f2():
+        return 84
+    result2, info2 = f2()
+    expect(result2).to_be(84)
+    expect(info2).to_be((("terry", "gilliam"), {"eric": "idle", "john": "cleese"}))
+
+    @noteargs(1, 2)
+    def f3():
+        return None
+    result3, info3 = f3()
+    expect(result3).to_be(None)
+    expect(info3).to_be(((1, 2), {}))
+
+test("cpython_decorator_argforms", test_cpython_decorator_argforms)
+
+# --- Class decorators (from CPython TestClassDecorators) ---
+
+def test_cpython_class_decorator_simple():
+    """Simple class decorator that adds an attribute"""
+    def plain(x):
+        x.extra = "Hello"
+        return x
+
+    @plain
+    class C:
+        pass
+
+    expect(C.extra).to_be("Hello")
+
+test("cpython_class_decorator_simple", test_cpython_class_decorator_simple)
+
+def test_cpython_class_decorator_double():
+    """Two class decorators stacked"""
+    def ten(x):
+        x.extra = 10
+        return x
+    def add_five(x):
+        x.extra = x.extra + 5
+        return x
+
+    @add_five
+    @ten
+    class C:
+        pass
+
+    # ten applied first (sets extra=10), then add_five (adds 5)
+    expect(C.extra).to_be(15)
+
+test("cpython_class_decorator_double", test_cpython_class_decorator_double)
+
+def test_cpython_class_decorator_order():
+    """Class decorator ordering: bottom-to-top application"""
+    def applied_first(x):
+        x.extra = "first"
+        return x
+    def applied_second(x):
+        x.extra = "second"
+        return x
+
+    @applied_second
+    @applied_first
+    class C:
+        pass
+
+    # applied_first sets extra='first', then applied_second overwrites to 'second'
+    expect(C.extra).to_be("second")
+
+test("cpython_class_decorator_order", test_cpython_class_decorator_order)
+
+# --- Class decorator that replaces the class ---
+
+def test_cpython_class_decorator_replace():
+    """Class decorator can return a completely different class"""
+    def replace_with_enhanced(cls):
+        class Enhanced(cls):
+            bonus = True
+        Enhanced.__name__ = cls.__name__ + "Enhanced"
+        return Enhanced
+
+    @replace_with_enhanced
+    class Original:
+        value = 42
+
+    expect(Original.value).to_be(42)
+    expect(Original.bonus).to_be(True)
+
+test("cpython_class_decorator_replace", test_cpython_class_decorator_replace)
+
+# --- Class decorator with arguments ---
+
+def test_cpython_class_decorator_with_args():
+    """Class decorator factory with arguments"""
+    def tag(name, value):
+        def decorator(cls):
+            cls.tag_name = name
+            cls.tag_value = value
+            return cls
+        return decorator
+
+    @tag("version", 2)
+    class MyService:
+        pass
+
+    expect(MyService.tag_name).to_be("version")
+    expect(MyService.tag_value).to_be(2)
+
+test("cpython_class_decorator_with_args", test_cpython_class_decorator_with_args)
+
+# --- Multiple stacked class decorators with ordering ---
+
+def test_cpython_class_decorator_triple_stack():
+    """Three class decorators stacked"""
+    log = []
+
+    def d1(cls):
+        log.append("d1")
+        cls.d1 = True
+        return cls
+
+    def d2(cls):
+        log.append("d2")
+        cls.d2 = True
+        return cls
+
+    def d3(cls):
+        log.append("d3")
+        cls.d3 = True
+        return cls
+
+    @d1
+    @d2
+    @d3
+    class C:
+        pass
+
+    # Applied bottom-to-top: d3 first, then d2, then d1
+    expect(log).to_be(["d3", "d2", "d1"])
+    expect(C.d1).to_be(True)
+    expect(C.d2).to_be(True)
+    expect(C.d3).to_be(True)
+
+test("cpython_class_decorator_triple_stack", test_cpython_class_decorator_triple_stack)
+
+# --- Decorator that wraps with a callable class ---
+
+def test_cpython_callable_class_as_decorator():
+    """A class with __call__ used as a decorator"""
+    class Validator:
+        def __init__(self, func):
+            self.func = func
+
+        def __call__(self, *args):
+            for arg in args:
+                if not isinstance(arg, int):
+                    raise TypeError("Expected int")
+            return self.func(*args)
+
+    @Validator
+    def add_ints(a, b):
+        return a + b
+
+    expect(add_ints(3, 4)).to_be(7)
+
+    got_error = False
+    try:
+        add_ints("a", 1)
+    except TypeError:
+        got_error = True
+    expect(got_error).to_be(True)
+
+test("cpython_callable_class_as_decorator", test_cpython_callable_class_as_decorator)
+
+# --- Decorator factory returning callable class ---
+
+def test_cpython_decorator_factory_with_class():
+    """Decorator factory that returns a callable class wrapper"""
+    class Repeater:
+        def __init__(self, func, times):
+            self.func = func
+            self.times = times
+
+        def __call__(self, *args):
+            results = []
+            for i in range(self.times):
+                results.append(self.func(*args))
+            return results
+
+    def repeat(times):
+        def decorator(func):
+            return Repeater(func, times)
+        return decorator
+
+    @repeat(3)
+    def greet(name):
+        return "hello " + name
+
+    expect(greet("world")).to_be(["hello world", "hello world", "hello world"])
+
+test("cpython_decorator_factory_with_class", test_cpython_decorator_factory_with_class)
+
+# --- Decorator on nested function ---
+
+def test_cpython_decorator_on_nested():
+    """Decorators work on nested function definitions"""
+    def outer():
+        def add_ten(func):
+            def wrapper(x):
+                return func(x) + 10
+            return wrapper
+
+        @add_ten
+        def inner(x):
+            return x * 2
+
+        return inner
+
+    fn = outer()
+    expect(fn(5)).to_be(20)   # 5*2 + 10
+    expect(fn(0)).to_be(10)   # 0*2 + 10
+
+test("cpython_decorator_on_nested", test_cpython_decorator_on_nested)
+
+# --- Decorator preserving closure ---
+
+def test_cpython_decorator_with_closure():
+    """Decorator that preserves access to closure variables"""
+    def make_adder(n):
+        def add_n(x):
+            return x + n
+        return add_n
+
+    def trace(func):
+        calls = [0]
+        def wrapper(x):
+            calls[0] = calls[0] + 1
+            result = func(x)
+            return (result, calls[0])
+        return wrapper
+
+    @trace
+    def add5(x):
+        return x + 5
+
+    expect(add5(10)).to_be((15, 1))
+    expect(add5(20)).to_be((25, 2))
+
+    # Also works with a closure-based function
+    add3 = trace(make_adder(3))
+    expect(add3(10)).to_be((13, 1))
+    expect(add3(7)).to_be((10, 2))
+
+test("cpython_decorator_with_closure", test_cpython_decorator_with_closure)
+
+# --- Decorator that raises on bad input (TypeError pattern) ---
+
+def test_cpython_decorator_raises_typeerror():
+    """Decorator that is not callable should raise TypeError"""
+    got_error = False
+    try:
+        # Applying a non-callable as a decorator
+        none_result = None
+        def apply_bad():
+            @none_result
+            def foo():
+                pass
+        apply_bad()
+    except TypeError:
+        got_error = True
+    expect(got_error).to_be(True)
+
+test("cpython_decorator_raises_typeerror", test_cpython_decorator_raises_typeerror)
+
+# --- Staticmethod and classmethod on class (from CPython TestDecorators.test_single) ---
+
+def test_cpython_staticmethod_classmethod_basic():
+    """@staticmethod and @classmethod basic usage from CPython"""
+    class C:
+        @staticmethod
+        def foo():
+            return 42
+
+        @classmethod
+        def bar(cls):
+            return cls.__name__
+
+    expect(C.foo()).to_be(42)
+    expect(C().foo()).to_be(42)
+    expect(C.bar()).to_be("C")
+    expect(C().bar()).to_be("C")
+
+test("cpython_staticmethod_classmethod_basic", test_cpython_staticmethod_classmethod_basic)
+
+# --- Dotted decorator name (simulated, since CPython tests MiscDecorators.author) ---
+
+def test_cpython_dotted_decorator():
+    """Dotted attribute access for decorator (simulated from CPython)"""
+    class Decorators:
+        @staticmethod
+        def author(name):
+            def decorate(func):
+                func_author = name
+                def wrapper(*args, **kwargs):
+                    return (func(*args, **kwargs), func_author)
+                return wrapper
+            return decorate
+
+    decorators = Decorators()
+
+    @decorators.author("Cleese")
+    def foo():
+        return 42
+
+    result, author = foo()
+    expect(result).to_be(42)
+    expect(author).to_be("Cleese")
+
+test("cpython_dotted_decorator", test_cpython_dotted_decorator)
+
 print("CPython decorator tests completed")

@@ -258,6 +258,13 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return o.Args, nil
 			}
 			return &PyTuple{Items: []Value{}}, nil
+		case "__class__":
+			if o.ExcType != nil {
+				return o.ExcType, nil
+			}
+			return None, nil
+		case "__name__":
+			return &PyString{Value: o.Type()}, nil
 		case "__cause__":
 			if o.Cause != nil {
 				return o.Cause, nil
@@ -268,6 +275,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return o.Context, nil
 			}
 			return None, nil
+		case "__suppress_context__":
+			if o.SuppressContext {
+				return True, nil
+			}
+			return False, nil
 		case "__traceback__":
 			return None, nil
 		case "__notes__":
@@ -2878,6 +2890,29 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	case *PyClass:
 		o.Dict[name] = val
 		return nil
+	case *PyException:
+		switch name {
+		case "__cause__":
+			if val == None || val == nil {
+				o.Cause = nil
+			} else {
+				o.Cause = vm.createException(val, nil)
+			}
+			// Setting __cause__ always sets __suppress_context__ = True (CPython behavior)
+			o.SuppressContext = true
+			return nil
+		case "__context__":
+			if val == None || val == nil {
+				o.Context = nil
+			} else {
+				o.Context = vm.createException(val, nil)
+			}
+			return nil
+		case "__suppress_context__":
+			o.SuppressContext = vm.truthy(val)
+			return nil
+		}
+		return fmt.Errorf("'%s' object attribute '%s' is read-only", o.Type(), name)
 	}
 	return fmt.Errorf("'%s' object attribute '%s' is read-only", vm.typeName(obj), name)
 }

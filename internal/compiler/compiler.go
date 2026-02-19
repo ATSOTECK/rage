@@ -1472,6 +1472,9 @@ func (c *Compiler) compileTry(s *model.Try) {
 					c.compileStore(handler.Name)
 				}
 
+				// Mark end of except handler (pops excHandlerStack)
+				c.emit(runtime.OpPopExceptHandler)
+
 				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 				c.patchJump(nextHandler, c.currentOffset())
 			} else {
@@ -1481,6 +1484,8 @@ func (c *Compiler) compileTry(s *model.Try) {
 				for _, stmt := range handler.Body {
 					c.compileStmt(stmt)
 				}
+				// Mark end of except handler (pops excHandlerStack)
+				c.emit(runtime.OpPopExceptHandler)
 				handlerEnds = append(handlerEnds, c.emitJump(runtime.OpJump))
 			}
 		}

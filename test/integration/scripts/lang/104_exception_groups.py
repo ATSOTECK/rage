@@ -242,3 +242,237 @@ def test_add_note_type_check():
         got_error = True
     expect(got_error).to_be(True)
 test("add_note requires string argument", test_add_note_type_check)
+
+# ============================================================================
+# Additional except* and ExceptionGroup tests
+# Adapted from CPython's Lib/test/test_except_star.py
+# ============================================================================
+
+# Test 26: except* catches all of one type from group
+def test_except_star_catch_all_of_type():
+    """except* catches all exceptions of a given type."""
+    caught_vals = []
+    try:
+        raise ExceptionGroup("eg", [ValueError("v1"), ValueError("v2"), ValueError("v3")])
+    except* ValueError as eg:
+        for exc in eg.exceptions:
+            caught_vals.append(str(exc))
+    expect(len(caught_vals)).to_be(3)
+    expect("v1" in caught_vals).to_be(True)
+    expect("v2" in caught_vals).to_be(True)
+    expect("v3" in caught_vals).to_be(True)
+
+test("except* catches all of one type", test_except_star_catch_all_of_type)
+
+# Test 27: except* with tuple of types
+def test_except_star_tuple_types():
+    """except* with tuple of exception types."""
+    caught = False
+    try:
+        raise ExceptionGroup("eg", [ValueError("v"), TypeError("t")])
+    except* (ValueError, TypeError) as eg:
+        caught = True
+        expect(len(eg.exceptions)).to_be(2)
+    expect(caught).to_be(True)
+
+test("except* with tuple of types", test_except_star_tuple_types)
+
+# Test 28: except* partial catch leaves remainder
+def test_except_star_partial_catch_detail():
+    """except* partial match: matched are caught, rest re-raised."""
+    caught_value = False
+    caught_type = False
+    try:
+        try:
+            raise ExceptionGroup("eg", [ValueError("v"), TypeError("t"), OSError("o")])
+        except* ValueError:
+            caught_value = True
+        except* TypeError:
+            caught_type = True
+    except* OSError:
+        pass  # Catch the remaining OSError
+    expect(caught_value).to_be(True)
+    expect(caught_type).to_be(True)
+
+test("except* partial catch detail", test_except_star_partial_catch_detail)
+
+# Test 29: except* with mixed types in same group
+def test_except_star_mixed_types():
+    """except* with multiple types in one group, caught by separate clauses."""
+    caught_v = False
+    caught_t = False
+    caught_o = False
+    try:
+        raise ExceptionGroup("eg", [ValueError("v"), TypeError("t"), OSError("o")])
+    except* ValueError:
+        caught_v = True
+    except* TypeError:
+        caught_t = True
+    except* OSError:
+        caught_o = True
+    expect(caught_v).to_be(True)
+    expect(caught_t).to_be(True)
+    expect(caught_o).to_be(True)
+
+test("except* mixed types in group", test_except_star_mixed_types)
+
+# Test 30: except* matching Exception catches all in ExceptionGroup
+def test_except_star_match_exception():
+    """except* Exception matches all exceptions in group."""
+    caught = False
+    try:
+        raise ExceptionGroup("eg", [ValueError("v"), TypeError("t")])
+    except* Exception as eg:
+        caught = True
+        expect(len(eg.exceptions)).to_be(2)
+    expect(caught).to_be(True)
+
+test("except* Exception matches all", test_except_star_match_exception)
+
+# Test 31: except* does not catch non-matching types
+def test_except_star_no_match():
+    """except* does not catch types that are not in the group."""
+    outer_caught = False
+    try:
+        try:
+            raise ExceptionGroup("eg", [ValueError("v")])
+        except* TypeError:
+            pass  # This should not catch ValueError
+    except Exception:
+        outer_caught = True
+    expect(outer_caught).to_be(True)
+
+test("except* no match does not catch", test_except_star_no_match)
+
+# Test 32: except* with single non-group exception
+def test_except_star_plain_exception():
+    """except* can catch plain (non-group) exceptions too."""
+    caught = False
+    try:
+        raise TypeError("plain")
+    except* TypeError:
+        caught = True
+    expect(caught).to_be(True)
+
+test("except* catches plain exception", test_except_star_plain_exception)
+
+# Test 33: except* multiple clauses with ordering
+def test_except_star_clause_ordering():
+    """Multiple except* clauses process independently."""
+    order = []
+    try:
+        raise ExceptionGroup("eg", [ValueError("v"), TypeError("t"), OSError("o")])
+    except* ValueError:
+        order.append("V")
+    except* TypeError:
+        order.append("T")
+    except* OSError:
+        order.append("O")
+    expect(order).to_be(["V", "T", "O"])
+
+test("except* clause ordering", test_except_star_clause_ordering)
+
+# Test 34: except* with finally always runs
+def test_except_star_finally_always_runs():
+    """finally block runs regardless of except* matching."""
+    finally_ran = False
+    try:
+        try:
+            raise ExceptionGroup("eg", [ValueError("v")])
+        except* TypeError:
+            pass  # Won't match
+        finally:
+            finally_ran = True
+    except Exception:
+        pass  # Catch the re-raised ValueError
+    expect(finally_ran).to_be(True)
+
+test("except* finally always runs", test_except_star_finally_always_runs)
+
+# Test 35: except* re-raise in handler
+def test_except_star_reraise():
+    """Raise inside except* handler propagates."""
+    caught_outer = False
+    try:
+        try:
+            raise ExceptionGroup("eg", [ValueError("v")])
+        except* ValueError:
+            raise RuntimeError("handler error")
+    except RuntimeError as e:
+        caught_outer = True
+        expect(str(e)).to_be("handler error")
+    expect(caught_outer).to_be(True)
+
+test("except* re-raise in handler", test_except_star_reraise)
+
+# Test 36: ExceptionGroup subgroup with tuple of types
+def test_subgroup_tuple_types():
+    """subgroup() with a tuple of types."""
+    eg = ExceptionGroup("eg", [ValueError("v"), TypeError("t"), OSError("o")])
+    sub = eg.subgroup((ValueError, TypeError))
+    expect(sub is not None).to_be(True)
+    expect(len(sub.exceptions)).to_be(2)
+
+test("subgroup with tuple of types", test_subgroup_tuple_types)
+
+# Test 37: ExceptionGroup split with tuple of types
+def test_split_tuple_types():
+    """split() with a tuple of types."""
+    eg = ExceptionGroup("eg", [ValueError("v"), TypeError("t"), OSError("o")])
+    matched, rest = eg.split((ValueError, TypeError))
+    expect(matched is not None).to_be(True)
+    expect(rest is not None).to_be(True)
+    expect(len(matched.exceptions)).to_be(2)
+    expect(len(rest.exceptions)).to_be(1)
+
+test("split with tuple of types", test_split_tuple_types)
+
+# Test 38: Nested except* blocks
+def test_nested_except_star():
+    """Nested except* blocks work correctly."""
+    inner_caught = False
+    outer_caught = False
+    try:
+        raise ExceptionGroup("outer", [ValueError("v")])
+    except* ValueError:
+        outer_caught = True
+        try:
+            raise ExceptionGroup("inner", [TypeError("t")])
+        except* TypeError:
+            inner_caught = True
+    expect(outer_caught).to_be(True)
+    expect(inner_caught).to_be(True)
+
+test("nested except* blocks", test_nested_except_star)
+
+# Test 39: except* with subclass matching
+def test_except_star_subclass():
+    """except* matches exception subclasses."""
+    caught = False
+    try:
+        raise ExceptionGroup("eg", [FileNotFoundError("fnf")])
+    except* OSError as eg:
+        caught = True
+        # FileNotFoundError is a subclass of OSError
+        expect(len(eg.exceptions)).to_be(1)
+    expect(caught).to_be(True)
+
+test("except* matches subclasses", test_except_star_subclass)
+
+# Test 40: except* with mixed subclass and non-subclass
+def test_except_star_mixed_subclass():
+    """except* with mixed subclass matching."""
+    caught_os = False
+    caught_val = False
+    try:
+        raise ExceptionGroup("eg", [FileNotFoundError("fnf"), ValueError("v"), PermissionError("pe")])
+    except* OSError as eg:
+        caught_os = True
+        # FileNotFoundError and PermissionError are both OSError subclasses
+        expect(len(eg.exceptions)).to_be(2)
+    except* ValueError:
+        caught_val = True
+    expect(caught_os).to_be(True)
+    expect(caught_val).to_be(True)
+
+test("except* mixed subclass matching", test_except_star_mixed_subclass)

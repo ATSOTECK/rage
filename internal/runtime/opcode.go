@@ -128,13 +128,14 @@ const (
 	OpImportStar // Import * from module
 
 	// Exception handling
-	OpSetupExcept    // Setup exception handler (arg: handler offset)
-	OpSetupFinally   // Setup finally handler (arg: handler offset)
-	OpPopExcept      // Pop exception handler from block stack
-	OpEndFinally     // End finally block
-	OpRaiseVarargs   // Raise exception (arg: count 0-3)
-	OpExceptionMatch // Check if exception matches type for except clause
-	OpClearException // Clear current exception state (for handler entry)
+	OpSetupExcept       // Setup exception handler (arg: handler offset)
+	OpSetupFinally      // Setup finally handler (arg: handler offset)
+	OpPopExcept         // Pop exception handler from block stack
+	OpEndFinally        // End finally block
+	OpRaiseVarargs      // Raise exception (arg: count 0-3)
+	OpExceptionMatch    // Check if exception matches type for except clause
+	OpClearException    // Clear current exception state (for handler entry)
+	OpPopExceptHandler  // Pop excHandlerStack entry (end of handler body)
 
 	// Exception groups (except*)
 	OpSetupExceptStar  // Setup except* handler (arg: handler offset)
@@ -356,6 +357,7 @@ var OpcodeNames = map[Opcode]string{
 	OpEndFinally:       "END_FINALLY",
 	OpRaiseVarargs:     "RAISE_VARARGS",
 	OpExceptionMatch:   "EXCEPTION_MATCH",
+	OpPopExceptHandler: "POP_EXCEPT_HANDLER",
 	OpClearException:    "CLEAR_EXCEPTION",
 	OpSetupExceptStar:  "SETUP_EXCEPT_STAR",
 	OpExceptStarMatch:  "EXCEPT_STAR_MATCH",
@@ -472,7 +474,7 @@ func init() {
 		OpCompareIn, OpCompareNotIn,
 		OpBinarySubscr, OpStoreSubscr, OpDeleteSubscr,
 		OpGetIter, OpReturn,
-		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException,
+		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException, OpPopExceptHandler,
 		OpExceptStarMatch, OpExceptStarReraise,
 		OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,

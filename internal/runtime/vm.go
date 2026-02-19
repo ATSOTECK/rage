@@ -20,8 +20,9 @@ type VM struct {
 	checkInterval int64 // Check context every N instructions
 
 	// Exception handling state
-	currentException *PyException // Currently active exception being handled
-	lastException    *PyException // Last raised exception (for bare raise)
+	currentException *PyException   // Currently active exception being handled
+	lastException    *PyException   // Last raised exception (for bare raise)
+	excHandlerStack  []*PyException // Stack of exceptions being handled (for __context__)
 
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
@@ -164,6 +165,13 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 		pyExc = pe
 	} else {
 		pyExc = vm.wrapGoError(err)
+	}
+	// Set implicit __context__ from the exception handler stack
+	if len(vm.excHandlerStack) > 0 {
+		handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+		if pyExc != handledException {
+			pyExc.Context = handledException
+		}
 	}
 	_, handleErr := vm.handleException(pyExc)
 	if handleErr != nil {
@@ -2171,9 +2179,10 @@ func (vm *VM) run() (Value, error) {
 		case OpSetupExcept:
 			// Push exception handler block onto block stack
 			block := Block{
-				Type:    BlockExcept,
-				Handler: arg,
-				Level:   frame.SP,
+				Type:          BlockExcept,
+				Handler:       arg,
+				Level:         frame.SP,
+				ExcStackLevel: len(vm.excHandlerStack),
 			}
 			frame.BlockStack = append(frame.BlockStack, block)
 
@@ -2187,15 +2196,26 @@ func (vm *VM) run() (Value, error) {
 			frame.BlockStack = append(frame.BlockStack, block)
 
 		case OpPopExcept:
-			// Pop exception handler from block stack (try block completed normally)
+			// No-exception path: pop BlockExcept from block stack
 			if len(frame.BlockStack) > 0 {
 				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 			}
 			vm.currentException = nil
 
+		case OpPopExceptHandler:
+			// End of except handler body: pop excHandlerStack entry
+			vm.currentException = nil
+			if len(vm.excHandlerStack) > 0 {
+				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			}
+
 		case OpClearException:
 			// Clear the current exception state (when handler catches exception)
 			// Does NOT pop the block stack (block was already popped by handleException)
+			// Push onto handler stack so new exceptions in this handler get __context__
+			if vm.currentException != nil {
+				vm.excHandlerStack = append(vm.excHandlerStack, vm.currentException)
+			}
 			vm.currentException = nil
 
 		case OpSetupExceptStar:
@@ -2323,6 +2343,10 @@ func (vm *VM) run() (Value, error) {
 
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
+			// Pop the handler stack entry that was pushed when entering finally
+			if len(vm.excHandlerStack) > 0 {
+				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err
 			}
@@ -2345,8 +2369,10 @@ func (vm *VM) run() (Value, error) {
 		case OpRaiseVarargs:
 			var exc *PyException
 			if arg == 0 {
-				// Bare raise - re-raise current/last exception
-				if vm.lastException != nil {
+				// Bare raise - re-raise the exception from the current handler
+				if len(vm.excHandlerStack) > 0 {
+					exc = vm.excHandlerStack[len(vm.excHandlerStack)-1]
+				} else if vm.lastException != nil {
 					exc = vm.lastException
 				} else {
 					return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
@@ -2360,6 +2386,16 @@ func (vm *VM) run() (Value, error) {
 				cause := vm.pop()
 				excVal := vm.pop()
 				exc = vm.createException(excVal, cause)
+			}
+
+			// Set implicit __context__ from the exception handler stack.
+			// When we're inside an except block, the handled exception is on
+			// the excHandlerStack. Bare raise re-raises, so skip for arg==0.
+			if arg != 0 && len(vm.excHandlerStack) > 0 {
+				handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+				if exc != handledException {
+					exc.Context = handledException
+				}
 			}
 
 			// Build traceback

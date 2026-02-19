@@ -813,15 +813,16 @@ func (s *PySuper) String() string { return "<super object>" }
 
 // PyException represents a Python exception
 type PyException struct {
-	ExcType   *PyClass         // Exception class (e.g., ValueError, TypeError)
-	TypeName  string           // Exception type name (used when ExcType is nil)
-	Args      *PyTuple         // Exception arguments
-	Message   string           // String representation
-	Cause     *PyException     // __cause__ for chained exceptions (raise X from Y)
-	Context   *PyException     // __context__ for implicit chaining
-	Traceback []TracebackEntry // Traceback frames
-	Instance  *PyInstance      // non-nil for ExceptionGroup instances
-	Notes     *PyList          // __notes__ list (nil until add_note is called)
+	ExcType        *PyClass         // Exception class (e.g., ValueError, TypeError)
+	TypeName       string           // Exception type name (used when ExcType is nil)
+	Args           *PyTuple         // Exception arguments
+	Message        string           // String representation
+	Cause          *PyException     // __cause__ for chained exceptions (raise X from Y)
+	Context        *PyException     // __context__ for implicit chaining
+	SuppressContext bool            // __suppress_context__ - set True when __cause__ is assigned
+	Traceback      []TracebackEntry // Traceback frames
+	Instance       *PyInstance      // non-nil for ExceptionGroup instances
+	Notes          *PyList          // __notes__ list (nil until add_note is called)
 }
 
 // exceptStarState tracks the remaining unmatched exceptions during except* handling
@@ -952,9 +953,10 @@ type Frame struct {
 
 // Block represents a control flow block
 type Block struct {
-	Type    BlockType
-	Handler int // Handler address
-	Level   int // Stack level
+	Type          BlockType
+	Handler       int // Handler address
+	Level         int // Stack level
+	ExcStackLevel int // excHandlerStack level at block setup time
 }
 
 // BlockType identifies the type of block

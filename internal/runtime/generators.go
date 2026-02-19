@@ -1470,7 +1470,16 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		vm.currentException = nil
 
+	case OpPopExceptHandler:
+		vm.currentException = nil
+		if len(vm.excHandlerStack) > 0 {
+			vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+		}
+
 	case OpClearException:
+		if vm.currentException != nil {
+			vm.excHandlerStack = append(vm.excHandlerStack, vm.currentException)
+		}
 		vm.currentException = nil
 
 	case OpSetupWith:
@@ -1552,8 +1561,10 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpRaiseVarargs:
 		var exc *PyException
 		if arg == 0 {
-			// Bare raise - re-raise current exception
-			if vm.lastException != nil {
+			// Bare raise - re-raise the exception from the current handler
+			if len(vm.excHandlerStack) > 0 {
+				exc = vm.excHandlerStack[len(vm.excHandlerStack)-1]
+			} else if vm.lastException != nil {
 				exc = vm.lastException
 			} else {
 				return nil, fmt.Errorf("RuntimeError: No active exception to re-raise")
@@ -1563,10 +1574,17 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			excVal := vm.pop()
 			exc = vm.createException(excVal, nil)
 		} else {
-			// raise exc from cause (ignore cause for now)
+			// raise exc from cause
 			cause := vm.pop()
 			excVal := vm.pop()
 			exc = vm.createException(excVal, cause)
+		}
+		// Set implicit __context__ from the exception handler stack
+		if arg != 0 && len(vm.excHandlerStack) > 0 {
+			handledException := vm.excHandlerStack[len(vm.excHandlerStack)-1]
+			if exc != handledException {
+				exc.Context = handledException
+			}
 		}
 		exc.Traceback = vm.buildTraceback()
 		_, err := vm.handleException(exc)
