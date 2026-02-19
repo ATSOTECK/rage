@@ -564,8 +564,8 @@ test("walrus in if and", test_walrus_in_if_and)
 def test_walrus_in_if_comparison():
     """Walrus operator in if with comparison"""
     result = None
-    if (match := 10) == 10:
-        result = match
+    if (m := 10) == 10:
+        result = m
     expect(result).to_be(10)
 
 test("walrus in if comparison", test_walrus_in_if_comparison)

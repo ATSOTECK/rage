@@ -717,9 +717,11 @@ type PyFunction struct {
 	Code       *CodeObject
 	Globals    map[string]Value
 	Defaults   *PyTuple
+	KwDefaults map[string]Value // Keyword-only argument defaults
 	Closure    []*PyCell
 	Name       string
-	IsAbstract bool // Set by @abstractmethod decorator
+	IsAbstract bool             // Set by @abstractmethod decorator
+	Dict       map[string]Value // Custom attributes (e.g. func._name)
 }
 
 func (f *PyFunction) Type() string   { return "function" }
@@ -1038,8 +1040,9 @@ func (s *PySlice) String() string {
 
 // PyIterator wraps an iterator
 type PyIterator struct {
-	Items []Value
-	Index int
+	Items  []Value
+	Index  int
+	Source *PyList // Optional: if set, Items is dynamically read from Source.Items (for live mutation visibility)
 }
 
 func (i *PyIterator) Type() string   { return "iterator" }
@@ -1062,6 +1065,15 @@ type PyGenerator struct {
 	Name       string         // Generator function name
 	State      GeneratorState // Current state
 	YieldValue Value          // Value to send into generator on resume
+
+	// Saved VM exception state (isolated per-generator)
+	SavedCurrentException    *PyException
+	SavedLastException       *PyException
+	SavedExcHandlerStack     []*PyException
+	SavedPendingReturn       Value
+	SavedHasPendingReturn    bool
+	SavedPendingJump         int
+	SavedHasPendingJump      bool
 }
 
 func (g *PyGenerator) Type() string   { return "generator" }

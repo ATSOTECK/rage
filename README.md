@@ -30,7 +30,7 @@ go get github.com/ATSOTECK/rage
   - In-package runtime tests (`internal/runtime/*_test.go`) — operations, conversions, items/slicing, type primitives
   - External compile+execute tests (`test/*_test.go`) — builtins, stdlib modules
   - Compiler tests (`internal/compiler/*_test.go`)
-- **Integration tests**: 124 scripts with 2358 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, exception chaining, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, super(), and more
+- **Integration tests**: 128 scripts with 2867 tests covering data types, operators, control flow, functions, classes, exceptions, exception groups, exception chaining, generators, comprehensions, closures, decorators, imports, context managers, metaclasses, descriptors, string formatting, dataclasses, copy module, super(), and more
   - Run with `go run test/integration/integration_test_runner.go`
 
 ## Quick Start

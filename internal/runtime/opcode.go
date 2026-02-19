@@ -85,11 +85,12 @@ const (
 	OpJumpIfFalseOrPop // Jump if false, else pop (arg: offset)
 
 	// Control flow
-	OpJump           // Unconditional jump (arg: offset)
-	OpJumpIfTrue     // Jump if top is true (arg: offset)
-	OpJumpIfFalse    // Jump if top is false (arg: offset)
-	OpPopJumpIfTrue  // Pop and jump if true (arg: offset)
-	OpPopJumpIfFalse // Pop and jump if false (arg: offset)
+	OpJump             // Unconditional jump (arg: offset)
+	OpJumpIfTrue       // Jump if top is true (arg: offset)
+	OpJumpIfFalse      // Jump if top is false (arg: offset)
+	OpPopJumpIfTrue    // Pop and jump if true (arg: offset)
+	OpPopJumpIfFalse   // Pop and jump if false (arg: offset)
+	OpContinueLoop     // Continue through finally blocks (arg: loop target offset)
 
 	// Iteration
 	OpGetIter // Get iterator from iterable
@@ -99,6 +100,7 @@ const (
 	OpMakeFunction // Create function object (arg: flags)
 	OpCall         // Call function (arg: arg count)
 	OpCallKw       // Call function with keyword args (arg: arg count)
+	OpCallEx       // Call function with *args/**kwargs unpacking (arg: flags, 1=has **kwargs)
 	OpReturn       // Return from function
 
 	// Class operations
@@ -131,6 +133,7 @@ const (
 	OpSetupExcept       // Setup exception handler (arg: handler offset)
 	OpSetupFinally      // Setup finally handler (arg: handler offset)
 	OpPopExcept         // Pop exception handler from block stack
+	OpPopBlock          // Pop top block from block stack (for normal finally entry)
 	OpEndFinally        // End finally block
 	OpRaiseVarargs      // Raise exception (arg: count 0-3)
 	OpExceptionMatch    // Check if exception matches type for except clause
@@ -154,6 +157,7 @@ const (
 	OpStoreClosure // Store to closure variable
 	OpLoadDeref    // Load from cell
 	OpStoreDeref   // Store to cell
+	OpDeleteDeref  // Delete cell variable (set to nil)
 	OpMakeCell     // Create cell for variable
 
 	// Misc
@@ -329,11 +333,13 @@ var OpcodeNames = map[Opcode]string{
 	OpJumpIfFalse:      "JUMP_IF_FALSE",
 	OpPopJumpIfTrue:    "POP_JUMP_IF_TRUE",
 	OpPopJumpIfFalse:   "POP_JUMP_IF_FALSE",
+	OpContinueLoop:     "CONTINUE_LOOP",
 	OpGetIter:          "GET_ITER",
 	OpForIter:          "FOR_ITER",
 	OpMakeFunction:     "MAKE_FUNCTION",
 	OpCall:             "CALL",
 	OpCallKw:           "CALL_KW",
+	OpCallEx:           "CALL_FUNCTION_EX",
 	OpReturn:           "RETURN_VALUE",
 	OpLoadBuildClass:   "LOAD_BUILD_CLASS",
 	OpLoadMethod:       "LOAD_METHOD",
@@ -354,6 +360,7 @@ var OpcodeNames = map[Opcode]string{
 	OpSetupExcept:      "SETUP_EXCEPT",
 	OpSetupFinally:     "SETUP_FINALLY",
 	OpPopExcept:        "POP_EXCEPT",
+	OpPopBlock:         "POP_BLOCK",
 	OpEndFinally:       "END_FINALLY",
 	OpRaiseVarargs:     "RAISE_VARARGS",
 	OpExceptionMatch:   "EXCEPTION_MATCH",
@@ -369,6 +376,7 @@ var OpcodeNames = map[Opcode]string{
 	OpStoreClosure:     "STORE_CLOSURE",
 	OpLoadDeref:        "LOAD_DEREF",
 	OpStoreDeref:       "STORE_DEREF",
+	OpDeleteDeref:      "DELETE_DEREF",
 	OpMakeCell:         "MAKE_CELL",
 	OpNop:              "NOP",
 	OpPrintExpr:        "PRINT_EXPR",
@@ -474,7 +482,7 @@ func init() {
 		OpCompareIn, OpCompareNotIn,
 		OpBinarySubscr, OpStoreSubscr, OpDeleteSubscr,
 		OpGetIter, OpReturn,
-		OpPopExcept, OpEndFinally, OpExceptionMatch, OpClearException, OpPopExceptHandler,
+		OpPopExcept, OpPopBlock, OpEndFinally, OpExceptionMatch, OpClearException, OpPopExceptHandler,
 		OpExceptStarMatch, OpExceptStarReraise,
 		OpWithCleanup,
 		OpNop, OpPrintExpr, OpLoadLocals, OpLoadBuildClass,
@@ -591,6 +599,18 @@ func (co *CodeObject) LineForOffset(offset int) int {
 	return co.FirstLine
 }
 
+// CellOrFreeName returns the variable name for a cell/free index.
+func (co *CodeObject) CellOrFreeName(idx int) string {
+	if idx < len(co.CellVars) {
+		return co.CellVars[idx]
+	}
+	freeIdx := idx - len(co.CellVars)
+	if freeIdx < len(co.FreeVars) {
+		return co.FreeVars[freeIdx]
+	}
+	return fmt.Sprintf("<cell %d>", idx)
+}
+
 func formatInstruction(offset, line int, op Opcode, arg int, argStr string) string {
 	if arg >= 0 {
 		if argStr != "" {
@@ -618,7 +638,7 @@ func formatArg(co *CodeObject, op Opcode, arg int) string {
 		if arg < len(co.VarNames) {
 			return co.VarNames[arg]
 		}
-	case OpLoadDeref, OpStoreDeref, OpLoadClosure, OpStoreClosure:
+	case OpLoadDeref, OpStoreDeref, OpDeleteDeref, OpLoadClosure, OpStoreClosure:
 		idx := arg
 		if idx < len(co.CellVars) {
 			return co.CellVars[idx]
@@ -629,7 +649,7 @@ func formatArg(co *CodeObject, op Opcode, arg int) string {
 		}
 	case OpJump, OpJumpIfTrue, OpJumpIfFalse,
 		OpPopJumpIfTrue, OpPopJumpIfFalse,
-		OpJumpIfTrueOrPop, OpJumpIfFalseOrPop,
+		OpJumpIfTrueOrPop, OpJumpIfFalseOrPop, OpContinueLoop,
 		OpForIter, OpSetupExcept, OpSetupFinally, OpSetupExceptStar, OpSetupWith:
 		return fmt.Sprintf("to %d", arg)
 	}

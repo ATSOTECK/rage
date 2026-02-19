@@ -263,11 +263,18 @@ var exceptionPrefixes = []struct {
 	fallback string // Optional fallback exception name
 }{
 	{"ModuleNotFoundError", "ModuleNotFoundError", ""},
+	{"UnboundLocalError", "UnboundLocalError", ""},
 	{"ZeroDivisionError", "ZeroDivisionError", ""},
 	{"FileNotFoundError", "FileNotFoundError", ""},
 	{"PermissionError", "PermissionError", ""},
 	{"FileExistsError", "FileExistsError", ""},
+	{"NotImplementedError", "NotImplementedError", ""},
 	{"AttributeError", "AttributeError", ""},
+	{"RuntimeError", "RuntimeError", ""},
+	{"AssertionError", "AssertionError", ""},
+	{"StopIteration", "StopIteration", ""},
+	{"GeneratorExit", "GeneratorExit", ""},
+	{"RecursionError", "RecursionError", ""},
 	{"ImportError", "ImportError", ""},
 	{"IndexError", "IndexError", ""},
 	{"ValueError", "ValueError", ""},

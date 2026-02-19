@@ -311,9 +311,13 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 func (vm *VM) toList(v Value) ([]Value, error) {
 	switch val := v.(type) {
 	case *PyList:
-		return val.Items, nil
+		items := make([]Value, len(val.Items))
+		copy(items, val.Items)
+		return items, nil
 	case *PyTuple:
-		return val.Items, nil
+		items := make([]Value, len(val.Items))
+		copy(items, val.Items)
+		return items, nil
 	case *PyString:
 		runes := []rune(val.Value)
 		items := make([]Value, len(runes))
@@ -351,7 +355,11 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 		copy(items, keys)
 		return items, nil
 	case *PyIterator:
-		return val.Items[val.Index:], nil
+		items := val.Items
+		if val.Source != nil {
+			items = val.Source.Items
+		}
+		return items[val.Index:], nil
 	case *PyGenerator:
 		var items []Value
 		for {
@@ -359,6 +367,7 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			if done || err != nil {
 				if err != nil {
 					if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+						vm.currentException = nil // Clear so it doesn't propagate
 						break
 					}
 					return nil, err
@@ -399,6 +408,7 @@ func (vm *VM) iteratorToList(iterator Value) ([]Value, error) {
 		if err != nil {
 			// StopIteration means we're done
 			if pyExc, ok := err.(*PyException); ok && pyExc.Type() == "StopIteration" {
+				vm.currentException = nil // Clear so it doesn't propagate
 				break
 			}
 			return nil, err
@@ -438,7 +448,12 @@ func (vm *VM) truthy(v Value) bool {
 		return len(val.Value) > 0
 	case *PyInstance:
 		// Check __bool__ first
-		if result, found, err := vm.callDunder(val, "__bool__"); found && err == nil {
+		if result, found, err := vm.callDunder(val, "__bool__"); found {
+			if err != nil {
+				// Propagate exceptions from __bool__ via currentException
+				vm.currentException = vm.wrapGoError(err)
+				return false
+			}
 			if b, ok := result.(*PyBool); ok {
 				return b.Value
 			}

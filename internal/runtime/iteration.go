@@ -18,6 +18,12 @@ func (vm *VM) getIter(obj Value) (Value, error) {
 		return v, nil
 	}
 
+	// For lists, create an iterator that references the list directly
+	// so mutations (append, etc.) are visible during iteration
+	if lst, ok := obj.(*PyList); ok {
+		return &PyIterator{Source: lst, Index: 0}, nil
+	}
+
 	// Try __iter__ method first
 	if iterMethod, err := vm.getAttr(obj, "__iter__"); err == nil {
 		result, err := vm.call(iterMethod, nil, nil)
@@ -40,8 +46,12 @@ func (vm *VM) getIter(obj Value) (Value, error) {
 func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 	switch it := iter.(type) {
 	case *PyIterator:
-		if it.Index < len(it.Items) {
-			val := it.Items[it.Index]
+		items := it.Items
+		if it.Source != nil {
+			items = it.Source.Items
+		}
+		if it.Index < len(items) {
+			val := items[it.Index]
 			it.Index++
 			return val, false, nil
 		}
@@ -52,6 +62,7 @@ func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 		if err != nil {
 			// StopIteration is not an error for iteration
 			if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
+				vm.currentException = nil // Clear so it doesn't propagate
 				return nil, true, nil
 			}
 			return nil, false, err
@@ -62,6 +73,7 @@ func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 		val, done, err := vm.CoroutineSend(it, None)
 		if err != nil {
 			if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
+				vm.currentException = nil // Clear so it doesn't propagate
 				return nil, true, nil
 			}
 			return nil, false, err
@@ -77,10 +89,12 @@ func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 		val, err := vm.call(nextMethod, nil, nil)
 		if err != nil {
 			if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
+				vm.currentException = nil // Clear so it doesn't propagate
 				return nil, true, nil
 			}
 			// Also check for StopIteration from Go function calls (plain error strings)
 			if strings.HasPrefix(err.Error(), "StopIteration:") {
+				vm.currentException = nil // Clear so it doesn't propagate
 				return nil, true, nil
 			}
 			return nil, false, err

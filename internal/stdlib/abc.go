@@ -14,10 +14,52 @@ func getInstanceClass(v runtime.Value) *runtime.PyClass {
 	return nil
 }
 
-// callSubclassHook searches cls's MRO for __subclasshook__ and calls it with subclass.
+// getValueClassOrBuiltin returns the class representation of a value for ABC checks.
+// For PyInstance, returns its Class. For builtin types (int, str, etc.), returns the
+// corresponding builtin type value (which may be *PyBuiltinFunc or *PyClass).
+func getValueClassOrBuiltin(vm *runtime.VM, v runtime.Value) runtime.Value {
+	if inst, ok := v.(*runtime.PyInstance); ok {
+		return inst.Class
+	}
+	// Map builtin values to their type constructors
+	var typeName string
+	switch v.(type) {
+	case *runtime.PyBool:
+		typeName = "bool"
+	case *runtime.PyInt:
+		typeName = "int"
+	case *runtime.PyFloat:
+		typeName = "float"
+	case *runtime.PyString:
+		typeName = "str"
+	case *runtime.PyList:
+		typeName = "list"
+	case *runtime.PyTuple:
+		typeName = "tuple"
+	case *runtime.PyDict:
+		typeName = "dict"
+	case *runtime.PySet:
+		typeName = "set"
+	case *runtime.PyFrozenSet:
+		typeName = "frozenset"
+	case *runtime.PyBytes:
+		typeName = "bytes"
+	case *runtime.PyNone:
+		typeName = "NoneType"
+	case *runtime.PyComplex:
+		typeName = "complex"
+	}
+	if typeName != "" {
+		return vm.GetBuiltin(typeName)
+	}
+	return nil
+}
+
+// callSubclassHookValue searches cls's MRO for __subclasshook__ and calls it with subclass.
+// subclass can be *PyClass or *PyBuiltinFunc (for builtin types).
 // Returns True/False if the hook gave a definitive answer, or nil if it returned NotImplemented
 // or was not found (meaning the caller should fall through to normal behavior).
-func callSubclassHook(vm *runtime.VM, cls *runtime.PyClass, subclass *runtime.PyClass) runtime.Value {
+func callSubclassHookValue(vm *runtime.VM, cls *runtime.PyClass, subclass runtime.Value) runtime.Value {
 	for _, mroCls := range cls.Mro {
 		if hook, ok := mroCls.Dict["__subclasshook__"]; ok {
 			// __subclasshook__ is a classmethod; call with cls as first arg
@@ -54,6 +96,11 @@ func callSubclassHook(vm *runtime.VM, cls *runtime.PyClass, subclass *runtime.Py
 		}
 	}
 	return nil
+}
+
+// callSubclassHook is a convenience wrapper for callSubclassHookValue with *PyClass args.
+func callSubclassHook(vm *runtime.VM, cls *runtime.PyClass, subclass *runtime.PyClass) runtime.Value {
+	return callSubclassHookValue(vm, cls, subclass)
 }
 
 // makeRegisterMethod creates a register() builtin for an ABC class.
@@ -111,11 +158,20 @@ func InitAbcModule() {
 				instance := args[1]
 
 				// Try __subclasshook__ on cls MRO
-				instClass := getInstanceClass(instance)
-				if instClass != nil {
-					result := callSubclassHook(vm, cls, instClass)
-					if result != nil {
-						return result, nil
+				// Support both PyInstance and builtin types
+				classVal := getValueClassOrBuiltin(vm, instance)
+				if classVal != nil {
+					if instClass, ok := classVal.(*runtime.PyClass); ok {
+						result := callSubclassHook(vm, cls, instClass)
+						if result != nil {
+							return result, nil
+						}
+					} else {
+						// Builtin type represented as *PyBuiltinFunc
+						result := callSubclassHookValue(vm, cls, classVal)
+						if result != nil {
+							return result, nil
+						}
 					}
 				}
 
@@ -148,29 +204,38 @@ func InitAbcModule() {
 				if !ok {
 					return nil, fmt.Errorf("TypeError: __subclasscheck__ first arg must be a class")
 				}
-				subclass, ok := args[1].(*runtime.PyClass)
-				if !ok {
-					return nil, fmt.Errorf("TypeError: issubclass() arg 1 must be a class")
-				}
+				subclass := args[1]
 
 				// Try __subclasshook__ on cls MRO
-				result := callSubclassHook(vm, cls, subclass)
-				if result != nil {
-					return result, nil
+				if subPyClass, ok := subclass.(*runtime.PyClass); ok {
+					result := callSubclassHook(vm, cls, subPyClass)
+					if result != nil {
+						return result, nil
+					}
+				} else {
+					// Builtin type represented as *PyBuiltinFunc
+					result := callSubclassHookValue(vm, cls, subclass)
+					if result != nil {
+						return result, nil
+					}
 				}
 
-				// Fall back to normal MRO-based subclass check
-				for _, mroClass := range subclass.Mro {
-					if mroClass == cls {
-						return runtime.True, nil
+				// Fall back to normal MRO-based subclass check (only works with *PyClass)
+				if subPyClass, ok := subclass.(*runtime.PyClass); ok {
+					for _, mroClass := range subPyClass.Mro {
+						if mroClass == cls {
+							return runtime.True, nil
+						}
 					}
 				}
 				// Check registered virtual subclasses on cls and its MRO
-				for _, mroCls := range cls.Mro {
-					for _, reg := range mroCls.RegisteredSubclasses {
-						for _, mroClass := range subclass.Mro {
-							if mroClass == reg {
-								return runtime.True, nil
+				if subPyClass, ok := subclass.(*runtime.PyClass); ok {
+					for _, mroCls := range cls.Mro {
+						for _, reg := range mroCls.RegisteredSubclasses {
+							for _, mroClass := range subPyClass.Mro {
+								if mroClass == reg {
+									return runtime.True, nil
+								}
 							}
 						}
 					}

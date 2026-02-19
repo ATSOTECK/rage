@@ -792,37 +792,36 @@ func (vm *VM) initBuiltins() {
 				return checkTypeName(cls.Name)
 			}
 
-			// Helper to check a single type specification
-			checkType := func(typeSpec Value) bool {
+			// Recursive check for a single type specification (handles nested tuples)
+			var checkType func(typeSpec Value) (bool, error)
+			checkType = func(typeSpec Value) (bool, error) {
 				switch t := typeSpec.(type) {
 				case *PyClass:
-					return checkClass(t)
+					return checkClass(t), nil
 				case *PyBuiltinFunc:
-					// Built-in type constructors (int, str, float, etc.)
-					return checkTypeName(t.Name)
+					return checkTypeName(t.Name), nil
+				case *PyTuple:
+					for _, item := range t.Items {
+						match, err := checkType(item)
+						if err != nil {
+							return false, err
+						}
+						if match {
+							return true, nil
+						}
+					}
+					return false, nil
+				default:
+					return false, fmt.Errorf("TypeError: isinstance() arg 2 must be a type, a tuple of types, or a union")
 				}
-				return false
 			}
 
-			// classInfo can be a single class/type or a tuple of classes/types
-			switch ci := classInfo.(type) {
-			case *PyClass:
-				if checkClass(ci) {
-					return True, nil
-				}
-			case *PyBuiltinFunc:
-				// Built-in type constructor (int, str, float, etc.)
-				if checkTypeName(ci.Name) {
-					return True, nil
-				}
-			case *PyTuple:
-				for _, item := range ci.Items {
-					if checkType(item) {
-						return True, nil
-					}
-				}
-			default:
-				return nil, fmt.Errorf("isinstance() arg 2 must be a type or tuple of types")
+			match, err := checkType(classInfo)
+			if err != nil {
+				return nil, err
+			}
+			if match {
+				return True, nil
 			}
 			return False, nil
 		},
@@ -1054,29 +1053,32 @@ func (vm *VM) initBuiltins() {
 			if len(args) == 0 {
 				return &PyIterator{Items: []Value{}, Index: 0}, nil
 			}
-			// Convert all args to lists
-			lists := make([][]Value, len(args))
-			minLen := -1
+			// Get iterators for all args
+			iters := make([]Value, len(args))
 			for i, arg := range args {
-				items, err := vm.toList(arg)
+				it, err := vm.getIter(arg)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("zip argument #%d is not iterable", i+1)
 				}
-				lists[i] = items
-				if minLen == -1 || len(items) < minLen {
-					minLen = len(items)
-				}
+				iters[i] = it
 			}
-			// Build result tuples
-			result := make([]Value, minLen)
-			for i := 0; i < minLen; i++ {
-				tuple := make([]Value, len(lists))
-				for j, list := range lists {
-					tuple[j] = list[i]
+			// Iterate lazily, collecting tuples until any iterator is exhausted
+			var result []Value
+			for {
+				tuple := make([]Value, len(iters))
+				for j, it := range iters {
+					val, done, err := vm.iterNext(it)
+					if err != nil {
+						return nil, err
+					}
+					if done {
+						// This iterator is exhausted, stop
+						return &PyIterator{Items: result, Index: 0}, nil
+					}
+					tuple[j] = val
 				}
-				result[i] = &PyTuple{Items: tuple}
+				result = append(result, &PyTuple{Items: tuple})
 			}
-			return &PyIterator{Items: result, Index: 0}, nil
 		},
 	}
 
@@ -1228,11 +1230,25 @@ func (vm *VM) initBuiltins() {
 						return false
 					}
 				}
-				cmp := vm.compare(a, b)
+				// For reverse sort, compare b < a instead of a < b to maintain stability.
+				// Using !less would break stability because equal elements (less=false)
+				// would return true, swapping their order.
+				var cmpA, cmpB Value
 				if reverse {
-					return cmp > 0
+					cmpA, cmpB = b, a
+				} else {
+					cmpA, cmpB = a, b
 				}
-				return cmp < 0
+				cmpResult := vm.compareOp(OpCompareLt, cmpA, cmpB)
+				if cmpResult == nil {
+					// compareOp set vm.currentException (e.g. TypeError for incompatible types)
+					if vm.currentException != nil {
+						sortErr = vm.currentException
+						vm.currentException = nil
+					}
+					return false
+				}
+				return vm.truthy(cmpResult)
 			})
 			if sortErr != nil {
 				return nil, sortErr
@@ -1294,6 +1310,12 @@ func (vm *VM) initBuiltins() {
 			}
 			_, err := vm.getAttr(args[0], name.Value)
 			if err != nil {
+				// Check if builtin type has this dunder
+				if typeName := builtinValueTypeName(args[0]); typeName != "" {
+					if builtinHasDunder(typeName, name.Value) {
+						return True, nil
+					}
+				}
 				return False, nil
 			}
 			return True, nil
@@ -1653,13 +1675,17 @@ func (vm *VM) initBuiltins() {
 				}
 				return val, nil
 			case *PyIterator:
-				if it.Index >= len(it.Items) {
+				items := it.Items
+				if it.Source != nil {
+					items = it.Source.Items
+				}
+				if it.Index >= len(items) {
 					if hasDefault {
 						return args[1], nil
 					}
 					return nil, &PyException{TypeName: "StopIteration", Message: ""}
 				}
-				val := it.Items[it.Index]
+				val := items[it.Index]
 				it.Index++
 				return val, nil
 			default:
@@ -1764,62 +1790,56 @@ func (vm *VM) initBuiltins() {
 				return nil, fmt.Errorf("TypeError: issubclass() arg 1 must be a class")
 			}
 
-			// Handle PyClass with MRO
-			if cls, ok := args[0].(*PyClass); ok {
-				switch target := args[1].(type) {
-				case *PyClass:
-					for _, mroClass := range cls.Mro {
-						if mroClass == target {
-							return True, nil
-						}
+			// Check single target class
+			checkSingleTarget := func(cls *PyClass, target *PyClass) bool {
+				for _, mroClass := range cls.Mro {
+					if mroClass == target {
+						return true
 					}
-					// Check registered virtual subclasses
-					if len(target.RegisteredSubclasses) > 0 {
-						for _, reg := range target.RegisteredSubclasses {
-							for _, mroClass := range cls.Mro {
-								if mroClass == reg {
-									return True, nil
-								}
+				}
+				if len(target.RegisteredSubclasses) > 0 {
+					for _, reg := range target.RegisteredSubclasses {
+						for _, mroClass := range cls.Mro {
+							if mroClass == reg {
+								return true
 							}
 						}
 					}
-					return False, nil
+				}
+				return false
+			}
+
+			// Recursive check that handles nested tuples
+			var checkTarget func(arg1 Value, arg2 Value) (Value, error)
+			checkTarget = func(arg1 Value, arg2 Value) (Value, error) {
+				switch target := arg2.(type) {
+				case *PyClass:
+					if cls, ok := arg1.(*PyClass); ok {
+						if checkSingleTarget(cls, target) {
+							return True, nil
+						}
+						return vm.toValue(builtinSubclass(clsName, target.Name)), nil
+					}
+					return vm.toValue(builtinSubclass(clsName, target.Name)), nil
 				case *PyBuiltinFunc:
 					return vm.toValue(builtinSubclass(clsName, target.Name)), nil
 				case *PyTuple:
 					for _, item := range target.Items {
-						targetName, ok := getClassName(item)
-						if !ok {
-							return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
+						result, err := checkTarget(arg1, item)
+						if err != nil {
+							return nil, err
 						}
-						if builtinSubclass(clsName, targetName) {
+						if result == True {
 							return True, nil
 						}
 					}
 					return False, nil
+				default:
+					return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
 				}
 			}
 
-			// Handle builtin types (PyBuiltinFunc)
-			switch target := args[1].(type) {
-			case *PyClass:
-				return vm.toValue(builtinSubclass(clsName, target.Name)), nil
-			case *PyBuiltinFunc:
-				return vm.toValue(builtinSubclass(clsName, target.Name)), nil
-			case *PyTuple:
-				for _, item := range target.Items {
-					targetName, ok := getClassName(item)
-					if !ok {
-						return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
-					}
-					if builtinSubclass(clsName, targetName) {
-						return True, nil
-					}
-				}
-				return False, nil
-			default:
-				return nil, fmt.Errorf("TypeError: issubclass() arg 2 must be a class or tuple of classes")
-			}
+			return checkTarget(args[0], args[1])
 		},
 	}
 
@@ -2792,7 +2812,8 @@ func (vm *VM) initExceptionClasses() {
 	makeExc("IndexError", exception)
 	attrError := makeExc("AttributeError", exception)
 	makeExc("FrozenInstanceError", attrError)
-	makeExc("NameError", exception)
+	nameError := makeExc("NameError", exception)
+	makeExc("UnboundLocalError", nameError)
 	makeExc("RuntimeError", exception)
 	makeExc("ZeroDivisionError", exception)
 	makeExc("AssertionError", exception)
@@ -2819,6 +2840,15 @@ func (vm *VM) initExceptionClasses() {
 	// ArithmeticError (base for ZeroDivisionError - for compatibility)
 	arithmeticError := makeExc("ArithmeticError", exception)
 	_ = arithmeticError // We already created ZeroDivisionError above
+
+	// GeneratorExit inherits from BaseException (not Exception)
+	makeExc("GeneratorExit", baseException)
+
+	// SystemExit inherits from BaseException (not Exception)
+	makeExc("SystemExit", baseException)
+
+	// KeyboardInterrupt inherits from BaseException (not Exception)
+	makeExc("KeyboardInterrupt", baseException)
 
 	// BaseExceptionGroup inherits from BaseException
 	baseExcGroup := &PyClass{
