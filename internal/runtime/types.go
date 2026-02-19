@@ -741,8 +741,9 @@ func (m *PyMethod) String() string { return fmt.Sprintf("<bound method %s>", m.F
 
 // PyBuiltinFunc represents a built-in function
 type PyBuiltinFunc struct {
-	Name string
-	Fn   func(args []Value, kwargs map[string]Value) (Value, error)
+	Name  string
+	Fn    func(args []Value, kwargs map[string]Value) (Value, error)
+	Bound bool // true when self is already captured (bound method wrapper)
 }
 
 func (b *PyBuiltinFunc) Type() string   { return "builtin_function_or_method" }

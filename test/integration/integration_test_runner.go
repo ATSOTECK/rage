@@ -141,8 +141,8 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 			return err
 		}
 
-		// Skip non-Python files and the test framework module itself
-		if info.IsDir() || !strings.HasSuffix(info.Name(), ".py") || info.Name() == "test_framework.py" {
+		// Skip non-Python files, the test framework module, and scripts requiring Go-registered classes
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".py") || info.Name() == "test_framework.py" || info.Name() == "107_go_defined_classes.py" {
 			return nil
 		}
 

@@ -671,11 +671,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpCompareNe:
 		b := vm.pop()
 		a := vm.pop()
-		if !vm.equal(a, b) {
-			vm.push(True)
-		} else {
-			vm.push(False)
-		}
+		vm.push(vm.compareOp(OpCompareNe, a, b))
 	case OpCompareLt:
 		b := vm.pop()
 		a := vm.pop()
@@ -996,7 +992,13 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		obj := vm.pop()
 		var result Value
 		var err error
+		alreadyBound := false
 		if _, isBound := method.(*PyMethod); isBound {
+			alreadyBound = true
+		} else if bf, ok := method.(*PyBuiltinFunc); ok && bf.Bound {
+			alreadyBound = true
+		}
+		if alreadyBound {
 			result, err = vm.call(method, args, nil)
 		} else {
 			allArgs := append([]Value{obj}, args...)
@@ -1440,8 +1442,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpCompareNeJump:
 		b := vm.pop()
 		a := vm.pop()
-		result := !vm.equal(a, b)
-		if !result {
+		neResult := vm.compareOp(OpCompareNe, a, b)
+		if neResult == nil || !vm.truthy(neResult) {
 			frame.IP = arg
 		}
 

@@ -196,6 +196,17 @@ func (v DictValue) toRuntime() runtime.Value {
 	return d
 }
 
+// BytesValue represents a Python bytes
+type BytesValue struct {
+	value []byte
+}
+
+func (v BytesValue) Type() string             { return "bytes" }
+func (v BytesValue) String() string           { return fmt.Sprintf("b'%s'", string(v.value)) }
+func (v BytesValue) GoValue() any             { return v.value }
+func (v BytesValue) Bytes() []byte            { return v.value }
+func (v BytesValue) toRuntime() runtime.Value { return runtime.NewBytes(v.value) }
+
 // UserDataValue wraps arbitrary Go values
 type UserDataValue struct {
 	value any
@@ -275,6 +286,11 @@ func Dict(pairs ...any) Value {
 	return DictValue{items: items}
 }
 
+// Bytes creates a Python bytes value
+func Bytes(v []byte) Value {
+	return BytesValue{value: v}
+}
+
 // UserData wraps a Go value for use in Python
 func UserData(v any) Value {
 	return UserDataValue{value: v}
@@ -321,6 +337,8 @@ func FromGo(v any) Value {
 		return ComplexValue{real: real(val), imag: imag(val)}
 	case string:
 		return String(val)
+	case []byte:
+		return Bytes(val)
 	case []any:
 		items := make([]Value, len(val))
 		for i, item := range val {
@@ -396,9 +414,27 @@ func IsDict(v Value) bool {
 	return ok
 }
 
+// IsBytes returns true if the value is bytes
+func IsBytes(v Value) bool {
+	_, ok := v.(BytesValue)
+	return ok
+}
+
 // IsUserData returns true if the value is userdata
 func IsUserData(v Value) bool {
 	_, ok := v.(UserDataValue)
+	return ok
+}
+
+// IsObject returns true if the value is a Python instance (Object)
+func IsObject(v Value) bool {
+	_, ok := v.(Object)
+	return ok
+}
+
+// IsClass returns true if the value is a Python class (ClassValue)
+func IsClass(v Value) bool {
+	_, ok := v.(ClassValue)
 	return ok
 }
 
@@ -474,12 +510,36 @@ func AsDict(v Value) (map[string]Value, bool) {
 	return nil, false
 }
 
+// AsBytes returns the bytes value or nil if not bytes
+func AsBytes(v Value) ([]byte, bool) {
+	if bv, ok := v.(BytesValue); ok {
+		return bv.value, true
+	}
+	return nil, false
+}
+
 // AsUserData returns the userdata value or nil if not userdata
 func AsUserData(v Value) (any, bool) {
 	if uv, ok := v.(UserDataValue); ok {
 		return uv.value, true
 	}
 	return nil, false
+}
+
+// AsObject returns the Object or zero value if not an Object
+func AsObject(v Value) (Object, bool) {
+	if o, ok := v.(Object); ok {
+		return o, true
+	}
+	return Object{}, false
+}
+
+// AsClass returns the ClassValue or zero value if not a ClassValue
+func AsClass(v Value) (ClassValue, bool) {
+	if c, ok := v.(ClassValue); ok {
+		return c, true
+	}
+	return ClassValue{}, false
 }
 
 // =====================================
@@ -513,6 +573,8 @@ func fromRuntime(v runtime.Value) Value {
 		return ComplexValue{real: val.Real, imag: val.Imag}
 	case *runtime.PyString:
 		return String(val.Value)
+	case *runtime.PyBytes:
+		return BytesValue{value: val.Value}
 	case *runtime.PyList:
 		items := make([]Value, len(val.Items))
 		for i, item := range val.Items {
@@ -543,6 +605,10 @@ func fromRuntime(v runtime.Value) Value {
 		return FunctionValue{name: val.Name, rv: val}
 	case *runtime.PyGoFunc:
 		return FunctionValue{name: val.Name, rv: val}
+	case *runtime.PyClass:
+		return ClassValue{class: val}
+	case *runtime.PyInstance:
+		return Object{inst: val}
 	default:
 		// For other types, wrap as userdata
 		return UserDataValue{value: v}

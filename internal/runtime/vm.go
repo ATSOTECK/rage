@@ -843,7 +843,8 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if vm.equal(a, b) {
+			neResult := vm.compareOp(OpCompareNe, a, b)
+			if neResult == nil || !vm.truthy(neResult) {
 				frame.IP = arg
 			}
 
@@ -2134,8 +2135,14 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			var result Value
 			var err error
-			// Check if method is already bound (PyMethod)
+			// Check if method is already bound (PyMethod or bound PyBuiltinFunc)
+			alreadyBound := false
 			if _, isBound := method.(*PyMethod); isBound {
+				alreadyBound = true
+			} else if bf, ok := method.(*PyBuiltinFunc); ok && bf.Bound {
+				alreadyBound = true
+			}
+			if alreadyBound {
 				// Bound method already has self, don't prepend again
 				result, err = vm.call(method, args, nil)
 			} else {

@@ -772,6 +772,25 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		op.String(), vm.typeName(a), vm.typeName(b))
 }
 
+// tryRichCompare attempts dunder-based comparison on PyInstance objects.
+// It tries a.__dunder__(b) first, then b.__reflected__(a).
+// Returns (result, true) if a dunder was found, or (nil, false) to fall back.
+func (vm *VM) tryRichCompare(a, b Value, dunder, reflected string) (Value, bool) {
+	if inst, ok := a.(*PyInstance); ok {
+		result, found, err := vm.callDunder(inst, dunder, b)
+		if found && err == nil && result != NotImplemented {
+			return result, true
+		}
+	}
+	if inst, ok := b.(*PyInstance); ok {
+		result, found, err := vm.callDunder(inst, reflected, a)
+		if found && err == nil && result != NotImplemented {
+			return result, true
+		}
+	}
+	return nil, false
+}
+
 func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 	// Fast path: int vs int comparisons (most common case)
 	if ai, ok := a.(*PyInt); ok {
@@ -874,6 +893,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		}
 		return False
 	case OpCompareNe:
+		if result, ok := vm.tryRichCompare(a, b, "__ne__", "__ne__"); ok {
+			return result
+		}
 		if !vm.equal(a, b) {
 			return True
 		}
@@ -888,6 +910,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		}
 		return False
 	case OpCompareLe:
+		if result, ok := vm.tryRichCompare(a, b, "__le__", "__ge__"); ok {
+			return result
+		}
 		if aIsComplex || bIsComplex {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'<=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
@@ -906,6 +931,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		}
 		return False
 	case OpCompareGe:
+		if result, ok := vm.tryRichCompare(a, b, "__ge__", "__le__"); ok {
+			return result
+		}
 		if aIsComplex || bIsComplex {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'>=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
