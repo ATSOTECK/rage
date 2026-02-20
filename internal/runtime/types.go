@@ -951,6 +951,7 @@ type Frame struct {
 	Builtins         map[string]Value // Built-in functions
 	Cells            []*PyCell        // Closure cells
 	BlockStack       []Block          // Block stack for try/except/finally
+	OrderedGlobalKeys []string        // Insertion-ordered global names (for class bodies)
 }
 
 // Block represents a control flow block

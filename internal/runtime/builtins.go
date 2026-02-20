@@ -1910,7 +1910,7 @@ func (vm *VM) initBuiltins() {
 			}
 
 			// Execute the class body to get the namespace and cells
-			classDict, cells, err := vm.callClassBody(bodyFunc)
+			classDict, cells, orderedKeys, err := vm.callClassBody(bodyFunc)
 			if err != nil {
 				return nil, fmt.Errorf("__build_class__: error executing class body: %w", err)
 			}
@@ -1955,8 +1955,24 @@ func (vm *VM) initBuiltins() {
 				}
 				basesTuple := &PyTuple{Items: basesItems}
 				nsDict := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+				// Use ordered keys to preserve class body definition order
+				for _, k := range orderedKeys {
+					if v, ok := classDict[k]; ok {
+						nsDict.DictSet(&PyString{Value: k}, v, vm)
+					}
+				}
+				// Add any remaining entries not in orderedKeys
 				for k, v := range classDict {
-					nsDict.DictSet(&PyString{Value: k}, v, vm)
+					found := false
+					for _, ok := range orderedKeys {
+						if ok == k {
+							found = true
+							break
+						}
+					}
+					if !found {
+						nsDict.DictSet(&PyString{Value: k}, v, vm)
+					}
 				}
 				nameStr := &PyString{Value: className}
 
