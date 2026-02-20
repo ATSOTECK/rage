@@ -188,9 +188,10 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 }
 
 func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDuration time.Duration) {
-	fmt.Println("\n" + color(colorDim, strings.Repeat("═", 70)))
+	const repeatCount = 75
+	fmt.Println("\n" + color(colorDim, strings.Repeat("═", repeatCount)))
 	fmt.Println(color(colorBold, "TEST RESULTS"))
-	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
+	fmt.Println(color(colorDim, strings.Repeat("═", repeatCount)))
 
 	// Separate passing and failing tests for better organization
 	var failingTests []ScriptResult
@@ -247,7 +248,7 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDur
 	}
 
 	// Summary
-	fmt.Println("\n" + color(colorDim, strings.Repeat("═", 70)))
+	fmt.Println("\n" + color(colorDim, strings.Repeat("═", repeatCount)))
 
 	var summaryColor string
 	var summaryIcon string
@@ -259,20 +260,31 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDur
 		summaryIcon = "✓"
 	}
 
+	totalTests := totalPassed + totalFailed
+	var passPct, failPct float64
+	if totalTests > 0 {
+		passPct = float64(totalPassed) / float64(totalTests) * 100
+		failPct = float64(totalFailed) / float64(totalTests) * 100
+	}
+
 	passed := color(colorGreen, fmt.Sprintf("%d passed", totalPassed))
 	failed := color(colorRed, fmt.Sprintf("%d failed", totalFailed))
 	scripts := fmt.Sprintf("%d scripts", len(results))
+	passPercentage := color(colorDim, fmt.Sprintf("(%.1f%%)", passPct))
+	failPercentage := color(colorDim, fmt.Sprintf("(%.1f%%)", failPct))
 
 	totalTime := color(colorDim, fmt.Sprintf("in %s", formatDuration(totalDuration)))
 
-	fmt.Printf("%s %s  %s, %s  %s  %s\n",
+	fmt.Printf("%s %s  %s %s,  %s %s  %s  %s\n",
 		color(summaryColor, summaryIcon),
 		color(summaryColor, "TOTAL:"),
 		passed,
+		passPercentage,
 		failed,
+		failPercentage,
 		color(colorDim, "("+scripts+")"),
 		totalTime)
-	fmt.Println(color(colorDim, strings.Repeat("═", 70)))
+	fmt.Println(color(colorDim, strings.Repeat("═", repeatCount)))
 }
 
 // formatDuration formats a duration as seconds, milliseconds, or microseconds depending on magnitude
@@ -353,7 +365,7 @@ func main() {
 	results, totalPassed, totalFailed := runAllTests(scriptsDir)
 	totalDuration := time.Since(totalStart)
 
-	time.Sleep(1 * time.Second) // Sleep to make sure the final test results are printed at the end.
+	time.Sleep(100 * time.Millisecond) // Sleep to make sure the final test results are printed at the end.
 	printResults(results, totalPassed, totalFailed, totalDuration)
 
 	if totalFailed > 0 {

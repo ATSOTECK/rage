@@ -280,6 +280,9 @@ func (vm *VM) run() (Value, error) {
 
 		case OpStoreName:
 			name := frame.Code.Names[arg]
+			if _, exists := frame.Globals[name]; !exists && frame.OrderedGlobalKeys != nil {
+				frame.OrderedGlobalKeys = append(frame.OrderedGlobalKeys, name)
+			}
 			frame.Globals[name] = vm.pop()
 
 		case OpDeleteName:

@@ -1613,6 +1613,48 @@ func (vm *VM) contains(container, item Value) bool {
 			}
 			return bytesContains(c.Value, sub.Value)
 		}
+	case *PyClass:
+		// Check for __contains__ in class Dict or MRO
+		if method, ok := c.Dict["__contains__"]; ok {
+			var result Value
+			var err error
+			switch fn := method.(type) {
+			case *PyFunction:
+				result, err = vm.callFunction(fn, []Value{c, item}, nil)
+			case *PyBuiltinFunc:
+				result, err = fn.Fn([]Value{c, item}, nil)
+			}
+			if err != nil {
+				vm.currentException = &PyException{
+					TypeName: "TypeError",
+					Message:  err.Error(),
+				}
+				return false
+			}
+			if result != nil {
+				if boolVal, ok := result.(*PyBool); ok {
+					return boolVal.Value
+				}
+				return vm.truthy(result)
+			}
+		}
+		// Fallback to __iter__-based iteration
+		if iterMethod, ok := c.Dict["__iter__"]; ok {
+			_ = iterMethod
+			if iter, err := vm.getIter(c); err == nil {
+				for {
+					val, done, err := vm.iterNext(iter)
+					if done || err != nil {
+						break
+					}
+					if vm.containsIdentityOrEqual(val, item) {
+						return true
+					}
+				}
+				vm.currentException = nil
+				return false
+			}
+		}
 	case *PyInstance:
 		// Check for __contains__ method in MRO
 		containsFound := false

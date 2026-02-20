@@ -2167,7 +2167,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 // callClassBody executes a class body function with a fresh namespace
 // and returns the namespace dict (not the function's return value) and any cells
 // (for populating __class__ after class creation)
-func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, error) {
+func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, []string, error) {
 	code := fn.Code
 
 	// Create a fresh namespace for the class body
@@ -2176,14 +2176,15 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, error)
 	// Create new frame with the class namespace as its globals
 	// EnclosingGlobals allows the class body to access outer scope variables
 	frame := &Frame{
-		Code:             code,
-		IP:               0,
-		Stack:            make([]Value, code.StackSize+16), // Pre-allocate
-		SP:               0,
-		Locals:           make([]Value, len(code.VarNames)),
-		Globals:          classNamespace,
-		EnclosingGlobals: vm.Globals,
-		Builtins:         vm.builtins,
+		Code:              code,
+		IP:                0,
+		Stack:             make([]Value, code.StackSize+16), // Pre-allocate
+		SP:                0,
+		Locals:            make([]Value, len(code.VarNames)),
+		Globals:           classNamespace,
+		EnclosingGlobals:  vm.Globals,
+		Builtins:          vm.builtins,
+		OrderedGlobalKeys: make([]string, 0, 8),
 	}
 
 	// Set up cells for the class body (for __class__ cell and other captured variables)
@@ -2212,8 +2213,8 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, error)
 	vm.frame = oldFrame
 
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return classNamespace, frame.Cells, nil
+	return classNamespace, frame.Cells, frame.OrderedGlobalKeys, nil
 }
