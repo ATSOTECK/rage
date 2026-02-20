@@ -2,9 +2,13 @@ package runtime
 
 import (
 	"fmt"
+	"math"
+	"math/big"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -173,6 +177,7 @@ var builtinTypeDunders = map[string]map[string]bool{
 		"__gt__": true, "__ge__": true,
 		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
 		"__int__": true, "__float__": true, "__bool__": true, "__index__": true,
+		"__ceil__": true, "__floor__": true, "__round__": true, "__trunc__": true,
 	},
 	"float": {
 		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
@@ -182,6 +187,7 @@ var builtinTypeDunders = map[string]map[string]bool{
 		"__gt__": true, "__ge__": true,
 		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
 		"__int__": true, "__float__": true, "__bool__": true,
+		"__ceil__": true, "__floor__": true, "__round__": true, "__trunc__": true,
 	},
 	"bool": {
 		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
@@ -319,7 +325,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return None, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'generator' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'generator' object has no attribute '%s'", name)
 
 	case *PyCoroutine:
 		coro := o
@@ -367,7 +373,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return None, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'coroutine' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'coroutine' object has no attribute '%s'", name)
 
 	case *PyComplex:
 		switch name {
@@ -381,7 +387,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return MakeComplex(c.Real, -c.Imag), nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'complex' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'complex' object has no attribute '%s'", name)
 
 	case *PyException:
 		switch name {
@@ -443,7 +449,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		if o.Instance != nil {
 			return vm.getAttr(o.Instance, name)
 		}
-		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Type(), name)
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Type(), name)
 
 	case *PyModule:
 		if val, ok := o.Dict[name]; ok {
@@ -509,7 +515,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 			}
 		}
-		return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(obj), name)
 	case *PyProperty:
 		prop := o
 		switch name {
@@ -576,11 +582,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		case "__doc__":
 			return &PyString{Value: prop.Doc}, nil
 		}
-		return nil, fmt.Errorf("'property' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'property' object has no attribute '%s'", name)
 	case *PySuper:
 		// super() proxy - look up attribute in MRO starting after ThisClass
 		if o.Instance == nil {
-			return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+			return nil, fmt.Errorf("AttributeError: 'super' object has no attribute '%s'", name)
 		}
 
 		// Get the MRO to search
@@ -664,7 +670,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return val, nil
 			}
 		}
-		return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'super' object has no attribute '%s'", name)
 
 	case *PyInstance:
 		// Check for custom __getattribute__ (not inherited from object)
@@ -1383,6 +1389,90 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				return True, nil
 			}}, nil
+		case "difference_update":
+			return &PyBuiltinFunc{Name: "set.difference_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						s.SetRemove(item, vm)
+					}
+				}
+				return None, nil
+			}}, nil
+		case "intersection_update":
+			return &PyBuiltinFunc{Name: "set.intersection_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) == 0 {
+					return None, nil
+				}
+				// Collect all items to keep: those in self AND in all args
+				keep := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					inAll := true
+					for _, arg := range args {
+						items, err := vm.toList(arg)
+						if err != nil {
+							return nil, err
+						}
+						found := false
+						for _, item := range items {
+							if vm.equal(k, item) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							inAll = false
+							break
+						}
+					}
+					if inAll {
+						keep.SetAdd(k, vm)
+					}
+				}
+				// Replace contents of s with keep
+				s.Items = keep.Items
+				s.buckets = keep.buckets
+				s.size = keep.size
+				return None, nil
+			}}, nil
+		case "symmetric_difference_update":
+			return &PyBuiltinFunc{Name: "set.symmetric_difference_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("symmetric_difference_update() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				// Items in self but not in other stay
+				// Items in other but not in self get added
+				// Items in both get removed
+				toRemove := []Value{}
+				toAdd := []Value{}
+				for k := range s.Items {
+					for _, item := range other {
+						if vm.equal(k, item) {
+							toRemove = append(toRemove, k)
+							break
+						}
+					}
+				}
+				for _, item := range other {
+					if !s.SetContains(item, vm) {
+						toAdd = append(toAdd, item)
+					}
+				}
+				for _, item := range toRemove {
+					s.SetRemove(item, vm)
+				}
+				for _, item := range toAdd {
+					s.SetAdd(item, vm)
+				}
+				return None, nil
+			}}, nil
 		}
 	case *PyTuple:
 		tpl := o
@@ -1421,16 +1511,403 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return nil, fmt.Errorf("ValueError: tuple.index(x): x not in tuple")
 			}}, nil
 		}
+	case *PyInt:
+		v := o
+		switch name {
+		// Properties
+		case "real":
+			return v, nil
+		case "imag":
+			return MakeInt(0), nil
+		case "numerator":
+			return v, nil
+		case "denominator":
+			return MakeInt(1), nil
+
+		// Methods
+		case "bit_length":
+			return &PyBuiltinFunc{Name: "int.bit_length", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					return MakeInt(int64(v.BigValue.BitLen())), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				if val == 0 {
+					return MakeInt(0), nil
+				}
+				return MakeInt(int64(bits.Len64(uint64(val)))), nil
+			}}, nil
+
+		case "bit_count":
+			return &PyBuiltinFunc{Name: "int.bit_count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					// Count bits in absolute value
+					abs := new(big.Int).Abs(v.BigValue)
+					count := 0
+					for _, word := range abs.Bits() {
+						count += bits.OnesCount(uint(word))
+					}
+					return MakeInt(int64(count)), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				return MakeInt(int64(bits.OnesCount64(uint64(val)))), nil
+			}}, nil
+
+		case "conjugate":
+			return &PyBuiltinFunc{Name: "int.conjugate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "as_integer_ratio":
+			return &PyBuiltinFunc{Name: "int.as_integer_ratio", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyTuple{Items: []Value{v, MakeInt(1)}}, nil
+			}}, nil
+
+		case "to_bytes":
+			return &PyBuiltinFunc{Name: "int.to_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// to_bytes(length, byteorder, *, signed=False)
+				length := 0
+				byteorder := ""
+				signed := false
+
+				if len(args) >= 1 {
+					length = int(vm.toInt(args[0]))
+				} else if kv, ok := kwargs["length"]; ok {
+					length = int(vm.toInt(kv))
+				} else {
+					return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'length'")
+				}
+
+				if len(args) >= 2 {
+					if s, ok := args[1].(*PyString); ok {
+						byteorder = s.Value
+					} else {
+						return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
+					}
+				} else if kv, ok := kwargs["byteorder"]; ok {
+					if s, ok := kv.(*PyString); ok {
+						byteorder = s.Value
+					} else {
+						return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
+					}
+				} else {
+					return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'byteorder'")
+				}
+
+				if byteorder != "big" && byteorder != "little" {
+					return nil, fmt.Errorf("ValueError: byteorder must be either 'little' or 'big'")
+				}
+
+				if kv, ok := kwargs["signed"]; ok {
+					signed = vm.Truthy(kv)
+				}
+
+				val := v.Value
+				if v.BigValue != nil {
+					if v.BigValue.IsInt64() {
+						val = v.BigValue.Int64()
+					} else {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				}
+
+				if val < 0 && !signed {
+					return nil, fmt.Errorf("OverflowError: can't convert negative int to unsigned")
+				}
+
+				var uval uint64
+				if val < 0 {
+					// Two's complement for negative values
+					uval = uint64(val)
+				} else {
+					uval = uint64(val)
+				}
+
+				result := make([]byte, length)
+
+				if signed && val < 0 {
+					// Fill with 0xff for negative numbers (sign extension)
+					for i := range result {
+						result[i] = 0xff
+					}
+				}
+
+				// Write bytes in big-endian order first
+				for i := length - 1; i >= 0; i-- {
+					result[i] = byte(uval & 0xff)
+					uval >>= 8
+				}
+
+				// Check for overflow: if uval still has bits, the number doesn't fit
+				if val >= 0 && uval != 0 {
+					return nil, fmt.Errorf("OverflowError: int too big to convert")
+				}
+				if signed && val < 0 {
+					// For negative signed, check that sign bit is set in the MSB
+					if length > 0 && result[0]&0x80 == 0 {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				} else if !signed && val >= 0 {
+					// Already checked uval == 0 above
+				} else if signed && val >= 0 {
+					// Check sign bit isn't set (would look negative)
+					if length > 0 && result[0]&0x80 != 0 {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				}
+
+				if byteorder == "little" {
+					// Reverse the bytes
+					for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+						result[i], result[j] = result[j], result[i]
+					}
+				}
+
+				return &PyBytes{Value: result}, nil
+			}}, nil
+
+		case "from_bytes":
+			return &PyBuiltinFunc{Name: "int.from_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return intFromBytesImpl(vm, args, kwargs)
+			}}, nil
+
+		// Dunder methods
+		case "__abs__":
+			return &PyBuiltinFunc{Name: "int.__abs__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					return MakeBigInt(new(big.Int).Abs(v.BigValue)), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				return MakeInt(val), nil
+			}}, nil
+
+		case "__bool__":
+			return &PyBuiltinFunc{Name: "int.__bool__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					if v.BigValue.Sign() == 0 {
+						return False, nil
+					}
+					return True, nil
+				}
+				if v.Value == 0 {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+
+		case "__ceil__":
+			return &PyBuiltinFunc{Name: "int.__ceil__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__floor__":
+			return &PyBuiltinFunc{Name: "int.__floor__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__trunc__":
+			return &PyBuiltinFunc{Name: "int.__trunc__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__round__":
+			return &PyBuiltinFunc{Name: "int.__round__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// __round__(ndigits=None)
+				if len(args) == 0 {
+					return v, nil
+				}
+				if args[0] == None {
+					return v, nil
+				}
+				ndigits := int(vm.toInt(args[0]))
+				if ndigits >= 0 {
+					return v, nil
+				}
+				// Negative ndigits: round to nearest 10^(-ndigits) with banker's rounding
+				val := v.Value
+				pow := int64(1)
+				for i := 0; i < -ndigits; i++ {
+					pow *= 10
+				}
+				remainder := val % pow
+				truncated := val - remainder
+				half := pow / 2
+
+				if remainder < 0 {
+					remainder = -remainder
+				}
+
+				if remainder > half {
+					if val >= 0 {
+						truncated += pow
+					} else {
+						truncated -= pow
+					}
+				} else if remainder == half {
+					// Banker's rounding: round to even
+					quotient := truncated / pow
+					if quotient%2 != 0 {
+						if val >= 0 {
+							truncated += pow
+						} else {
+							truncated -= pow
+						}
+					}
+				}
+
+				return MakeInt(truncated), nil
+			}}, nil
+
+		case "__int__":
+			return &PyBuiltinFunc{Name: "int.__int__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__float__":
+			return &PyBuiltinFunc{Name: "int.__float__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					f, _ := v.BigValue.Float64()
+					return &PyFloat{Value: f}, nil
+				}
+				return &PyFloat{Value: float64(v.Value)}, nil
+			}}, nil
+
+		case "__index__":
+			return &PyBuiltinFunc{Name: "int.__index__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("AttributeError: 'int' object has no attribute '%s'", name)
+
 	case *PyFloat:
-		if name == "is_integer" {
-			f := o
+		f := o
+		switch name {
+		// Properties
+		case "real":
+			return f, nil
+		case "imag":
+			return &PyFloat{Value: 0.0}, nil
+
+		// Methods
+		case "is_integer":
 			return &PyBuiltinFunc{Name: "float.is_integer", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				if f.Value == float64(int64(f.Value)) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return False, nil
+				}
+				if f.Value == math.Trunc(f.Value) {
 					return True, nil
 				}
 				return False, nil
 			}}, nil
+
+		case "conjugate":
+			return &PyBuiltinFunc{Name: "float.conjugate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return f, nil
+			}}, nil
+
+		case "hex":
+			return &PyBuiltinFunc{Name: "float.hex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyString{Value: floatHex(f.Value)}, nil
+			}}, nil
+
+		case "fromhex":
+			return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return floatFromHexImpl(args)
+			}}, nil
+
+		case "as_integer_ratio":
+			return &PyBuiltinFunc{Name: "float.as_integer_ratio", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) {
+					return nil, fmt.Errorf("OverflowError: cannot convert Infinity to integer ratio")
+				}
+				if math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("ValueError: cannot convert NaN to integer ratio")
+				}
+				num, den := floatAsIntegerRatio(f.Value)
+				return &PyTuple{Items: []Value{num, den}}, nil
+			}}, nil
+
+		// Dunder methods
+		case "__abs__":
+			return &PyBuiltinFunc{Name: "float.__abs__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyFloat{Value: math.Abs(f.Value)}, nil
+			}}, nil
+
+		case "__bool__":
+			return &PyBuiltinFunc{Name: "float.__bool__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if f.Value == 0.0 {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+
+		case "__ceil__":
+			return &PyBuiltinFunc{Name: "float.__ceil__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Ceil(f.Value))), nil
+			}}, nil
+
+		case "__floor__":
+			return &PyBuiltinFunc{Name: "float.__floor__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Floor(f.Value))), nil
+			}}, nil
+
+		case "__trunc__":
+			return &PyBuiltinFunc{Name: "float.__trunc__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Trunc(f.Value))), nil
+			}}, nil
+
+		case "__round__":
+			return &PyBuiltinFunc{Name: "float.__round__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) == 0 {
+					// No ndigits: return int with banker's rounding
+					if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+						return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+					}
+					return MakeInt(int64(math.RoundToEven(f.Value))), nil
+				}
+				if args[0] == None {
+					if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+						return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+					}
+					return MakeInt(int64(math.RoundToEven(f.Value))), nil
+				}
+				ndigits := int(vm.toInt(args[0]))
+				pow := math.Pow(10, float64(ndigits))
+				return &PyFloat{Value: math.RoundToEven(f.Value*pow) / pow}, nil
+			}}, nil
+
+		case "__int__":
+			return &PyBuiltinFunc{Name: "float.__int__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(f.Value)), nil
+			}}, nil
+
+		case "__float__":
+			return &PyBuiltinFunc{Name: "float.__float__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return f, nil
+			}}, nil
 		}
+		return nil, fmt.Errorf("AttributeError: 'float' object has no attribute '%s'", name)
+
 	case *PyList:
 		lst := o
 		switch name {
@@ -2153,6 +2630,259 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		case "encode":
 			return &PyBuiltinFunc{Name: "str.encode", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				return &PyBytes{Value: []byte(str.Value)}, nil
+			}}, nil
+
+		case "casefold":
+			return &PyBuiltinFunc{Name: "str.casefold", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// casefold is like lower() but more aggressive for caseless matching
+				// Go's strings.ToLower handles most Unicode casefolding
+				// For full CPython compatibility we'd need special cases (e.g. ß → ss)
+				// but strings.ToLower is a good approximation
+				result := []rune{}
+				for _, r := range str.Value {
+					// Handle special casefold cases
+					if r == 'ß' || r == 'ẞ' {
+						result = append(result, 's', 's')
+					} else {
+						result = append(result, []rune(strings.ToLower(string(r)))...)
+					}
+				}
+				return &PyString{Value: string(result)}, nil
+			}}, nil
+
+		case "isascii":
+			return &PyBuiltinFunc{Name: "str.isascii", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// Empty string returns True (CPython behavior)
+				for _, r := range str.Value {
+					if r > 127 {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+
+		case "isdecimal":
+			return &PyBuiltinFunc{Name: "str.isdecimal", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(str.Value) == 0 {
+					return False, nil
+				}
+				for _, r := range str.Value {
+					// Decimal digits are Unicode category Nd with digit value
+					if r < '0' || r > '9' {
+						// Check for other Unicode decimal digits
+						if !unicode.Is(unicode.Nd, r) {
+							return False, nil
+						}
+					}
+				}
+				return True, nil
+			}}, nil
+
+		case "isnumeric":
+			return &PyBuiltinFunc{Name: "str.isnumeric", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(str.Value) == 0 {
+					return False, nil
+				}
+				for _, r := range str.Value {
+					// Numeric includes digits, fractions, subscripts, superscripts, etc.
+					if !unicode.Is(unicode.Nd, r) && !unicode.Is(unicode.Nl, r) && !unicode.Is(unicode.No, r) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+
+		case "isidentifier":
+			return &PyBuiltinFunc{Name: "str.isidentifier", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(str.Value) == 0 {
+					return False, nil
+				}
+				for i, r := range str.Value {
+					if i == 0 {
+						if r != '_' && !unicode.IsLetter(r) {
+							return False, nil
+						}
+					} else {
+						if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+							return False, nil
+						}
+					}
+				}
+				return True, nil
+			}}, nil
+
+		case "isprintable":
+			return &PyBuiltinFunc{Name: "str.isprintable", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// Empty string returns True (CPython behavior)
+				for _, r := range str.Value {
+					if !unicode.IsPrint(r) {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+
+		case "istitle":
+			return &PyBuiltinFunc{Name: "str.istitle", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(str.Value) == 0 {
+					return False, nil
+				}
+				// A titlecased string has uppercase after uncased chars
+				// and lowercase after cased chars
+				prevCased := false
+				hasCased := false
+				for _, r := range str.Value {
+					if unicode.IsUpper(r) || unicode.IsTitle(r) {
+						if prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else if unicode.IsLower(r) {
+						if !prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else {
+						prevCased = false
+					}
+				}
+				if !hasCased {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+
+		case "removeprefix":
+			return &PyBuiltinFunc{Name: "str.removeprefix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removeprefix() takes exactly one argument (%d given)", len(args))
+				}
+				prefix, ok := args[0].(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removeprefix arg must be str, not '%s'", vm.typeName(args[0]))
+				}
+				if strings.HasPrefix(str.Value, prefix.Value) {
+					return &PyString{Value: str.Value[len(prefix.Value):]}, nil
+				}
+				return str, nil
+			}}, nil
+
+		case "removesuffix":
+			return &PyBuiltinFunc{Name: "str.removesuffix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removesuffix() takes exactly one argument (%d given)", len(args))
+				}
+				suffix, ok := args[0].(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removesuffix arg must be str, not '%s'", vm.typeName(args[0]))
+				}
+				if suffix.Value != "" && strings.HasSuffix(str.Value, suffix.Value) {
+					return &PyString{Value: str.Value[:len(str.Value)-len(suffix.Value)]}, nil
+				}
+				return str, nil
+			}}, nil
+
+		case "format_map":
+			return &PyBuiltinFunc{Name: "str.format_map", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: format_map() takes exactly one argument (%d given)", len(args))
+				}
+				mapping, ok := args[0].(*PyDict)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: format_map() argument must be a mapping, not '%s'", vm.typeName(args[0]))
+				}
+				// Build format args from the mapping
+				template := str.Value
+				var result strings.Builder
+				i := 0
+				for i < len(template) {
+					if template[i] == '{' {
+						if i+1 < len(template) && template[i+1] == '{' {
+							result.WriteByte('{')
+							i += 2
+							continue
+						}
+						j := i + 1
+						for j < len(template) && template[j] != '}' {
+							j++
+						}
+						if j >= len(template) {
+							return nil, fmt.Errorf("ValueError: Single '{' encountered in format string")
+						}
+						field := template[i+1 : j]
+						var fieldName, formatSpec string
+						if colonIdx := strings.Index(field, ":"); colonIdx >= 0 {
+							fieldName = field[:colonIdx]
+							formatSpec = field[colonIdx+1:]
+						} else {
+							fieldName = field
+						}
+						val, found := mapping.DictGet(&PyString{Value: fieldName}, vm)
+						if !found {
+							return nil, fmt.Errorf("KeyError: '%s'", fieldName)
+						}
+						if formatSpec != "" {
+							formatted, err := vm.formatValue(val, formatSpec)
+							if err != nil {
+								return nil, err
+							}
+							result.WriteString(formatted)
+						} else {
+							result.WriteString(vm.str(val))
+						}
+						i = j + 1
+					} else if template[i] == '}' {
+						if i+1 < len(template) && template[i+1] == '}' {
+							result.WriteByte('}')
+							i += 2
+							continue
+						}
+						return nil, fmt.Errorf("ValueError: Single '}' encountered in format string")
+					} else {
+						result.WriteByte(template[i])
+						i++
+					}
+				}
+				return &PyString{Value: result.String()}, nil
+			}}, nil
+
+		case "maketrans":
+			return &PyBuiltinFunc{Name: "str.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return strMaketransImpl(vm, args)
+			}}, nil
+
+		case "translate":
+			return &PyBuiltinFunc{Name: "str.translate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: translate() takes exactly one argument (%d given)", len(args))
+				}
+				table, ok := args[0].(*PyDict)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: translate() argument must be a dict")
+				}
+				var result strings.Builder
+				for _, r := range str.Value {
+					key := MakeInt(int64(r))
+					if val, found := table.DictGet(key, vm); found {
+						if val == None {
+							// Delete the character
+							continue
+						}
+						switch v := val.(type) {
+						case *PyString:
+							result.WriteString(v.Value)
+						case *PyInt:
+							result.WriteRune(rune(v.Value))
+						default:
+							result.WriteRune(r)
+						}
+					} else {
+						result.WriteRune(r)
+					}
+				}
+				return &PyString{Value: result.String()}, nil
 			}}, nil
 		}
 	case *PyBytes:
@@ -2941,8 +3671,166 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				return &PyList{Items: items}, nil
 			}}, nil
+		case "removeprefix":
+			return &PyBuiltinFunc{Name: "bytes.removeprefix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removeprefix() takes exactly one argument (%d given)", len(args))
+				}
+				prefix, ok := args[0].(*PyBytes)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removeprefix arg must be bytes, not '%s'", vm.typeName(args[0]))
+				}
+				if len(prefix.Value) <= len(b.Value) && bytesStartsWith(b.Value, prefix.Value) {
+					return &PyBytes{Value: b.Value[len(prefix.Value):]}, nil
+				}
+				return b, nil
+			}}, nil
+		case "removesuffix":
+			return &PyBuiltinFunc{Name: "bytes.removesuffix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removesuffix() takes exactly one argument (%d given)", len(args))
+				}
+				suffix, ok := args[0].(*PyBytes)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removesuffix arg must be bytes, not '%s'", vm.typeName(args[0]))
+				}
+				if len(suffix.Value) > 0 && len(suffix.Value) <= len(b.Value) && bytesEndsWith(b.Value, suffix.Value) {
+					return &PyBytes{Value: b.Value[:len(b.Value)-len(suffix.Value)]}, nil
+				}
+				return b, nil
+			}}, nil
+		case "isascii":
+			return &PyBuiltinFunc{Name: "bytes.isascii", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for _, c := range b.Value {
+					if c > 127 {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "istitle":
+			return &PyBuiltinFunc{Name: "bytes.istitle", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(b.Value) == 0 {
+					return False, nil
+				}
+				prevCased := false
+				hasCased := false
+				for _, c := range b.Value {
+					isUpper := c >= 'A' && c <= 'Z'
+					isLower := c >= 'a' && c <= 'z'
+					if isUpper {
+						if prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else if isLower {
+						if !prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else {
+						prevCased = false
+					}
+				}
+				if !hasCased {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+		case "maketrans":
+			return &PyBuiltinFunc{Name: "bytes.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return bytesMaketransImpl(args)
+			}}, nil
+		case "translate":
+			return &PyBuiltinFunc{Name: "bytes.translate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("TypeError: translate() takes at least 1 argument")
+				}
+				var table []byte
+				if args[0] != None {
+					t, ok := args[0].(*PyBytes)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: translate() argument 1 must be bytes or None")
+					}
+					if len(t.Value) != 256 {
+						return nil, fmt.Errorf("ValueError: translation table must be 256 characters long")
+					}
+					table = t.Value
+				}
+				// Optional second argument: bytes to delete
+				var deleteSet [256]bool
+				if len(args) >= 2 {
+					del, ok := args[1].(*PyBytes)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: translate() argument 2 must be bytes")
+					}
+					for _, c := range del.Value {
+						deleteSet[c] = true
+					}
+				}
+				result := make([]byte, 0, len(b.Value))
+				for _, c := range b.Value {
+					if deleteSet[c] {
+						continue
+					}
+					if table != nil {
+						result = append(result, table[c])
+					} else {
+						result = append(result, c)
+					}
+				}
+				return &PyBytes{Value: result}, nil
+			}}, nil
 		}
-		return nil, fmt.Errorf("'bytes' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'bytes' object has no attribute '%s'", name)
+
+	case *PyRange:
+		r := o
+		switch name {
+		case "start":
+			return MakeInt(r.Start), nil
+		case "stop":
+			return MakeInt(r.Stop), nil
+		case "step":
+			return MakeInt(r.Step), nil
+		case "count":
+			return &PyBuiltinFunc{Name: "range.count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: count() takes exactly one argument (%d given)", len(args))
+				}
+				val, ok := args[0].(*PyInt)
+				if !ok {
+					return MakeInt(0), nil
+				}
+				v := val.Value
+				if r.Contains(v) {
+					return MakeInt(1), nil
+				}
+				return MakeInt(0), nil
+			}}, nil
+		case "index":
+			return &PyBuiltinFunc{Name: "range.index", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: index() takes exactly one argument (%d given)", len(args))
+				}
+				val, ok := args[0].(*PyInt)
+				if !ok {
+					return nil, fmt.Errorf("ValueError: %s is not in range", vm.str(args[0]))
+				}
+				v := val.Value
+				if !r.Contains(v) {
+					return nil, fmt.Errorf("ValueError: %d is not in range", v)
+				}
+				if r.Step > 0 {
+					return MakeInt((v - r.Start) / r.Step), nil
+				}
+				return MakeInt((r.Start - v) / (-r.Step)), nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("AttributeError: 'range' object has no attribute '%s'", name)
+
 	case *PyFunction:
 		switch name {
 		case "__name__":
@@ -2960,7 +3848,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					}
 				}
 			}
-			return nil, fmt.Errorf("'function' object has no attribute '__wrapped__'")
+			return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '__wrapped__'")
 		}
 		// Check custom attributes
 		if o.Dict != nil {
@@ -2968,7 +3856,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return val, nil
 			}
 		}
-		return nil, fmt.Errorf("'function' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '%s'", name)
 	case *PyBuiltinFunc:
 		// Handle class methods on builtin types (e.g., dict.fromkeys)
 		if o.Name == "dict" && name == "fromkeys" {
@@ -2991,13 +3879,315 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return result, nil
 			}}, nil
 		}
+		if o.Name == "bytes" && name == "maketrans" {
+			return &PyBuiltinFunc{Name: "bytes.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return bytesMaketransImpl(args)
+			}}, nil
+		}
+		if o.Name == "str" && name == "maketrans" {
+			return &PyBuiltinFunc{Name: "str.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return strMaketransImpl(vm, args)
+			}}, nil
+		}
+		if o.Name == "float" && name == "fromhex" {
+			return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return floatFromHexImpl(args)
+			}}, nil
+		}
+		if o.Name == "int" && name == "from_bytes" {
+			return &PyBuiltinFunc{Name: "int.from_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return intFromBytesImpl(vm, args, kwargs)
+			}}, nil
+		}
 		// Handle dunder attribute queries on builtin type constructors (e.g., hasattr(list, "__iter__"))
 		if builtinHasDunder(o.Name, name) {
 			return &PyBuiltinFunc{Name: o.Name + "." + name}, nil
 		}
 	}
 
-	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(obj), name)
+}
+
+// intFromBytesImpl implements int.from_bytes(bytes, byteorder, *, signed=False)
+func intFromBytesImpl(vm *VM, args []Value, kwargs map[string]Value) (Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("TypeError: from_bytes() missing required argument: 'bytes'")
+	}
+
+	var data []byte
+	switch b := args[0].(type) {
+	case *PyBytes:
+		data = b.Value
+	case *PyList:
+		data = make([]byte, len(b.Items))
+		for i, item := range b.Items {
+			data[i] = byte(vm.toInt(item))
+		}
+	case *PyTuple:
+		data = make([]byte, len(b.Items))
+		for i, item := range b.Items {
+			data[i] = byte(vm.toInt(item))
+		}
+	default:
+		return nil, fmt.Errorf("TypeError: cannot convert '%s' object to bytes", vm.typeName(args[0]))
+	}
+
+	byteorder := ""
+	if len(args) >= 2 {
+		if s, ok := args[1].(*PyString); ok {
+			byteorder = s.Value
+		} else {
+			return nil, fmt.Errorf("TypeError: from_bytes() argument 'byteorder' must be str")
+		}
+	} else if kv, ok := kwargs["byteorder"]; ok {
+		if s, ok := kv.(*PyString); ok {
+			byteorder = s.Value
+		} else {
+			return nil, fmt.Errorf("TypeError: from_bytes() argument 'byteorder' must be str")
+		}
+	} else {
+		return nil, fmt.Errorf("TypeError: from_bytes() missing required argument: 'byteorder'")
+	}
+
+	if byteorder != "big" && byteorder != "little" {
+		return nil, fmt.Errorf("ValueError: byteorder must be either 'little' or 'big'")
+	}
+
+	signed := false
+	if kv, ok := kwargs["signed"]; ok {
+		signed = vm.Truthy(kv)
+	}
+
+	// Make a copy to avoid mutating
+	b := make([]byte, len(data))
+	copy(b, data)
+
+	if byteorder == "little" {
+		// Reverse to big-endian for processing
+		for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+			b[i], b[j] = b[j], b[i]
+		}
+	}
+
+	// Convert bytes to integer (big-endian)
+	var result uint64
+	if len(b) <= 8 {
+		for _, byteVal := range b {
+			result = (result << 8) | uint64(byteVal)
+		}
+		if signed && len(b) > 0 && b[0]&0x80 != 0 {
+			// Sign extend
+			for i := len(b); i < 8; i++ {
+				result |= 0xff << (uint(i) * 8)
+			}
+			return MakeInt(int64(result)), nil
+		}
+		return MakeInt(int64(result)), nil
+	}
+
+	// For larger values, use big.Int
+	bi := new(big.Int).SetBytes(b)
+	if signed && len(b) > 0 && b[0]&0x80 != 0 {
+		// Subtract 2^(len*8) for negative
+		twoN := new(big.Int).Lsh(big.NewInt(1), uint(len(b)*8))
+		bi.Sub(bi, twoN)
+	}
+	return MakeBigInt(bi), nil
+}
+
+// formatSpecialFloat returns "infinity" or "NaN" for error messages.
+func formatSpecialFloat(f float64) string {
+	if math.IsInf(f, 0) {
+		return "infinity"
+	}
+	return "NaN"
+}
+
+// floatHex returns the hex representation of a float64, matching Python's float.hex().
+func floatHex(f float64) string {
+	if math.IsInf(f, 1) {
+		return "inf"
+	}
+	if math.IsInf(f, -1) {
+		return "-inf"
+	}
+	if math.IsNaN(f) {
+		return "nan"
+	}
+
+	sign := ""
+	if math.Signbit(f) {
+		sign = "-"
+		f = -f
+	}
+
+	if f == 0 {
+		return sign + "0x0.0000000000000p+0"
+	}
+
+	fbits := math.Float64bits(f)
+	mantissa := fbits & ((1 << 52) - 1)
+	biasedExp := int((fbits >> 52) & 0x7ff)
+
+	if biasedExp == 0 {
+		// Subnormal
+		return fmt.Sprintf("%s0x0.%013xp-1022", sign, mantissa)
+	}
+	// Normal
+	exp := biasedExp - 1023
+	return fmt.Sprintf("%s0x1.%013xp%+d", sign, mantissa, exp)
+}
+
+// floatFromHexImpl implements float.fromhex(string).
+func floatFromHexImpl(args []Value) (Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("TypeError: float.fromhex() requires a string argument")
+	}
+	s, ok := args[0].(*PyString)
+	if !ok {
+		return nil, fmt.Errorf("TypeError: float.fromhex() argument must be a string")
+	}
+	str := strings.TrimSpace(s.Value)
+	f, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return nil, fmt.Errorf("ValueError: could not convert string to float: '%s'", s.Value)
+	}
+	return &PyFloat{Value: f}, nil
+}
+
+// floatAsIntegerRatio returns (numerator, denominator) for a finite float.
+func floatAsIntegerRatio(f float64) (Value, Value) {
+	if f == 0 {
+		if math.Signbit(f) {
+			return MakeInt(0), MakeInt(1)
+		}
+		return MakeInt(0), MakeInt(1)
+	}
+
+	// Use math.Frexp: f = frac * 2^exp, 0.5 <= |frac| < 1.0
+	frac, exp := math.Frexp(f)
+
+	// Multiply frac by 2^53 to get an exact integer mantissa
+	// (float64 has 53 bits of significand)
+	mantissa := int64(frac * (1 << 53))
+	exp -= 53
+
+	// Remove trailing zeros from mantissa to reduce the fraction
+	for mantissa != 0 && mantissa%2 == 0 {
+		mantissa /= 2
+		exp++
+	}
+
+	if exp >= 0 {
+		// numerator = mantissa * 2^exp, denominator = 1
+		if exp <= 62 {
+			return MakeInt(mantissa * (1 << uint(exp))), MakeInt(1)
+		}
+		// Large shift — use big.Int
+		num := new(big.Int).SetInt64(mantissa)
+		num.Lsh(num, uint(exp))
+		return MakeBigInt(num), MakeInt(1)
+	}
+
+	// numerator = mantissa, denominator = 2^(-exp)
+	negExp := uint(-exp)
+	if negExp <= 62 {
+		return MakeInt(mantissa), MakeInt(1 << negExp)
+	}
+	den := new(big.Int).Lsh(big.NewInt(1), negExp)
+	return MakeInt(mantissa), MakeBigInt(den)
+}
+
+// bytesMaketransImpl implements bytes.maketrans(from, to).
+func bytesMaketransImpl(args []Value) (Value, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("TypeError: maketrans() takes exactly 2 arguments (%d given)", len(args))
+	}
+	from, ok1 := args[0].(*PyBytes)
+	to, ok2 := args[1].(*PyBytes)
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("TypeError: maketrans arguments must be bytes")
+	}
+	if len(from.Value) != len(to.Value) {
+		return nil, fmt.Errorf("ValueError: maketrans arguments must have same length")
+	}
+	table := make([]byte, 256)
+	for i := range table {
+		table[i] = byte(i)
+	}
+	for i, f := range from.Value {
+		table[f] = to.Value[i]
+	}
+	return &PyBytes{Value: table}, nil
+}
+
+// strMaketransImpl implements str.maketrans(x[, y[, z]]).
+func strMaketransImpl(vm *VM, args []Value) (Value, error) {
+	result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
+	if len(args) == 1 {
+		d, ok := args[0].(*PyDict)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: if you give only one argument to maketrans it must be a dict")
+		}
+		for _, key := range d.Keys(vm) {
+			val, _ := d.DictGet(key, vm)
+			var intKey Value
+			switch k := key.(type) {
+			case *PyString:
+				runes := []rune(k.Value)
+				if len(runes) != 1 {
+					return nil, fmt.Errorf("ValueError: string keys in translate table must be of length 1, found %d", len(runes))
+				}
+				intKey = MakeInt(int64(runes[0]))
+			case *PyInt:
+				intKey = k
+			default:
+				return nil, fmt.Errorf("TypeError: keys in translate table must be strings or integers")
+			}
+			switch v := val.(type) {
+			case *PyString:
+				runes := []rune(v.Value)
+				if len(runes) == 1 {
+					result.DictSet(intKey, MakeInt(int64(runes[0])), vm)
+				} else {
+					result.DictSet(intKey, val, vm)
+				}
+			case *PyInt:
+				result.DictSet(intKey, val, vm)
+			case *PyNone:
+				result.DictSet(intKey, None, vm)
+			default:
+				result.DictSet(intKey, val, vm)
+			}
+		}
+		return result, nil
+	}
+	if len(args) < 2 {
+		return nil, fmt.Errorf("TypeError: maketrans requires 1 or 2-3 string arguments")
+	}
+	x, ok1 := args[0].(*PyString)
+	y, ok2 := args[1].(*PyString)
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("TypeError: maketrans arguments must be strings")
+	}
+	xRunes := []rune(x.Value)
+	yRunes := []rune(y.Value)
+	if len(xRunes) != len(yRunes) {
+		return nil, fmt.Errorf("ValueError: the first two maketrans arguments must have equal length")
+	}
+	for i, r := range xRunes {
+		result.DictSet(MakeInt(int64(r)), MakeInt(int64(yRunes[i])), vm)
+	}
+	if len(args) >= 3 {
+		z, ok := args[2].(*PyString)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: maketrans third argument must be a string")
+		}
+		for _, r := range z.Value {
+			result.DictSet(MakeInt(int64(r)), None, vm)
+		}
+	}
+	return result, nil
 }
 
 func (vm *VM) setAttr(obj Value, name string, val Value) error {
