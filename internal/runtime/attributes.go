@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"math/bits"
 	"sort"
@@ -185,6 +186,7 @@ var builtinTypeDunders = map[string]map[string]bool{
 		"__gt__": true, "__ge__": true,
 		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
 		"__int__": true, "__float__": true, "__bool__": true,
+		"__ceil__": true, "__floor__": true, "__round__": true, "__trunc__": true,
 	},
 	"bool": {
 		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
@@ -322,7 +324,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return None, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'generator' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'generator' object has no attribute '%s'", name)
 
 	case *PyCoroutine:
 		coro := o
@@ -370,7 +372,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return None, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'coroutine' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'coroutine' object has no attribute '%s'", name)
 
 	case *PyComplex:
 		switch name {
@@ -384,7 +386,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return MakeComplex(c.Real, -c.Imag), nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'complex' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'complex' object has no attribute '%s'", name)
 
 	case *PyException:
 		switch name {
@@ -446,7 +448,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		if o.Instance != nil {
 			return vm.getAttr(o.Instance, name)
 		}
-		return nil, fmt.Errorf("'%s' object has no attribute '%s'", o.Type(), name)
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Type(), name)
 
 	case *PyModule:
 		if val, ok := o.Dict[name]; ok {
@@ -512,7 +514,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 			}
 		}
-		return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(obj), name)
 	case *PyProperty:
 		prop := o
 		switch name {
@@ -579,11 +581,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		case "__doc__":
 			return &PyString{Value: prop.Doc}, nil
 		}
-		return nil, fmt.Errorf("'property' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'property' object has no attribute '%s'", name)
 	case *PySuper:
 		// super() proxy - look up attribute in MRO starting after ThisClass
 		if o.Instance == nil {
-			return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+			return nil, fmt.Errorf("AttributeError: 'super' object has no attribute '%s'", name)
 		}
 
 		// Get the MRO to search
@@ -667,7 +669,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return val, nil
 			}
 		}
-		return nil, fmt.Errorf("'super' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'super' object has no attribute '%s'", name)
 
 	case *PyInstance:
 		// Check for custom __getattribute__ (not inherited from object)
@@ -1698,18 +1700,129 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return v, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'int' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'int' object has no attribute '%s'", name)
 
 	case *PyFloat:
-		if name == "is_integer" {
-			f := o
+		f := o
+		switch name {
+		// Properties
+		case "real":
+			return f, nil
+		case "imag":
+			return &PyFloat{Value: 0.0}, nil
+
+		// Methods
+		case "is_integer":
 			return &PyBuiltinFunc{Name: "float.is_integer", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-				if f.Value == float64(int64(f.Value)) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return False, nil
+				}
+				if f.Value == math.Trunc(f.Value) {
 					return True, nil
 				}
 				return False, nil
 			}}, nil
+
+		case "conjugate":
+			return &PyBuiltinFunc{Name: "float.conjugate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return f, nil
+			}}, nil
+
+		case "hex":
+			return &PyBuiltinFunc{Name: "float.hex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyString{Value: floatHex(f.Value)}, nil
+			}}, nil
+
+		case "fromhex":
+			return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return floatFromHexImpl(args)
+			}}, nil
+
+		case "as_integer_ratio":
+			return &PyBuiltinFunc{Name: "float.as_integer_ratio", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) {
+					return nil, fmt.Errorf("OverflowError: cannot convert Infinity to integer ratio")
+				}
+				if math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("ValueError: cannot convert NaN to integer ratio")
+				}
+				num, den := floatAsIntegerRatio(f.Value)
+				return &PyTuple{Items: []Value{num, den}}, nil
+			}}, nil
+
+		// Dunder methods
+		case "__abs__":
+			return &PyBuiltinFunc{Name: "float.__abs__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyFloat{Value: math.Abs(f.Value)}, nil
+			}}, nil
+
+		case "__bool__":
+			return &PyBuiltinFunc{Name: "float.__bool__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if f.Value == 0.0 {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+
+		case "__ceil__":
+			return &PyBuiltinFunc{Name: "float.__ceil__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Ceil(f.Value))), nil
+			}}, nil
+
+		case "__floor__":
+			return &PyBuiltinFunc{Name: "float.__floor__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Floor(f.Value))), nil
+			}}, nil
+
+		case "__trunc__":
+			return &PyBuiltinFunc{Name: "float.__trunc__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(math.Trunc(f.Value))), nil
+			}}, nil
+
+		case "__round__":
+			return &PyBuiltinFunc{Name: "float.__round__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) == 0 {
+					// No ndigits: return int with banker's rounding
+					if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+						return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+					}
+					return MakeInt(int64(math.RoundToEven(f.Value))), nil
+				}
+				if args[0] == None {
+					if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+						return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+					}
+					return MakeInt(int64(math.RoundToEven(f.Value))), nil
+				}
+				ndigits := int(vm.toInt(args[0]))
+				pow := math.Pow(10, float64(ndigits))
+				return &PyFloat{Value: math.RoundToEven(f.Value*pow) / pow}, nil
+			}}, nil
+
+		case "__int__":
+			return &PyBuiltinFunc{Name: "float.__int__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if math.IsInf(f.Value, 0) || math.IsNaN(f.Value) {
+					return nil, fmt.Errorf("OverflowError: cannot convert float %s to integer", formatSpecialFloat(f.Value))
+				}
+				return MakeInt(int64(f.Value)), nil
+			}}, nil
+
+		case "__float__":
+			return &PyBuiltinFunc{Name: "float.__float__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return f, nil
+			}}, nil
 		}
+		return nil, fmt.Errorf("AttributeError: 'float' object has no attribute '%s'", name)
+
 	case *PyList:
 		lst := o
 		switch name {
@@ -3221,7 +3334,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return &PyList{Items: items}, nil
 			}}, nil
 		}
-		return nil, fmt.Errorf("'bytes' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'bytes' object has no attribute '%s'", name)
 	case *PyFunction:
 		switch name {
 		case "__name__":
@@ -3239,7 +3352,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					}
 				}
 			}
-			return nil, fmt.Errorf("'function' object has no attribute '__wrapped__'")
+			return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '__wrapped__'")
 		}
 		// Check custom attributes
 		if o.Dict != nil {
@@ -3247,7 +3360,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return val, nil
 			}
 		}
-		return nil, fmt.Errorf("'function' object has no attribute '%s'", name)
+		return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '%s'", name)
 	case *PyBuiltinFunc:
 		// Handle class methods on builtin types (e.g., dict.fromkeys)
 		if o.Name == "dict" && name == "fromkeys" {
@@ -3270,6 +3383,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return result, nil
 			}}, nil
 		}
+		if o.Name == "float" && name == "fromhex" {
+			return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return floatFromHexImpl(args)
+			}}, nil
+		}
 		if o.Name == "int" && name == "from_bytes" {
 			return &PyBuiltinFunc{Name: "int.from_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 				return intFromBytesImpl(vm, args, kwargs)
@@ -3281,7 +3399,7 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(obj), name)
 }
 
 // intFromBytesImpl implements int.from_bytes(bytes, byteorder, *, signed=False)
@@ -3369,6 +3487,109 @@ func intFromBytesImpl(vm *VM, args []Value, kwargs map[string]Value) (Value, err
 		bi.Sub(bi, twoN)
 	}
 	return MakeBigInt(bi), nil
+}
+
+// formatSpecialFloat returns "infinity" or "NaN" for error messages.
+func formatSpecialFloat(f float64) string {
+	if math.IsInf(f, 0) {
+		return "infinity"
+	}
+	return "NaN"
+}
+
+// floatHex returns the hex representation of a float64, matching Python's float.hex().
+func floatHex(f float64) string {
+	if math.IsInf(f, 1) {
+		return "inf"
+	}
+	if math.IsInf(f, -1) {
+		return "-inf"
+	}
+	if math.IsNaN(f) {
+		return "nan"
+	}
+
+	sign := ""
+	if math.Signbit(f) {
+		sign = "-"
+		f = -f
+	}
+
+	if f == 0 {
+		return sign + "0x0.0000000000000p+0"
+	}
+
+	fbits := math.Float64bits(f)
+	mantissa := fbits & ((1 << 52) - 1)
+	biasedExp := int((fbits >> 52) & 0x7ff)
+
+	if biasedExp == 0 {
+		// Subnormal
+		return fmt.Sprintf("%s0x0.%013xp-1022", sign, mantissa)
+	}
+	// Normal
+	exp := biasedExp - 1023
+	return fmt.Sprintf("%s0x1.%013xp%+d", sign, mantissa, exp)
+}
+
+// floatFromHexImpl implements float.fromhex(string).
+func floatFromHexImpl(args []Value) (Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("TypeError: float.fromhex() requires a string argument")
+	}
+	s, ok := args[0].(*PyString)
+	if !ok {
+		return nil, fmt.Errorf("TypeError: float.fromhex() argument must be a string")
+	}
+	str := strings.TrimSpace(s.Value)
+	f, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return nil, fmt.Errorf("ValueError: could not convert string to float: '%s'", s.Value)
+	}
+	return &PyFloat{Value: f}, nil
+}
+
+// floatAsIntegerRatio returns (numerator, denominator) for a finite float.
+func floatAsIntegerRatio(f float64) (Value, Value) {
+	if f == 0 {
+		if math.Signbit(f) {
+			return MakeInt(0), MakeInt(1)
+		}
+		return MakeInt(0), MakeInt(1)
+	}
+
+	// Use math.Frexp: f = frac * 2^exp, 0.5 <= |frac| < 1.0
+	frac, exp := math.Frexp(f)
+
+	// Multiply frac by 2^53 to get an exact integer mantissa
+	// (float64 has 53 bits of significand)
+	mantissa := int64(frac * (1 << 53))
+	exp -= 53
+
+	// Remove trailing zeros from mantissa to reduce the fraction
+	for mantissa != 0 && mantissa%2 == 0 {
+		mantissa /= 2
+		exp++
+	}
+
+	if exp >= 0 {
+		// numerator = mantissa * 2^exp, denominator = 1
+		if exp <= 62 {
+			return MakeInt(mantissa * (1 << uint(exp))), MakeInt(1)
+		}
+		// Large shift — use big.Int
+		num := new(big.Int).SetInt64(mantissa)
+		num.Lsh(num, uint(exp))
+		return MakeBigInt(num), MakeInt(1)
+	}
+
+	// numerator = mantissa, denominator = 2^(-exp)
+	negExp := uint(-exp)
+	if negExp <= 62 {
+		return MakeInt(mantissa), MakeInt(1 << negExp)
+	}
+	den := new(big.Int).Lsh(big.NewInt(1), negExp)
+	return MakeInt(mantissa), MakeBigInt(den)
 }
 
 func (vm *VM) setAttr(obj Value, name string, val Value) error {

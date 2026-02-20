@@ -263,7 +263,7 @@ func (vm *VM) getObjectDir(obj Value) []Value {
 			names[name] = true
 		}
 	case *PyFloat:
-		for _, name := range []string{"is_integer", "hex", "fromhex"} {
+		for _, name := range []string{"is_integer", "hex", "fromhex", "as_integer_ratio", "conjugate", "real", "imag"} {
 			names[name] = true
 		}
 	}
