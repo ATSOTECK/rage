@@ -778,6 +778,11 @@ func (vm *VM) CallFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	return vm.callFunction(fn, args, kwargs)
 }
 
+// DefaultClassCall calls the default class instantiation logic (abstract check → __new__ → __init__).
+func (vm *VM) DefaultClassCall(cls *PyClass, args []Value, kwargs map[string]Value) (Value, error) {
+	return vm.defaultClassCall(cls, args, kwargs)
+}
+
 // IsInstanceOf checks if an instance is an instance of a class (including subclasses via MRO).
 func (vm *VM) IsInstanceOf(inst *PyInstance, cls *PyClass) bool {
 	return vm.isInstanceOf(inst, cls)

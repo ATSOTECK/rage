@@ -24,4 +24,5 @@ func InitAllModules() {
 	InitDataclassesModule()
 	InitCopyModule()
 	InitOperatorModule()
+	InitEnumModule()
 }

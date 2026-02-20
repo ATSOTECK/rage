@@ -377,6 +377,16 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			items = append(items, value)
 		}
 		return items, nil
+	case *PyClass:
+		// Check for __iter__ in class dict or MRO
+		if iterMethod, err := vm.getAttr(val, "__iter__"); err == nil {
+			iterResult, err := vm.call(iterMethod, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			return vm.toList(iterResult)
+		}
+		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	case *PyInstance:
 		// Check for __iter__ method
 		if iterResult, found, err := vm.callDunder(val, "__iter__"); found {
