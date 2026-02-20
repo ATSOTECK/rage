@@ -188,7 +188,7 @@ func runAllTests(scriptsDir string) ([]ScriptResult, int, int) {
 }
 
 func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDuration time.Duration) {
-	const repeatCount = 75
+	const repeatCount = 73
 	fmt.Println("\n" + color(colorDim, strings.Repeat("═", repeatCount)))
 	fmt.Println(color(colorBold, "TEST RESULTS"))
 	fmt.Println(color(colorDim, strings.Repeat("═", repeatCount)))
@@ -282,7 +282,7 @@ func printResults(results []ScriptResult, totalPassed, totalFailed int, totalDur
 		passPercentage,
 		failed,
 		failPercentage,
-		color(colorDim, "("+scripts+")"),
+		color(colorDim, scripts),
 		totalTime)
 	fmt.Println(color(colorDim, strings.Repeat("═", repeatCount)))
 }
