@@ -290,32 +290,6 @@ if state.IsModuleEnabled(rage.ModuleMath) {
 }
 ```
 
-### Available Modules
-
-| Module | Constant | Description |
-|--------|----------|-------------|
-| math | `rage.ModuleMath` | Mathematical functions (sin, cos, sqrt, etc.) |
-| random | `rage.ModuleRandom` | Random number generation |
-| string | `rage.ModuleString` | String constants (ascii_letters, digits, etc.) |
-| sys | `rage.ModuleSys` | System information (version, platform) |
-| time | `rage.ModuleTime` | Time functions (time, sleep) |
-| re | `rage.ModuleRe` | Regular expressions |
-| collections | `rage.ModuleCollections` | Container datatypes (Counter, defaultdict) |
-| json | `rage.ModuleJSON` | JSON encoding and decoding |
-| os | `rage.ModuleOS` | OS interface (environ, path manipulation) |
-| datetime | `rage.ModuleDatetime` | Date and time types |
-| typing | `rage.ModuleTyping` | Type hint support |
-| asyncio | `rage.ModuleAsyncio` | Basic async/await support |
-| csv | `rage.ModuleCSV` | CSV file reading and writing |
-| itertools | `rage.ModuleItertools` | Iterator building blocks (chain, combinations, permutations, etc.) |
-| functools | `rage.ModuleFunctools` | Higher-order functions (partial, reduce, lru_cache, wraps) |
-| io | `rage.ModuleIO` | File I/O operations |
-| base64 | `rage.ModuleBase64` | Base16, Base32, Base64 data encodings |
-| abc | `rage.ModuleAbc` | Abstract base classes (ABC, ABCMeta, abstractmethod) |
-| dataclasses | `rage.ModuleDataclasses` | Data class decorator and field utilities |
-| copy | `rage.ModuleCopy` | Shallow and deep copy operations |
-| operator | `rage.ModuleOperator` | Operator functions (length_hint, index) |
-
 ## Working with Values
 
 RAGE uses the `rage.Value` interface to represent Python values.
@@ -426,28 +400,39 @@ if err != nil {
 RAGE is under active development. Currently supported:
 
 ### Implemented
-- Data types: None, bool, int, float, complex, str, bytes, bytearray, list, tuple, dict, set, frozenset, range, slice
-- Operators: arithmetic, comparison, logical, bitwise, matrix multiplication (`@`), in-place operations
-- Control flow: if/elif/else, for, while, break, continue, pass, match/case
-- Functions: def, lambda, recursion, closures, *args, **kwargs, default arguments, nonlocal
-- Classes: class definitions, `__init__`, `__new__`, instance attributes, methods, single and multiple inheritance (C3 linearization), properties, classmethods, staticmethods, metaclasses (`class Foo(metaclass=Meta)`), `__slots__`, `__init_subclass__`, `__set_name__`
-- Exception handling: try/except/else/finally, raise, raise from, custom exception types, exception attributes (`.args`, `.__cause__`, `.__context__`, `.__suppress_context__`), implicit exception chaining, exception groups (`ExceptionGroup`, `BaseExceptionGroup`, `except*` syntax with `.subgroup()`, `.split()`, `.derive()`)
-- Generators: yield, yield from, generator expressions
-- Decorators: function and class decorators
-- Comprehensions: list `[x for x in items]`, dict `{k: v for k, v in items}`, set `{x for x in items}`
-- Imports: import, from...import, relative imports
-- Context managers: with statement support
-- String formatting: f-strings, `%` printf-style (`%s`, `%d`, `%f`, `%e`, `%g`, `%x`, `%o`, `%c`, `%(key)s` dict formatting, flags, `*` width/precision)
-- Walrus operator: assignment expressions (`:=`)
-- Extended unpacking: `a, *rest, b = [1, 2, 3, 4]`
-- Descriptor protocol: `__get__`, `__set__`, `__delete__`, `__set_name__` (data descriptors, non-data descriptors, class-level access)
-- Dunder methods for custom classes: `__new__`, `__init__`, `__del__`, `__str__`, `__repr__`, `__call__`, `__hash__`, `__len__`, `__iter__`, `__next__`, `__contains__`, `__getattr__`, `__getattribute__`, `__setattr__`, `__delattr__`, `__dir__`, `__getitem__`, `__setitem__`, `__delitem__`, `__missing__`, `__enter__`, `__exit__`, `__mro_entries__`, `__bool__`, `__int__`, `__index__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, `__bytes__`, `__format__`, `__sizeof__`, `__copy__`, `__deepcopy__`, `__class_getitem__`, operator overloading (`__add__`, `__sub__`, `__mul__`, `__matmul__`, `__eq__`, `__lt__`, etc. including reflected variants)
-- Built-in functions: print (with `sep`, `end`, `flush`), len, range, str, int, float, complex, bool, list, dict, tuple, set, bytes, bytearray, type, isinstance, issubclass, abs, min, max, sum, enumerate, zip, map, filter, any, all, reversed, sorted, repr, format, input, ord, chr, hasattr, getattr, setattr, delattr, dir, vars, id, pow, divmod, hex, oct, bin, round, callable, property, classmethod, staticmethod, super, iter, next
+Most of the language has been implemented.
+
+### Available Modules
+
+| Module | Constant | Description |
+|--------|----------|-------------|
+| math | `rage.ModuleMath` | Mathematical functions (sin, cos, sqrt, etc.) |
+| random | `rage.ModuleRandom` | Random number generation |
+| string | `rage.ModuleString` | String constants (ascii_letters, digits, etc.) |
+| sys | `rage.ModuleSys` | System information (version, platform) |
+| time | `rage.ModuleTime` | Time functions (time, sleep) |
+| re | `rage.ModuleRe` | Regular expressions |
+| collections | `rage.ModuleCollections` | Container datatypes (Counter, defaultdict) |
+| json | `rage.ModuleJSON` | JSON encoding and decoding |
+| os | `rage.ModuleOS` | OS interface (environ, path manipulation) |
+| datetime | `rage.ModuleDatetime` | Date and time types |
+| typing | `rage.ModuleTyping` | Type hint support |
+| asyncio | `rage.ModuleAsyncio` | Basic async/await support |
+| csv | `rage.ModuleCSV` | CSV file reading and writing |
+| itertools | `rage.ModuleItertools` | Iterator building blocks (chain, combinations, permutations, etc.) |
+| functools | `rage.ModuleFunctools` | Higher-order functions (partial, reduce, lru_cache, wraps) |
+| io | `rage.ModuleIO` | File I/O operations |
+| base64 | `rage.ModuleBase64` | Base16, Base32, Base64 data encodings |
+| abc | `rage.ModuleAbc` | Abstract base classes (ABC, ABCMeta, abstractmethod) |
+| dataclasses | `rage.ModuleDataclasses` | Data class decorator and field utilities |
+| copy | `rage.ModuleCopy` | Shallow and deep copy operations |
+| operator | `rage.ModuleOperator` | Operator functions (length_hint, index) |
+| enum | `rage.ModuleEnum` | Enumerations (Enum, IntEnum, StrEnum, Flag, IntFlag, auto, unique) |
 
 ### Not Yet Implemented
 - Full async/await - async generators, async context managers (basic support via asyncio module)
 
-### Security Notes
+## Security Notes
 Reflection builtins (`globals`, `locals`, `compile`, `exec`, `eval`) are opt-in and disabled by default. Enable them explicitly if needed:
 
 ```go
