@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"fmt"
+	"math/big"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -173,6 +175,7 @@ var builtinTypeDunders = map[string]map[string]bool{
 		"__gt__": true, "__ge__": true,
 		"__str__": true, "__repr__": true, "__hash__": true, "__class__": true,
 		"__int__": true, "__float__": true, "__bool__": true, "__index__": true,
+		"__ceil__": true, "__floor__": true, "__round__": true, "__trunc__": true,
 	},
 	"float": {
 		"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true,
@@ -1421,6 +1424,282 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return nil, fmt.Errorf("ValueError: tuple.index(x): x not in tuple")
 			}}, nil
 		}
+	case *PyInt:
+		v := o
+		switch name {
+		// Properties
+		case "real":
+			return v, nil
+		case "imag":
+			return MakeInt(0), nil
+		case "numerator":
+			return v, nil
+		case "denominator":
+			return MakeInt(1), nil
+
+		// Methods
+		case "bit_length":
+			return &PyBuiltinFunc{Name: "int.bit_length", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					return MakeInt(int64(v.BigValue.BitLen())), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				if val == 0 {
+					return MakeInt(0), nil
+				}
+				return MakeInt(int64(bits.Len64(uint64(val)))), nil
+			}}, nil
+
+		case "bit_count":
+			return &PyBuiltinFunc{Name: "int.bit_count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					// Count bits in absolute value
+					abs := new(big.Int).Abs(v.BigValue)
+					count := 0
+					for _, word := range abs.Bits() {
+						count += bits.OnesCount(uint(word))
+					}
+					return MakeInt(int64(count)), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				return MakeInt(int64(bits.OnesCount64(uint64(val)))), nil
+			}}, nil
+
+		case "conjugate":
+			return &PyBuiltinFunc{Name: "int.conjugate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "as_integer_ratio":
+			return &PyBuiltinFunc{Name: "int.as_integer_ratio", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return &PyTuple{Items: []Value{v, MakeInt(1)}}, nil
+			}}, nil
+
+		case "to_bytes":
+			return &PyBuiltinFunc{Name: "int.to_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// to_bytes(length, byteorder, *, signed=False)
+				length := 0
+				byteorder := ""
+				signed := false
+
+				if len(args) >= 1 {
+					length = int(vm.toInt(args[0]))
+				} else if kv, ok := kwargs["length"]; ok {
+					length = int(vm.toInt(kv))
+				} else {
+					return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'length'")
+				}
+
+				if len(args) >= 2 {
+					if s, ok := args[1].(*PyString); ok {
+						byteorder = s.Value
+					} else {
+						return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
+					}
+				} else if kv, ok := kwargs["byteorder"]; ok {
+					if s, ok := kv.(*PyString); ok {
+						byteorder = s.Value
+					} else {
+						return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
+					}
+				} else {
+					return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'byteorder'")
+				}
+
+				if byteorder != "big" && byteorder != "little" {
+					return nil, fmt.Errorf("ValueError: byteorder must be either 'little' or 'big'")
+				}
+
+				if kv, ok := kwargs["signed"]; ok {
+					signed = vm.Truthy(kv)
+				}
+
+				val := v.Value
+				if v.BigValue != nil {
+					if v.BigValue.IsInt64() {
+						val = v.BigValue.Int64()
+					} else {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				}
+
+				if val < 0 && !signed {
+					return nil, fmt.Errorf("OverflowError: can't convert negative int to unsigned")
+				}
+
+				var uval uint64
+				if val < 0 {
+					// Two's complement for negative values
+					uval = uint64(val)
+				} else {
+					uval = uint64(val)
+				}
+
+				result := make([]byte, length)
+
+				if signed && val < 0 {
+					// Fill with 0xff for negative numbers (sign extension)
+					for i := range result {
+						result[i] = 0xff
+					}
+				}
+
+				// Write bytes in big-endian order first
+				for i := length - 1; i >= 0; i-- {
+					result[i] = byte(uval & 0xff)
+					uval >>= 8
+				}
+
+				// Check for overflow: if uval still has bits, the number doesn't fit
+				if val >= 0 && uval != 0 {
+					return nil, fmt.Errorf("OverflowError: int too big to convert")
+				}
+				if signed && val < 0 {
+					// For negative signed, check that sign bit is set in the MSB
+					if length > 0 && result[0]&0x80 == 0 {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				} else if !signed && val >= 0 {
+					// Already checked uval == 0 above
+				} else if signed && val >= 0 {
+					// Check sign bit isn't set (would look negative)
+					if length > 0 && result[0]&0x80 != 0 {
+						return nil, fmt.Errorf("OverflowError: int too big to convert")
+					}
+				}
+
+				if byteorder == "little" {
+					// Reverse the bytes
+					for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+						result[i], result[j] = result[j], result[i]
+					}
+				}
+
+				return &PyBytes{Value: result}, nil
+			}}, nil
+
+		case "from_bytes":
+			return &PyBuiltinFunc{Name: "int.from_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return intFromBytesImpl(vm, args, kwargs)
+			}}, nil
+
+		// Dunder methods
+		case "__abs__":
+			return &PyBuiltinFunc{Name: "int.__abs__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					return MakeBigInt(new(big.Int).Abs(v.BigValue)), nil
+				}
+				val := v.Value
+				if val < 0 {
+					val = -val
+				}
+				return MakeInt(val), nil
+			}}, nil
+
+		case "__bool__":
+			return &PyBuiltinFunc{Name: "int.__bool__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					if v.BigValue.Sign() == 0 {
+						return False, nil
+					}
+					return True, nil
+				}
+				if v.Value == 0 {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+
+		case "__ceil__":
+			return &PyBuiltinFunc{Name: "int.__ceil__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__floor__":
+			return &PyBuiltinFunc{Name: "int.__floor__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__trunc__":
+			return &PyBuiltinFunc{Name: "int.__trunc__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__round__":
+			return &PyBuiltinFunc{Name: "int.__round__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				// __round__(ndigits=None)
+				if len(args) == 0 {
+					return v, nil
+				}
+				if args[0] == None {
+					return v, nil
+				}
+				ndigits := int(vm.toInt(args[0]))
+				if ndigits >= 0 {
+					return v, nil
+				}
+				// Negative ndigits: round to nearest 10^(-ndigits) with banker's rounding
+				val := v.Value
+				pow := int64(1)
+				for i := 0; i < -ndigits; i++ {
+					pow *= 10
+				}
+				remainder := val % pow
+				truncated := val - remainder
+				half := pow / 2
+
+				if remainder < 0 {
+					remainder = -remainder
+				}
+
+				if remainder > half {
+					if val >= 0 {
+						truncated += pow
+					} else {
+						truncated -= pow
+					}
+				} else if remainder == half {
+					// Banker's rounding: round to even
+					quotient := truncated / pow
+					if quotient%2 != 0 {
+						if val >= 0 {
+							truncated += pow
+						} else {
+							truncated -= pow
+						}
+					}
+				}
+
+				return MakeInt(truncated), nil
+			}}, nil
+
+		case "__int__":
+			return &PyBuiltinFunc{Name: "int.__int__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+
+		case "__float__":
+			return &PyBuiltinFunc{Name: "int.__float__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if v.BigValue != nil {
+					f, _ := v.BigValue.Float64()
+					return &PyFloat{Value: f}, nil
+				}
+				return &PyFloat{Value: float64(v.Value)}, nil
+			}}, nil
+
+		case "__index__":
+			return &PyBuiltinFunc{Name: "int.__index__", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return v, nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("'int' object has no attribute '%s'", name)
+
 	case *PyFloat:
 		if name == "is_integer" {
 			f := o
@@ -2991,6 +3270,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				return result, nil
 			}}, nil
 		}
+		if o.Name == "int" && name == "from_bytes" {
+			return &PyBuiltinFunc{Name: "int.from_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return intFromBytesImpl(vm, args, kwargs)
+			}}, nil
+		}
 		// Handle dunder attribute queries on builtin type constructors (e.g., hasattr(list, "__iter__"))
 		if builtinHasDunder(o.Name, name) {
 			return &PyBuiltinFunc{Name: o.Name + "." + name}, nil
@@ -2998,6 +3282,93 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 	}
 
 	return nil, fmt.Errorf("'%s' object has no attribute '%s'", vm.typeName(obj), name)
+}
+
+// intFromBytesImpl implements int.from_bytes(bytes, byteorder, *, signed=False)
+func intFromBytesImpl(vm *VM, args []Value, kwargs map[string]Value) (Value, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("TypeError: from_bytes() missing required argument: 'bytes'")
+	}
+
+	var data []byte
+	switch b := args[0].(type) {
+	case *PyBytes:
+		data = b.Value
+	case *PyList:
+		data = make([]byte, len(b.Items))
+		for i, item := range b.Items {
+			data[i] = byte(vm.toInt(item))
+		}
+	case *PyTuple:
+		data = make([]byte, len(b.Items))
+		for i, item := range b.Items {
+			data[i] = byte(vm.toInt(item))
+		}
+	default:
+		return nil, fmt.Errorf("TypeError: cannot convert '%s' object to bytes", vm.typeName(args[0]))
+	}
+
+	byteorder := ""
+	if len(args) >= 2 {
+		if s, ok := args[1].(*PyString); ok {
+			byteorder = s.Value
+		} else {
+			return nil, fmt.Errorf("TypeError: from_bytes() argument 'byteorder' must be str")
+		}
+	} else if kv, ok := kwargs["byteorder"]; ok {
+		if s, ok := kv.(*PyString); ok {
+			byteorder = s.Value
+		} else {
+			return nil, fmt.Errorf("TypeError: from_bytes() argument 'byteorder' must be str")
+		}
+	} else {
+		return nil, fmt.Errorf("TypeError: from_bytes() missing required argument: 'byteorder'")
+	}
+
+	if byteorder != "big" && byteorder != "little" {
+		return nil, fmt.Errorf("ValueError: byteorder must be either 'little' or 'big'")
+	}
+
+	signed := false
+	if kv, ok := kwargs["signed"]; ok {
+		signed = vm.Truthy(kv)
+	}
+
+	// Make a copy to avoid mutating
+	b := make([]byte, len(data))
+	copy(b, data)
+
+	if byteorder == "little" {
+		// Reverse to big-endian for processing
+		for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+			b[i], b[j] = b[j], b[i]
+		}
+	}
+
+	// Convert bytes to integer (big-endian)
+	var result uint64
+	if len(b) <= 8 {
+		for _, byteVal := range b {
+			result = (result << 8) | uint64(byteVal)
+		}
+		if signed && len(b) > 0 && b[0]&0x80 != 0 {
+			// Sign extend
+			for i := len(b); i < 8; i++ {
+				result |= 0xff << (uint(i) * 8)
+			}
+			return MakeInt(int64(result)), nil
+		}
+		return MakeInt(int64(result)), nil
+	}
+
+	// For larger values, use big.Int
+	bi := new(big.Int).SetBytes(b)
+	if signed && len(b) > 0 && b[0]&0x80 != 0 {
+		// Subtract 2^(len*8) for negative
+		twoN := new(big.Int).Lsh(big.NewInt(1), uint(len(b)*8))
+		bi.Sub(bi, twoN)
+	}
+	return MakeBigInt(bi), nil
 }
 
 func (vm *VM) setAttr(obj Value, name string, val Value) error {

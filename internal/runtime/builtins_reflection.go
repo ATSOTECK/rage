@@ -259,7 +259,7 @@ func (vm *VM) getObjectDir(obj Value) []Value {
 			names[name] = true
 		}
 	case *PyInt:
-		for _, name := range []string{"bit_length", "to_bytes", "from_bytes"} {
+		for _, name := range []string{"bit_length", "bit_count", "conjugate", "as_integer_ratio", "to_bytes", "from_bytes", "real", "imag", "numerator", "denominator"} {
 			names[name] = true
 		}
 	case *PyFloat:
