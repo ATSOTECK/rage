@@ -248,6 +248,9 @@ func (vm *VM) getObjectDir(obj Value) []Value {
 				names[s.Value] = true
 			}
 		}
+		for _, name := range []string{"clear", "copy", "fromkeys", "get", "items", "keys", "pop", "popitem", "setdefault", "update", "values"} {
+			names[name] = true
+		}
 	case *PyList:
 		// List methods
 		for _, name := range []string{"append", "clear", "copy", "count", "extend", "index", "insert", "pop", "remove", "reverse", "sort"} {
@@ -272,6 +275,22 @@ func (vm *VM) getObjectDir(obj Value) []Value {
 		}
 	case *PyFrozenSet:
 		for _, name := range []string{"copy", "difference", "intersection", "isdisjoint", "issubset", "issuperset", "symmetric_difference", "union"} {
+			names[name] = true
+		}
+	case *PyTuple:
+		for _, name := range []string{"count", "index"} {
+			names[name] = true
+		}
+	case *PyBytes:
+		for _, name := range []string{"capitalize", "center", "count", "decode", "endswith", "expandtabs", "find", "hex", "index", "isalnum", "isalpha", "isascii", "isdigit", "islower", "isspace", "istitle", "isupper", "join", "ljust", "lower", "lstrip", "maketrans", "partition", "removeprefix", "removesuffix", "replace", "rfind", "rindex", "rjust", "rpartition", "rsplit", "rstrip", "split", "splitlines", "startswith", "strip", "swapcase", "title", "translate", "upper", "zfill"} {
+			names[name] = true
+		}
+	case *PyRange:
+		for _, name := range []string{"count", "index", "start", "stop", "step"} {
+			names[name] = true
+		}
+	case *PyComplex:
+		for _, name := range []string{"conjugate", "imag", "real"} {
 			names[name] = true
 		}
 	}

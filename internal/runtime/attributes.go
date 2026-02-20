@@ -3671,8 +3671,166 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				return &PyList{Items: items}, nil
 			}}, nil
+		case "removeprefix":
+			return &PyBuiltinFunc{Name: "bytes.removeprefix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removeprefix() takes exactly one argument (%d given)", len(args))
+				}
+				prefix, ok := args[0].(*PyBytes)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removeprefix arg must be bytes, not '%s'", vm.typeName(args[0]))
+				}
+				if len(prefix.Value) <= len(b.Value) && bytesStartsWith(b.Value, prefix.Value) {
+					return &PyBytes{Value: b.Value[len(prefix.Value):]}, nil
+				}
+				return b, nil
+			}}, nil
+		case "removesuffix":
+			return &PyBuiltinFunc{Name: "bytes.removesuffix", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: removesuffix() takes exactly one argument (%d given)", len(args))
+				}
+				suffix, ok := args[0].(*PyBytes)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: removesuffix arg must be bytes, not '%s'", vm.typeName(args[0]))
+				}
+				if len(suffix.Value) > 0 && len(suffix.Value) <= len(b.Value) && bytesEndsWith(b.Value, suffix.Value) {
+					return &PyBytes{Value: b.Value[:len(b.Value)-len(suffix.Value)]}, nil
+				}
+				return b, nil
+			}}, nil
+		case "isascii":
+			return &PyBuiltinFunc{Name: "bytes.isascii", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for _, c := range b.Value {
+					if c > 127 {
+						return False, nil
+					}
+				}
+				return True, nil
+			}}, nil
+		case "istitle":
+			return &PyBuiltinFunc{Name: "bytes.istitle", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(b.Value) == 0 {
+					return False, nil
+				}
+				prevCased := false
+				hasCased := false
+				for _, c := range b.Value {
+					isUpper := c >= 'A' && c <= 'Z'
+					isLower := c >= 'a' && c <= 'z'
+					if isUpper {
+						if prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else if isLower {
+						if !prevCased {
+							return False, nil
+						}
+						prevCased = true
+						hasCased = true
+					} else {
+						prevCased = false
+					}
+				}
+				if !hasCased {
+					return False, nil
+				}
+				return True, nil
+			}}, nil
+		case "maketrans":
+			return &PyBuiltinFunc{Name: "bytes.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return bytesMaketransImpl(args)
+			}}, nil
+		case "translate":
+			return &PyBuiltinFunc{Name: "bytes.translate", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) < 1 {
+					return nil, fmt.Errorf("TypeError: translate() takes at least 1 argument")
+				}
+				var table []byte
+				if args[0] != None {
+					t, ok := args[0].(*PyBytes)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: translate() argument 1 must be bytes or None")
+					}
+					if len(t.Value) != 256 {
+						return nil, fmt.Errorf("ValueError: translation table must be 256 characters long")
+					}
+					table = t.Value
+				}
+				// Optional second argument: bytes to delete
+				var deleteSet [256]bool
+				if len(args) >= 2 {
+					del, ok := args[1].(*PyBytes)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: translate() argument 2 must be bytes")
+					}
+					for _, c := range del.Value {
+						deleteSet[c] = true
+					}
+				}
+				result := make([]byte, 0, len(b.Value))
+				for _, c := range b.Value {
+					if deleteSet[c] {
+						continue
+					}
+					if table != nil {
+						result = append(result, table[c])
+					} else {
+						result = append(result, c)
+					}
+				}
+				return &PyBytes{Value: result}, nil
+			}}, nil
 		}
 		return nil, fmt.Errorf("AttributeError: 'bytes' object has no attribute '%s'", name)
+
+	case *PyRange:
+		r := o
+		switch name {
+		case "start":
+			return MakeInt(r.Start), nil
+		case "stop":
+			return MakeInt(r.Stop), nil
+		case "step":
+			return MakeInt(r.Step), nil
+		case "count":
+			return &PyBuiltinFunc{Name: "range.count", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: count() takes exactly one argument (%d given)", len(args))
+				}
+				val, ok := args[0].(*PyInt)
+				if !ok {
+					return MakeInt(0), nil
+				}
+				v := val.Value
+				if r.Contains(v) {
+					return MakeInt(1), nil
+				}
+				return MakeInt(0), nil
+			}}, nil
+		case "index":
+			return &PyBuiltinFunc{Name: "range.index", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("TypeError: index() takes exactly one argument (%d given)", len(args))
+				}
+				val, ok := args[0].(*PyInt)
+				if !ok {
+					return nil, fmt.Errorf("ValueError: %s is not in range", vm.str(args[0]))
+				}
+				v := val.Value
+				if !r.Contains(v) {
+					return nil, fmt.Errorf("ValueError: %d is not in range", v)
+				}
+				if r.Step > 0 {
+					return MakeInt((v - r.Start) / r.Step), nil
+				}
+				return MakeInt((r.Start - v) / (-r.Step)), nil
+			}}, nil
+		}
+		return nil, fmt.Errorf("AttributeError: 'range' object has no attribute '%s'", name)
+
 	case *PyFunction:
 		switch name {
 		case "__name__":
@@ -3719,6 +3877,11 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 					result.DictSet(k, def, vm)
 				}
 				return result, nil
+			}}, nil
+		}
+		if o.Name == "bytes" && name == "maketrans" {
+			return &PyBuiltinFunc{Name: "bytes.maketrans", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				return bytesMaketransImpl(args)
 			}}, nil
 		}
 		if o.Name == "str" && name == "maketrans" {
@@ -3933,6 +4096,29 @@ func floatAsIntegerRatio(f float64) (Value, Value) {
 	}
 	den := new(big.Int).Lsh(big.NewInt(1), negExp)
 	return MakeInt(mantissa), MakeBigInt(den)
+}
+
+// bytesMaketransImpl implements bytes.maketrans(from, to).
+func bytesMaketransImpl(args []Value) (Value, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("TypeError: maketrans() takes exactly 2 arguments (%d given)", len(args))
+	}
+	from, ok1 := args[0].(*PyBytes)
+	to, ok2 := args[1].(*PyBytes)
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("TypeError: maketrans arguments must be bytes")
+	}
+	if len(from.Value) != len(to.Value) {
+		return nil, fmt.Errorf("ValueError: maketrans arguments must have same length")
+	}
+	table := make([]byte, 256)
+	for i := range table {
+		table[i] = byte(i)
+	}
+	for i, f := range from.Value {
+		table[f] = to.Value[i]
+	}
+	return &PyBytes{Value: table}, nil
 }
 
 // strMaketransImpl implements str.maketrans(x[, y[, z]]).
