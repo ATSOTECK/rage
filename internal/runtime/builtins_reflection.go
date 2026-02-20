@@ -266,6 +266,14 @@ func (vm *VM) getObjectDir(obj Value) []Value {
 		for _, name := range []string{"is_integer", "hex", "fromhex", "as_integer_ratio", "conjugate", "real", "imag"} {
 			names[name] = true
 		}
+	case *PySet:
+		for _, name := range []string{"add", "clear", "copy", "difference", "difference_update", "discard", "intersection", "intersection_update", "isdisjoint", "issubset", "issuperset", "pop", "remove", "symmetric_difference", "symmetric_difference_update", "union", "update"} {
+			names[name] = true
+		}
+	case *PyFrozenSet:
+		for _, name := range []string{"copy", "difference", "intersection", "isdisjoint", "issubset", "issuperset", "symmetric_difference", "union"} {
+			names[name] = true
+		}
 	}
 
 	return sortedStringList(names)

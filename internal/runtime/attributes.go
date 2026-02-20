@@ -1389,6 +1389,90 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 				}
 				return True, nil
 			}}, nil
+		case "difference_update":
+			return &PyBuiltinFunc{Name: "set.difference_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				for _, arg := range args {
+					items, err := vm.toList(arg)
+					if err != nil {
+						return nil, err
+					}
+					for _, item := range items {
+						s.SetRemove(item, vm)
+					}
+				}
+				return None, nil
+			}}, nil
+		case "intersection_update":
+			return &PyBuiltinFunc{Name: "set.intersection_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) == 0 {
+					return None, nil
+				}
+				// Collect all items to keep: those in self AND in all args
+				keep := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+				for k := range s.Items {
+					inAll := true
+					for _, arg := range args {
+						items, err := vm.toList(arg)
+						if err != nil {
+							return nil, err
+						}
+						found := false
+						for _, item := range items {
+							if vm.equal(k, item) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							inAll = false
+							break
+						}
+					}
+					if inAll {
+						keep.SetAdd(k, vm)
+					}
+				}
+				// Replace contents of s with keep
+				s.Items = keep.Items
+				s.buckets = keep.buckets
+				s.size = keep.size
+				return None, nil
+			}}, nil
+		case "symmetric_difference_update":
+			return &PyBuiltinFunc{Name: "set.symmetric_difference_update", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+				if len(args) != 1 {
+					return nil, fmt.Errorf("symmetric_difference_update() takes exactly 1 argument")
+				}
+				other, err := vm.toList(args[0])
+				if err != nil {
+					return nil, err
+				}
+				// Items in self but not in other stay
+				// Items in other but not in self get added
+				// Items in both get removed
+				toRemove := []Value{}
+				toAdd := []Value{}
+				for k := range s.Items {
+					for _, item := range other {
+						if vm.equal(k, item) {
+							toRemove = append(toRemove, k)
+							break
+						}
+					}
+				}
+				for _, item := range other {
+					if !s.SetContains(item, vm) {
+						toAdd = append(toAdd, item)
+					}
+				}
+				for _, item := range toRemove {
+					s.SetRemove(item, vm)
+				}
+				for _, item := range toAdd {
+					s.SetAdd(item, vm)
+				}
+				return None, nil
+			}}, nil
 		}
 	case *PyTuple:
 		tpl := o
