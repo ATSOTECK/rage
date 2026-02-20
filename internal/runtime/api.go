@@ -811,6 +811,18 @@ func (vm *VM) RaiseError(format string, args ...any) {
 		"RuntimeError", "StopIteration", "NotImplementedError", "OSError",
 		"FileNotFoundError", "PermissionError", "FileExistsError", "IOError",
 		"ZeroDivisionError", "OverflowError", "RecursionError", "SyntaxError",
+		"LookupError", "ArithmeticError", "FloatingPointError", "EOFError",
+		"BufferError", "TimeoutError", "ConnectionError", "ConnectionRefusedError",
+		"ConnectionResetError", "ConnectionAbortedError", "BrokenPipeError",
+		"IsADirectoryError", "NotADirectoryError", "InterruptedError",
+		"BlockingIOError", "ChildProcessError", "ProcessLookupError",
+		"UnicodeError", "UnicodeDecodeError", "UnicodeEncodeError",
+		"UnicodeTranslateError", "ImportError", "ModuleNotFoundError",
+		"UnboundLocalError", "NameError", "MemoryError", "AssertionError",
+		"Warning", "DeprecationWarning", "RuntimeWarning", "UserWarning",
+		"FutureWarning", "SyntaxWarning", "ImportWarning", "UnicodeWarning",
+		"BytesWarning", "ResourceWarning", "EncodingWarning",
+		"PendingDeprecationWarning", "StopAsyncIteration",
 	} {
 		if len(msg) > len(prefix)+2 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
 			excType = prefix
