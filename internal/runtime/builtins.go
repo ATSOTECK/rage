@@ -2808,19 +2808,30 @@ func (vm *VM) initExceptionClasses() {
 	// Standard exceptions inheriting from Exception
 	makeExc("ValueError", exception)
 	makeExc("TypeError", exception)
-	makeExc("KeyError", exception)
-	makeExc("IndexError", exception)
 	attrError := makeExc("AttributeError", exception)
 	makeExc("FrozenInstanceError", attrError)
 	nameError := makeExc("NameError", exception)
 	makeExc("UnboundLocalError", nameError)
 	makeExc("RuntimeError", exception)
-	makeExc("ZeroDivisionError", exception)
 	makeExc("AssertionError", exception)
 	makeExc("StopIteration", exception)
 	makeExc("NotImplementedError", exception)
 	makeExc("RecursionError", exception)
 	makeExc("MemoryError", exception)
+	makeExc("SyntaxError", exception)
+	makeExc("EOFError", exception)
+	makeExc("BufferError", exception)
+
+	// LookupError and its subclasses
+	lookupError := makeExc("LookupError", exception)
+	makeExc("KeyError", lookupError)
+	makeExc("IndexError", lookupError)
+
+	// ArithmeticError and its subclasses
+	arithmeticError := makeExc("ArithmeticError", exception)
+	makeExc("ZeroDivisionError", arithmeticError)
+	makeExc("OverflowError", arithmeticError)
+	makeExc("FloatingPointError", arithmeticError)
 
 	// OSError and its subclasses
 	osError := makeExc("OSError", exception)
@@ -2828,27 +2839,49 @@ func (vm *VM) initExceptionClasses() {
 	makeExc("PermissionError", osError)
 	makeExc("FileExistsError", osError)
 	makeExc("IOError", osError) // IOError is an alias for OSError in Python 3
+	makeExc("TimeoutError", osError)
+	connError := makeExc("ConnectionError", osError)
+	makeExc("ConnectionRefusedError", connError)
+	makeExc("ConnectionResetError", connError)
+	makeExc("ConnectionAbortedError", connError)
+	makeExc("BrokenPipeError", connError)
+	makeExc("IsADirectoryError", osError)
+	makeExc("NotADirectoryError", osError)
+	makeExc("InterruptedError", osError)
+	makeExc("BlockingIOError", osError)
+	makeExc("ChildProcessError", osError)
+	makeExc("ProcessLookupError", osError)
 
 	// ImportError and its subclass
 	importError := makeExc("ImportError", exception)
 	makeExc("ModuleNotFoundError", importError)
 
-	// LookupError (base for KeyError and IndexError - for compatibility)
-	lookupError := makeExc("LookupError", exception)
-	_ = lookupError // We already created KeyError and IndexError above
+	// UnicodeError and its subclasses (under ValueError)
+	valError := vm.builtins["ValueError"].(*PyClass)
+	unicodeError := makeExc("UnicodeError", valError)
+	makeExc("UnicodeDecodeError", unicodeError)
+	makeExc("UnicodeEncodeError", unicodeError)
+	makeExc("UnicodeTranslateError", unicodeError)
 
-	// ArithmeticError (base for ZeroDivisionError - for compatibility)
-	arithmeticError := makeExc("ArithmeticError", exception)
-	_ = arithmeticError // We already created ZeroDivisionError above
+	// Warning hierarchy
+	warning := makeExc("Warning", exception)
+	makeExc("DeprecationWarning", warning)
+	makeExc("PendingDeprecationWarning", warning)
+	makeExc("RuntimeWarning", warning)
+	makeExc("SyntaxWarning", warning)
+	makeExc("UserWarning", warning)
+	makeExc("FutureWarning", warning)
+	makeExc("ImportWarning", warning)
+	makeExc("UnicodeWarning", warning)
+	makeExc("BytesWarning", warning)
+	makeExc("ResourceWarning", warning)
+	makeExc("EncodingWarning", warning)
 
-	// GeneratorExit inherits from BaseException (not Exception)
+	// BaseException subclasses (not Exception)
 	makeExc("GeneratorExit", baseException)
-
-	// SystemExit inherits from BaseException (not Exception)
 	makeExc("SystemExit", baseException)
-
-	// KeyboardInterrupt inherits from BaseException (not Exception)
 	makeExc("KeyboardInterrupt", baseException)
+	makeExc("StopAsyncIteration", baseException)
 
 	// BaseExceptionGroup inherits from BaseException
 	baseExcGroup := &PyClass{
