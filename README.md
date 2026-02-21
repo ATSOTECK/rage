@@ -18,6 +18,7 @@ Check out the demo to see RAGE in action.
 - ClassBuilder API - define full-featured Python classes in Go with operators, properties, methods, and protocols
 - Timeout support - prevent infinite loops with execution timeouts
 - Context cancellation - integrate with Go's context for graceful shutdown
+- Resource limits - recursion depth, memory usage, and collection size caps for safe sandboxed execution
 - Standard library modules - math, random, string, sys, time, re, collections, json, os, datetime, typing, asyncio, csv, itertools, functools, io, base64, abc, dataclasses, copy, operator
 - Go interoperability - call Go functions from Python, define Python classes in Go, exchange values bidirectionally
 
@@ -262,6 +263,74 @@ while True:
 }
 ```
 
+### Resource Limits
+
+RAGE supports three configurable resource limits for safe sandboxed execution. All default to `0` (unlimited).
+
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/ATSOTECK/rage/pkg/rage"
+)
+
+func main() {
+    // Set limits at creation time
+    state := rage.NewStateWithModules(
+        rage.WithAllModules(),
+        rage.WithMaxRecursionDepth(100),    // Max call stack depth
+        rage.WithMaxMemoryBytes(50*1024*1024), // ~50MB memory cap
+        rage.WithMaxCollectionSize(100000), // Max elements per list/dict/set
+    )
+    defer state.Close()
+
+    // Or set them after creation
+    state.SetMaxRecursionDepth(200)
+    state.SetMaxMemoryBytes(100 * 1024 * 1024)
+    state.SetMaxCollectionSize(500000)
+
+    // Recursion limit raises RecursionError (catchable in Python)
+    _, err := state.Run(`
+def infinite():
+    return infinite()
+
+try:
+    infinite()
+except RecursionError:
+    print("Caught recursion limit!")
+    `)
+
+    // Memory limit raises MemoryError
+    state2 := rage.NewStateWithModules(
+        rage.WithMaxMemoryBytes(1024),
+    )
+    defer state2.Close()
+    _, err = state2.Run(`s = "x" * 1000000`)
+    fmt.Println(err) // MemoryError: memory limit exceeded
+
+    // Collection size limit raises MemoryError
+    state3 := rage.NewStateWithModules(
+        rage.WithMaxCollectionSize(100),
+    )
+    defer state3.Close()
+    _, err = state3.Run(`lst = [i for i in range(200)]`)
+    fmt.Println(err) // MemoryError: list size limit exceeded
+
+    // Check tracked memory usage
+    fmt.Println(state.AllocatedBytes())
+}
+```
+
+| Limit | Error Raised | What It Protects Against |
+|-------|-------------|------------------------|
+| `MaxRecursionDepth` | `RecursionError` | Infinite/excessive recursion |
+| `MaxMemoryBytes` | `MemoryError` | Runaway frame/string allocations |
+| `MaxCollectionSize` | `MemoryError` | Unbounded list/dict/set growth |
+
+Collection size limits are enforced across all growth paths: `append`, `extend`, `insert`, `update`, `add`, `setdefault`, comprehensions, `[0] * N` repetition, concatenation, and constructors (`list()`, `dict()`, `set()`, etc.).
+
 ## Controlling Standard Library Modules
 
 By default, `NewState()` enables all available stdlib modules. For more control:
@@ -441,6 +510,19 @@ state := rage.NewStateWithModules(
     rage.WithBuiltin(rage.BuiltinGlobals),
     rage.WithBuiltin(rage.BuiltinExec),
 )
+```
+
+For running untrusted code, combine resource limits with timeouts for defense in depth:
+
+```go
+state := rage.NewStateWithModules(
+    rage.WithAllModules(),
+    rage.WithMaxRecursionDepth(100),
+    rage.WithMaxMemoryBytes(50 * 1024 * 1024),
+    rage.WithMaxCollectionSize(100000),
+)
+defer state.Close()
+_, err := state.RunWithTimeout(untrustedCode, 5*time.Second)
 ```
 
 ## Thread Safety
