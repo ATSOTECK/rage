@@ -183,6 +183,10 @@ func sysExit(vm *gopherpy.VM) int {
 
 // sys.getrecursionlimit()
 func sysGetRecursionLimit(vm *gopherpy.VM) int {
+	if vmLimit := vm.MaxRecursionDepth(); vmLimit > 0 {
+		vm.Push(gopherpy.NewInt(vmLimit))
+		return 1
+	}
 	vm.Push(gopherpy.NewInt(recursionLimit))
 	return 1
 }
@@ -195,6 +199,7 @@ func sysSetRecursionLimit(vm *gopherpy.VM) int {
 		return 0
 	}
 	recursionLimit = limit
+	vm.SetMaxRecursionDepth(limit)
 	return 0
 }
 

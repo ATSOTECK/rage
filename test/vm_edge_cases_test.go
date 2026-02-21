@@ -31,11 +31,6 @@ result = recurse(100)
 }
 
 func TestExcessiveRecursionFails(t *testing.T) {
-	// Very deep recursion should fail with RecursionError
-	// Note: This test is skipped because RAGE doesn't currently have a recursion limit
-	// and will cause a Go stack overflow
-	t.Skip("RAGE doesn't have recursion limit protection - causes Go stack overflow")
-
 	source := `
 def infinite_recurse():
     return infinite_recurse()
@@ -43,14 +38,14 @@ def infinite_recurse():
 infinite_recurse()
 `
 	vm := runtime.NewVM()
+	vm.SetMaxRecursionDepth(100)
 	code, errs := compiler.CompileSource(source, "<test>")
 	require.Empty(t, errs)
 
 	_, err := vm.Execute(code)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "RecursionError") ||
-		strings.Contains(err.Error(), "maximum recursion depth") ||
-		strings.Contains(err.Error(), "stack"))
+		strings.Contains(err.Error(), "maximum recursion depth"))
 }
 
 func TestMutualRecursion(t *testing.T) {

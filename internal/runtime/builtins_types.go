@@ -261,6 +261,9 @@ func (vm *VM) initBuiltinsTypes() {
 			if err != nil {
 				return nil, err
 			}
+			if vm.maxCollectionSize > 0 && int64(len(items)) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			}
 			return &PyList{Items: items}, nil
 		},
 	}
@@ -275,6 +278,9 @@ func (vm *VM) initBuiltinsTypes() {
 			if err != nil {
 				return nil, err
 			}
+			if vm.maxCollectionSize > 0 && int64(len(items)) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			}
 			return &PyTuple{Items: items}, nil
 		},
 	}
@@ -286,6 +292,9 @@ func (vm *VM) initBuiltinsTypes() {
 			if len(args) > 0 {
 				switch src := args[0].(type) {
 				case *PyDict:
+					if vm.maxCollectionSize > 0 && int64(len(src.Items)) > vm.maxCollectionSize {
+						return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
+					}
 					for k, v := range src.Items {
 						d.DictSet(k, v, vm)
 					}
@@ -294,6 +303,9 @@ func (vm *VM) initBuiltinsTypes() {
 					items, err := vm.toList(args[0])
 					if err != nil {
 						return nil, err
+					}
+					if vm.maxCollectionSize > 0 && int64(len(items)) > vm.maxCollectionSize {
+						return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
 					}
 					for _, item := range items {
 						pair, err := vm.toList(item)
@@ -309,6 +321,9 @@ func (vm *VM) initBuiltinsTypes() {
 			}
 			for k, v := range kwargs {
 				d.DictSet(&PyString{Value: k}, v, vm)
+			}
+			if vm.maxCollectionSize > 0 && int64(d.DictLen()) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
 			}
 			return d, nil
 		},
@@ -429,6 +444,11 @@ func (vm *VM) initBuiltinsTypes() {
 					if !isHashable(item) {
 						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
 					}
+					if !s.SetContains(item, vm) {
+						if err := vm.checkCollectionSize(int64(s.SetLen()), "set"); err != nil {
+							return nil, err
+						}
+					}
 					// Use hash-based storage for O(1) lookup
 					s.SetAdd(item, vm)
 				}
@@ -449,6 +469,9 @@ func (vm *VM) initBuiltinsTypes() {
 				for _, item := range items {
 					if !isHashable(item) {
 						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+					}
+					if vm.maxCollectionSize > 0 && int64(len(fs.Items)) >= vm.maxCollectionSize {
+						return nil, fmt.Errorf("MemoryError: frozenset size limit exceeded (limit is %d)", vm.maxCollectionSize)
 					}
 					fs.FrozenSetAdd(item, vm)
 				}

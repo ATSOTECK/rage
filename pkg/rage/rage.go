@@ -131,8 +131,11 @@ var AllBuiltins = []Builtin{
 type StateOption func(*stateConfig)
 
 type stateConfig struct {
-	modules  map[Module]bool
-	builtins map[Builtin]bool
+	modules           map[Module]bool
+	builtins          map[Builtin]bool
+	maxRecursionDepth int64
+	maxMemoryBytes    int64
+	maxCollectionSize int64
 }
 
 // WithModule enables a specific stdlib module.
@@ -203,6 +206,28 @@ func WithAllBuiltins() StateOption {
 	}
 }
 
+// WithMaxRecursionDepth sets the maximum call stack depth. 0 means unlimited.
+func WithMaxRecursionDepth(n int64) StateOption {
+	return func(c *stateConfig) {
+		c.maxRecursionDepth = n
+	}
+}
+
+// WithMaxMemoryBytes sets the approximate memory limit in bytes. 0 means unlimited.
+func WithMaxMemoryBytes(n int64) StateOption {
+	return func(c *stateConfig) {
+		c.maxMemoryBytes = n
+	}
+}
+
+// WithMaxCollectionSize sets the maximum number of elements in a single collection.
+// 0 means unlimited.
+func WithMaxCollectionSize(n int64) StateOption {
+	return func(c *stateConfig) {
+		c.maxCollectionSize = n
+	}
+}
+
 // State represents a Python execution state.
 // It wraps the VM and provides a clean API for running Python code.
 type State struct {
@@ -262,6 +287,17 @@ func NewStateWithModules(opts ...StateOption) *State {
 	}
 
 	vm := runtime.NewVM()
+
+	// Apply resource limits
+	if cfg.maxRecursionDepth > 0 {
+		vm.SetMaxRecursionDepth(cfg.maxRecursionDepth)
+	}
+	if cfg.maxMemoryBytes > 0 {
+		vm.SetMaxMemoryBytes(cfg.maxMemoryBytes)
+	}
+	if cfg.maxCollectionSize > 0 {
+		vm.SetMaxCollectionSize(cfg.maxCollectionSize)
+	}
 
 	// Set up filesystem imports
 	vm.FileImporter = func(path string) (*runtime.CodeObject, error) {
@@ -471,6 +507,39 @@ func (s *State) EnabledBuiltins() []Builtin {
 		result = append(result, b)
 	}
 	return result
+}
+
+// SetMaxRecursionDepth sets the maximum call stack depth. 0 means unlimited.
+func (s *State) SetMaxRecursionDepth(n int64) {
+	if s.closed {
+		return
+	}
+	s.vm.SetMaxRecursionDepth(n)
+}
+
+// SetMaxMemoryBytes sets the approximate memory limit in bytes. 0 means unlimited.
+func (s *State) SetMaxMemoryBytes(n int64) {
+	if s.closed {
+		return
+	}
+	s.vm.SetMaxMemoryBytes(n)
+}
+
+// SetMaxCollectionSize sets the maximum number of elements in a single collection.
+// 0 means unlimited.
+func (s *State) SetMaxCollectionSize(n int64) {
+	if s.closed {
+		return
+	}
+	s.vm.SetMaxCollectionSize(n)
+}
+
+// AllocatedBytes returns the approximate number of bytes currently tracked by the VM.
+func (s *State) AllocatedBytes() int64 {
+	if s.closed {
+		return 0
+	}
+	return s.vm.AllocatedBytes()
 }
 
 // Close releases resources associated with the state.
