@@ -13,6 +13,9 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("append() takes exactly 1 argument")
 			}
+			if err := vm.checkCollectionSize(int64(len(lst.Items)), "list"); err != nil {
+				return nil, err
+			}
 			lst.Items = append(lst.Items, args[0])
 			return None, nil
 		}}, nil
@@ -44,6 +47,9 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if vm.maxCollectionSize > 0 && int64(len(lst.Items)+len(items)) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			}
 			lst.Items = append(lst.Items, items...)
 			return None, nil
 		}}, nil
@@ -51,6 +57,9 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 		return &PyBuiltinFunc{Name: "list.insert", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("insert() takes exactly 2 arguments")
+			}
+			if err := vm.checkCollectionSize(int64(len(lst.Items)), "list"); err != nil {
+				return nil, err
 			}
 			idx := int(vm.toInt(args[0]))
 			if idx < 0 {
@@ -244,6 +253,11 @@ func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
 				case *PyDict:
 					for _, k := range src.Keys(vm) {
 						if v, ok := src.DictGet(k, vm); ok {
+							if _, exists := d.DictGet(k, vm); !exists {
+								if err := vm.checkCollectionSize(int64(d.DictLen()), "dict"); err != nil {
+									return nil, err
+								}
+							}
 							d.DictSet(k, v, vm)
 						}
 					}
@@ -260,12 +274,23 @@ func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
 						if len(pair) != 2 {
 							return nil, fmt.Errorf("ValueError: dictionary update sequence element has length %d; 2 is required", len(pair))
 						}
+						if _, exists := d.DictGet(pair[0], vm); !exists {
+							if err := vm.checkCollectionSize(int64(d.DictLen()), "dict"); err != nil {
+								return nil, err
+							}
+						}
 						d.DictSet(pair[0], pair[1], vm)
 					}
 				}
 			}
 			for k, v := range kwargs {
-				d.DictSet(&PyString{Value: k}, v, vm)
+				key := &PyString{Value: k}
+				if _, exists := d.DictGet(key, vm); !exists {
+					if err := vm.checkCollectionSize(int64(d.DictLen()), "dict"); err != nil {
+						return nil, err
+					}
+				}
+				d.DictSet(key, v, vm)
 			}
 			return None, nil
 		}}, nil
@@ -306,6 +331,9 @@ func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
 			if found {
 				return val, nil
 			}
+			if err := vm.checkCollectionSize(int64(d.DictLen()), "dict"); err != nil {
+				return nil, err
+			}
 			def := Value(None)
 			if len(args) > 1 {
 				def = args[1]
@@ -339,6 +367,9 @@ func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if vm.maxCollectionSize > 0 && int64(len(keys)) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			}
 			def := Value(None)
 			if len(args) > 1 {
 				def = args[1]
@@ -363,6 +394,11 @@ func (vm *VM) getAttrSet(s *PySet, name string) (Value, error) {
 			}
 			if !isHashable(args[0]) {
 				return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(args[0]))
+			}
+			if !s.SetContains(args[0], vm) {
+				if err := vm.checkCollectionSize(int64(s.SetLen()), "set"); err != nil {
+					return nil, err
+				}
 			}
 			s.SetAdd(args[0], vm)
 			return None, nil
@@ -423,6 +459,11 @@ func (vm *VM) getAttrSet(s *PySet, name string) (Value, error) {
 				for _, item := range items {
 					if !isHashable(item) {
 						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
+					}
+					if !s.SetContains(item, vm) {
+						if err := vm.checkCollectionSize(int64(s.SetLen()), "set"); err != nil {
+							return nil, err
+						}
 					}
 					s.SetAdd(item, vm)
 				}

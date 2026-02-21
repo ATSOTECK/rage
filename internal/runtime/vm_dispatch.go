@@ -958,6 +958,20 @@ func (vm *VM) run() (Value, error) {
 			index := vm.pop()
 			obj := vm.pop()
 			val := vm.pop()
+			// Check collection size limit for dict insertions of new keys
+			if vm.maxCollectionSize > 0 {
+				if d, ok := obj.(*PyDict); ok {
+					if _, exists := d.DictGet(index, vm); !exists {
+						if err := vm.checkCollectionSize(int64(d.DictLen()), "dict"); err != nil {
+							if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+								return nil, handleErr
+							} else if handled {
+								continue
+							}
+						}
+					}
+				}
+			}
 			err = vm.setItem(obj, index, val)
 			if err != nil {
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
@@ -1373,6 +1387,14 @@ func (vm *VM) run() (Value, error) {
 			vm.push(&PyTuple{Items: items})
 
 		case OpBuildList:
+			if vm.maxCollectionSize > 0 && int64(arg) > vm.maxCollectionSize {
+				err = vm.checkCollectionSize(int64(arg), "list")
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
 			items := make([]Value, arg)
 			for i := arg - 1; i >= 0; i-- {
 				items[i] = vm.pop()
@@ -1380,6 +1402,14 @@ func (vm *VM) run() (Value, error) {
 			vm.push(&PyList{Items: items})
 
 		case OpBuildSet:
+			if vm.maxCollectionSize > 0 && int64(arg) > vm.maxCollectionSize {
+				err = vm.checkCollectionSize(int64(arg), "set")
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
 			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
 			var buildSetErr error
 			for i := 0; i < arg; i++ {
@@ -1401,6 +1431,14 @@ func (vm *VM) run() (Value, error) {
 			vm.push(s)
 
 		case OpBuildMap:
+			if vm.maxCollectionSize > 0 && int64(arg) > vm.maxCollectionSize {
+				err = vm.checkCollectionSize(int64(arg), "dict")
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+			}
 			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 			// Pop all key-value pairs first (they come off stack in reverse order)
 			type kvPair struct {
@@ -1490,11 +1528,29 @@ func (vm *VM) run() (Value, error) {
 		case OpListAppend:
 			val := vm.pop()
 			list := vm.peek(arg).(*PyList)
+			if vm.maxCollectionSize > 0 {
+				if err := vm.checkCollectionSize(int64(len(list.Items)), "list"); err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+				}
+			}
 			list.Items = append(list.Items, val)
 
 		case OpSetAdd:
 			val := vm.pop()
 			set := vm.peek(arg).(*PySet)
+			if vm.maxCollectionSize > 0 {
+				if err := vm.checkCollectionSize(int64(set.SetLen()), "set"); err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+				}
+			}
 			if !isHashable(val) {
 				err = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
@@ -1510,6 +1566,15 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			key := vm.pop()
 			dict := vm.peek(arg).(*PyDict)
+			if vm.maxCollectionSize > 0 {
+				if err := vm.checkCollectionSize(int64(dict.DictLen()), "dict"); err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+				}
+			}
 			if !isHashable(key) {
 				err = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(key))
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {

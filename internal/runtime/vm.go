@@ -35,6 +35,12 @@ type VM struct {
 	// except* state stack
 	exceptStarStack []ExceptStarState
 
+	// Resource limits (0 = unlimited)
+	maxRecursionDepth int64
+	maxMemoryBytes    int64
+	allocatedBytes    int64
+	maxCollectionSize int64
+
 	// Filesystem module imports
 	SearchPaths  []string                              // Directories to search for .py modules
 	FileImporter func(filename string) (*CodeObject, error) // Callback to compile a .py file (avoids circular dep)
@@ -95,6 +101,73 @@ func (vm *VM) SetCheckInterval(n int64) {
 	vm.checkCounter = n
 }
 
+// SetMaxRecursionDepth sets the maximum call stack depth. 0 means unlimited.
+func (vm *VM) SetMaxRecursionDepth(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	vm.maxRecursionDepth = n
+}
+
+// MaxRecursionDepth returns the current maximum recursion depth. 0 means unlimited.
+func (vm *VM) MaxRecursionDepth() int64 {
+	return vm.maxRecursionDepth
+}
+
+// SetMaxMemoryBytes sets the approximate memory limit in bytes. 0 means unlimited.
+func (vm *VM) SetMaxMemoryBytes(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	vm.maxMemoryBytes = n
+}
+
+// MaxMemoryBytes returns the current memory limit. 0 means unlimited.
+func (vm *VM) MaxMemoryBytes() int64 {
+	return vm.maxMemoryBytes
+}
+
+// AllocatedBytes returns the approximate number of bytes currently tracked.
+func (vm *VM) AllocatedBytes() int64 {
+	return vm.allocatedBytes
+}
+
+// SetMaxCollectionSize sets the maximum number of elements in a single collection.
+// 0 means unlimited.
+func (vm *VM) SetMaxCollectionSize(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	vm.maxCollectionSize = n
+}
+
+// MaxCollectionSize returns the current collection size limit. 0 means unlimited.
+func (vm *VM) MaxCollectionSize() int64 {
+	return vm.maxCollectionSize
+}
+
+// trackAlloc adds n bytes to the allocation counter and returns a MemoryError if over limit.
+func (vm *VM) trackAlloc(n int64) error {
+	vm.allocatedBytes += n
+	if vm.maxMemoryBytes > 0 && vm.allocatedBytes > vm.maxMemoryBytes {
+		return fmt.Errorf("MemoryError: memory limit exceeded (%d bytes allocated, limit is %d)", vm.allocatedBytes, vm.maxMemoryBytes)
+	}
+	return nil
+}
+
+// TrackAlloc is the exported wrapper of trackAlloc for stdlib use.
+func (vm *VM) TrackAlloc(n int64) error {
+	return vm.trackAlloc(n)
+}
+
+// checkCollectionSize returns a MemoryError if current >= maxCollectionSize (when set).
+func (vm *VM) checkCollectionSize(current int64, collType string) error {
+	if vm.maxCollectionSize > 0 && current >= vm.maxCollectionSize {
+		return fmt.Errorf("MemoryError: %s size limit exceeded (limit is %d)", collType, vm.maxCollectionSize)
+	}
+	return nil
+}
+
 // Execute runs bytecode and returns the result
 func (vm *VM) Execute(code *CodeObject) (Value, error) {
 	return vm.ExecuteWithContext(context.Background(), code)
@@ -122,6 +195,14 @@ func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, 
 		Builtins: vm.builtins,
 	}
 
+	// Track top-level frame memory
+	if vm.maxMemoryBytes > 0 {
+		frameBytes := int64(len(frame.Stack))*16 + int64(len(frame.Locals))*16
+		if err := vm.trackAlloc(frameBytes); err != nil {
+			return nil, err
+		}
+	}
+
 	vm.frames = append(vm.frames, frame)
 	vm.frame = frame
 	vm.ctx = ctx
@@ -141,6 +222,14 @@ func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) error {
 		Locals:   make([]Value, len(code.VarNames)),
 		Globals:  mod.Dict,
 		Builtins: vm.builtins,
+	}
+
+	// Track module frame memory
+	if vm.maxMemoryBytes > 0 {
+		frameBytes := int64(len(frame.Stack))*16 + int64(len(frame.Locals))*16
+		if err := vm.trackAlloc(frameBytes); err != nil {
+			return err
+		}
 	}
 
 	vm.frames = append(vm.frames, frame)
@@ -192,9 +281,12 @@ func (vm *VM) push(v Value) {
 	f := vm.frame
 	// Grow stack if needed
 	if f.SP >= len(f.Stack) {
-		newStack := make([]Value, len(f.Stack)*2)
+		oldSize := len(f.Stack)
+		newStack := make([]Value, oldSize*2)
 		copy(newStack, f.Stack)
 		f.Stack = newStack
+		// Best-effort memory tracking (no error return)
+		vm.trackAlloc(int64(oldSize) * 16)
 	}
 	f.Stack[f.SP] = v
 	f.SP++
@@ -205,13 +297,16 @@ func (vm *VM) ensureStack(n int) {
 	f := vm.frame
 	needed := f.SP + n
 	if needed > len(f.Stack) {
-		newSize := len(f.Stack) * 2
+		oldSize := len(f.Stack)
+		newSize := oldSize * 2
 		if newSize < needed {
 			newSize = needed + 16
 		}
 		newStack := make([]Value, newSize)
 		copy(newStack, f.Stack)
 		f.Stack = newStack
+		// Best-effort memory tracking
+		vm.trackAlloc(int64(newSize-oldSize) * 16)
 	}
 }
 

@@ -177,8 +177,21 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 		return vm.createCoroutine(fn, args, kwargs)
 	}
 
+	// Check recursion depth before pushing frame
+	if vm.maxRecursionDepth > 0 && int64(len(vm.frames)) >= vm.maxRecursionDepth {
+		return nil, fmt.Errorf("RecursionError: maximum recursion depth exceeded")
+	}
+
 	// Create new frame for regular function call
 	frame := vm.createFunctionFrame(fn, args, kwargs)
+
+	// Track frame memory: ~16 bytes per stack slot, ~16 bytes per local, ~24 bytes per cell
+	if vm.maxMemoryBytes > 0 {
+		frameBytes := int64(len(frame.Stack))*16 + int64(len(frame.Locals))*16 + int64(len(frame.Cells))*24
+		if err := vm.trackAlloc(frameBytes); err != nil {
+			return nil, err
+		}
+	}
 
 	// Push frame
 	vm.frames = append(vm.frames, frame)

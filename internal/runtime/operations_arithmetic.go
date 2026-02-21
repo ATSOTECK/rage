@@ -203,7 +203,11 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		// List concatenation
 		if al, ok := a.(*PyList); ok {
 			if bl, ok := b.(*PyList); ok {
-				items := make([]Value, len(al.Items)+len(bl.Items))
+				combined := int64(len(al.Items) + len(bl.Items))
+				if vm.maxCollectionSize > 0 && combined > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
+				}
+				items := make([]Value, combined)
 				copy(items, al.Items)
 				copy(items[len(al.Items):], bl.Items)
 				return &PyList{Items: items}, nil
@@ -212,7 +216,11 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		// Tuple concatenation
 		if at, ok := a.(*PyTuple); ok {
 			if bt, ok := b.(*PyTuple); ok {
-				items := make([]Value, len(at.Items)+len(bt.Items))
+				combined := int64(len(at.Items) + len(bt.Items))
+				if vm.maxCollectionSize > 0 && combined > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
+				}
+				items := make([]Value, combined)
 				copy(items, at.Items)
 				copy(items[len(at.Items):], bt.Items)
 				return &PyTuple{Items: items}, nil
@@ -242,6 +250,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if resultSize > maxStringRepeatSize {
 					return nil, fmt.Errorf("MemoryError: string repetition result too large")
 				}
+				if err := vm.trackAlloc(resultSize); err != nil {
+					return nil, err
+				}
 				return &PyString{Value: strings.Repeat(as.Value, int(bi.Value))}, nil
 			}
 		}
@@ -253,6 +264,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				resultSize := int64(len(as.Value)) * ai.Value
 				if resultSize > maxStringRepeatSize {
 					return nil, fmt.Errorf("MemoryError: string repetition result too large")
+				}
+				if err := vm.trackAlloc(resultSize); err != nil {
+					return nil, err
 				}
 				return &PyString{Value: strings.Repeat(as.Value, int(ai.Value))}, nil
 			}
@@ -268,6 +282,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				resultItems := int64(len(al.Items)) * bi.Value
 				if resultItems > maxListRepeatItems {
 					return nil, fmt.Errorf("MemoryError: list repetition result too large")
+				}
+				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
 				count := int(bi.Value)
 				items := make([]Value, 0, len(al.Items)*count)
@@ -285,6 +302,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				resultItems := int64(len(al.Items)) * bi.Value
 				if resultItems > maxListRepeatItems {
 					return nil, fmt.Errorf("MemoryError: list repetition result too large")
+				}
+				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
 				count := int(bi.Value)
 				items := make([]Value, 0, len(al.Items)*count)
@@ -305,6 +325,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if resultItems > maxTupleRepeatItems {
 					return nil, fmt.Errorf("MemoryError: tuple repetition result too large")
 				}
+				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
+				}
 				count := int(bi.Value)
 				items := make([]Value, 0, len(at.Items)*count)
 				for i := 0; i < count; i++ {
@@ -321,6 +344,9 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				resultItems := int64(len(at.Items)) * bi.Value
 				if resultItems > maxTupleRepeatItems {
 					return nil, fmt.Errorf("MemoryError: tuple repetition result too large")
+				}
+				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
+					return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
 				count := int(bi.Value)
 				items := make([]Value, 0, len(at.Items)*count)
