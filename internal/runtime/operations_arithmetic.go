@@ -581,6 +581,13 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		}
 	}
 
+	// PEP 604: type | type creates UnionType
+	if op == OpBinaryOr {
+		if isUnionableType(a) && isUnionableType(b) {
+			return MakeUnionType(a, b), nil
+		}
+	}
+
 	// Complex operations (including promotion from int/float)
 	{
 		var ac, bc *PyComplex

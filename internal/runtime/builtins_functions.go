@@ -247,6 +247,17 @@ func (vm *VM) initBuiltinsFunctions() {
 						}
 					}
 					return false, nil
+				case *UnionType:
+					for _, item := range t.Args {
+						match, err := checkType(item)
+						if err != nil {
+							return false, err
+						}
+						if match {
+							return true, nil
+						}
+					}
+					return false, nil
 				default:
 					return false, fmt.Errorf("TypeError: isinstance() arg 2 must be a type, a tuple of types, or a union")
 				}
@@ -1261,6 +1272,17 @@ func (vm *VM) initBuiltinsFunctions() {
 					return vm.toValue(builtinSubclass(clsName, target.Name)), nil
 				case *PyTuple:
 					for _, item := range target.Items {
+						result, err := checkTarget(arg1, item)
+						if err != nil {
+							return nil, err
+						}
+						if result == True {
+							return True, nil
+						}
+					}
+					return False, nil
+				case *UnionType:
+					for _, item := range target.Args {
 						result, err := checkTarget(arg1, item)
 						if err != nil {
 							return nil, err

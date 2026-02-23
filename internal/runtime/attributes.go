@@ -359,6 +359,17 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			}, nil
 		}
 		return nil, fmt.Errorf("AttributeError: 'GenericAlias' object has no attribute '%s'", name)
+	case *UnionType:
+		switch name {
+		case "__args__":
+			return &PyTuple{Items: o.Args}, nil
+		case "__class__":
+			if cls, ok := vm.builtins["type"]; ok {
+				return cls, nil
+			}
+			return &PyBuiltinFunc{Name: "types.UnionType"}, nil
+		}
+		return nil, fmt.Errorf("AttributeError: 'types.UnionType' object has no attribute '%s'", name)
 	case *PyDict:
 		return vm.getAttrDict(o, name)
 	case *PyFrozenSet:

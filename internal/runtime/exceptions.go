@@ -121,6 +121,14 @@ func (vm *VM) exceptionMatches(exc *PyException, exceptionType Value) bool {
 			}
 		}
 		return false
+	case *UnionType:
+		// PEP 604: union of exception types - match any
+		for _, item := range t.Args {
+			if vm.exceptionMatches(exc, item) {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}

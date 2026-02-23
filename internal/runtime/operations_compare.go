@@ -556,6 +556,19 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			}
 			return av.Step == bv.Step
 		}
+	case *UnionType:
+		if bv, ok := b.(*UnionType); ok {
+			if len(av.Args) != len(bv.Args) {
+				return false
+			}
+			for i, arg := range av.Args {
+				if !vm.equalWithCycleDetection(arg, bv.Args[i], seen) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
 	case *PyClass:
 		// Classes are compared by identity
 		return a == b
@@ -595,7 +608,8 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			}
 		}
 	}
-	return false
+	// Fall back to identity comparison for unhandled types
+	return a == b
 }
 
 func (vm *VM) compare(a, b Value) int {
