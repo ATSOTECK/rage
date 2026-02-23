@@ -417,6 +417,104 @@ func (g *GenericAlias) formatRepr() string {
 	return fmt.Sprintf("%s[%s]", originName, strings.Join(args, ", "))
 }
 
+// UnionType represents a PEP 604 type union (e.g. int | str).
+type UnionType struct {
+	Args []Value // Flattened, deduplicated list of types
+}
+
+func (u *UnionType) Type() string   { return "types.UnionType" }
+func (u *UnionType) String() string { return u.formatRepr() }
+
+func (u *UnionType) formatRepr() string {
+	parts := make([]string, len(u.Args))
+	for i, arg := range u.Args {
+		parts[i] = unionArgRepr(arg)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func unionArgRepr(v Value) string {
+	switch a := v.(type) {
+	case *PyClass:
+		return a.Name
+	case *PyBuiltinFunc:
+		return a.Name
+	case *PyNone:
+		return "None"
+	case *GenericAlias:
+		return a.formatRepr()
+	case *UnionType:
+		return a.formatRepr()
+	default:
+		return fmt.Sprintf("%v", a)
+	}
+}
+
+// isUnionableType returns true for types that can participate in PEP 604 unions.
+func isUnionableType(v Value) bool {
+	switch v.(type) {
+	case *PyClass, *PyBuiltinFunc, *UnionType, *GenericAlias, *PyNone:
+		return true
+	}
+	return false
+}
+
+// MakeUnionType creates a new UnionType from two values, flattening nested unions and deduplicating.
+func MakeUnionType(a, b Value) *UnionType {
+	var args []Value
+
+	// Collect args, flattening nested UnionTypes
+	collectArgs := func(v Value) {
+		// Convert None to NoneType builtin
+		if _, ok := v.(*PyNone); ok {
+			v = &PyBuiltinFunc{Name: "NoneType"}
+		}
+		if u, ok := v.(*UnionType); ok {
+			args = append(args, u.Args...)
+		} else {
+			args = append(args, v)
+		}
+	}
+	collectArgs(a)
+	collectArgs(b)
+
+	// Deduplicate
+	var deduped []Value
+	for _, arg := range args {
+		found := false
+		for _, existing := range deduped {
+			if unionTypeEqual(arg, existing) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			deduped = append(deduped, arg)
+		}
+	}
+
+	return &UnionType{Args: deduped}
+}
+
+// unionTypeEqual checks if two type values are the same for deduplication.
+func unionTypeEqual(a, b Value) bool {
+	switch av := a.(type) {
+	case *PyClass:
+		if bv, ok := b.(*PyClass); ok {
+			return av == bv
+		}
+	case *PyBuiltinFunc:
+		if bv, ok := b.(*PyBuiltinFunc); ok {
+			return av.Name == bv.Name
+		}
+	case *GenericAlias:
+		if bv, ok := b.(*GenericAlias); ok {
+			return av == bv
+		}
+	}
+	return a == b
+}
+
 func genericAliasArgRepr(v Value) string {
 	switch a := v.(type) {
 	case *PyClass:
