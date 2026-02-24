@@ -1,0 +1,42 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019" # deprecated usage — address separately
+        - "-SA4026" # -0.0 literal — used intentionally in tests
+        - "-ST*"    # all style checks (naming, comments, etc.)
+        - "-QF*"    # all quick-fix suggestions
+        - "-S1*"    # all simplification suggestions
+  exclusions:
+    paths:
+      - vendor$
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - govet
+      - path: test/
+        linters:
+          - errcheck
+          - govet

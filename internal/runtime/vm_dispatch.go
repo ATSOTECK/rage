@@ -938,9 +938,9 @@ func (vm *VM) run() (Value, error) {
 			val := vm.pop()
 			err = vm.setAttr(obj, name, val)
 			if err != nil {
-				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+				if _, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
-				} else if handled {
+				} else {
 					continue
 				}
 			}
@@ -950,9 +950,9 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			err = vm.delAttr(obj, name)
 			if err != nil {
-				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+				if _, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
-				} else if handled {
+				} else {
 					continue
 				}
 			}
@@ -990,9 +990,9 @@ func (vm *VM) run() (Value, error) {
 			}
 			err = vm.setItem(obj, index, val)
 			if err != nil {
-				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+				if _, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
-				} else if handled {
+				} else {
 					continue
 				}
 			}
@@ -1002,9 +1002,9 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			err = vm.delItem(obj, index)
 			if err != nil {
-				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+				if _, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
-				} else if handled {
+				} else {
 					continue
 				}
 			}
@@ -1193,9 +1193,8 @@ func (vm *VM) run() (Value, error) {
 						}
 						if count <= 0 {
 							lst.Items = []Value{}
-						} else {
-							// count == 1, no change
 						}
+						// count == 1: no change needed
 						vm.push(lst)
 						continue
 					}
@@ -1207,7 +1206,7 @@ func (vm *VM) run() (Value, error) {
 			var err error
 			if inst, ok := a.(*PyInstance); ok {
 				var inplaceDunders = [...]string{
-					OpInplaceAdd - OpInplaceAdd:      "__iadd__",
+					0 /* OpInplaceAdd */ : "__iadd__",
 					OpInplaceSubtract - OpInplaceAdd:  "__isub__",
 					OpInplaceMultiply - OpInplaceAdd:  "__imul__",
 					OpInplaceDivide - OpInplaceAdd:    "__itruediv__",

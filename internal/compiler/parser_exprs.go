@@ -90,6 +90,10 @@ func (p *Parser) parseNotExpr() model.Expr {
 	startPos := p.current().Pos
 	p.expect(model.TK_Not)
 	operand := p.parsePrecedence(precNot)
+	if operand == nil {
+		p.addError("expected expression after 'not'")
+		return nil
+	}
 	return &model.UnaryOp{
 		Op:       model.TK_Not,
 		Operand:  operand,
@@ -101,6 +105,10 @@ func (p *Parser) parseUnaryExpr() model.Expr {
 	startPos := p.current().Pos
 	op := p.advance().Kind
 	operand := p.parsePrecedence(precUnary)
+	if operand == nil {
+		p.addError("expected expression after unary operator")
+		return nil
+	}
 	return &model.UnaryOp{
 		Op:       op,
 		Operand:  operand,
@@ -119,6 +127,10 @@ func (p *Parser) parseLambdaExpr() model.Expr {
 
 	p.expect(model.TK_Colon)
 	body := p.parseExpression()
+	if body == nil {
+		p.addError("expected expression in lambda body")
+		return nil
+	}
 
 	return &model.Lambda{
 		Args:     args,
@@ -193,6 +205,10 @@ func (p *Parser) parseAwaitExpr() model.Expr {
 	startPos := p.current().Pos
 	p.expect(model.TK_Await)
 	value := p.parsePrecedence(precAwait)
+	if value == nil {
+		p.addError("expected expression after 'await'")
+		return nil
+	}
 	return &model.Await{
 		Value:    value,
 		StartPos: startPos,
@@ -205,6 +221,10 @@ func (p *Parser) parseYieldExpr() model.Expr {
 
 	if p.match(model.TK_From) {
 		value := p.parseExpression()
+		if value == nil {
+			p.addError("expected expression after 'yield from'")
+			return nil
+		}
 		return &model.YieldFrom{
 			Value:    value,
 			StartPos: startPos,
@@ -215,7 +235,9 @@ func (p *Parser) parseYieldExpr() model.Expr {
 	endPos := startPos
 	if !p.check(model.TK_Newline) && !p.check(model.TK_Comment) && !p.check(model.TK_RParen) && !p.check(model.TK_EOF) {
 		value = p.parseTupleOrExpr()
-		endPos = value.End()
+		if value != nil {
+			endPos = value.End()
+		}
 	}
 
 	return &model.Yield{
@@ -724,6 +746,10 @@ func (p *Parser) parseStarredExpr() model.Expr {
 	startPos := p.current().Pos
 	p.expect(model.TK_Star)
 	value := p.parsePrimaryExpr()
+	if value == nil {
+		p.addError("expected expression after '*'")
+		return nil
+	}
 	return &model.Starred{
 		Value:    value,
 		StartPos: startPos,
@@ -886,8 +912,16 @@ func (p *Parser) parseInfixExpr(left model.Expr, prec int) model.Expr {
 func (p *Parser) parseTernaryExpr(body model.Expr) model.Expr {
 	p.expect(model.TK_If)
 	test := p.parsePrecedence(precOr)
+	if test == nil {
+		p.addError("expected condition in ternary expression")
+		return body
+	}
 	p.expect(model.TK_Else)
 	orElse := p.parsePrecedence(precTernary)
+	if orElse == nil {
+		p.addError("expected expression after 'else' in ternary expression")
+		return body
+	}
 
 	return &model.IfExpr{
 		Test:   test,
@@ -902,6 +936,10 @@ func (p *Parser) parseBoolOpExpr(left model.Expr, prec int) model.Expr {
 
 	for {
 		right := p.parsePrecedence(prec + 1)
+		if right == nil {
+			p.addError("expected expression after boolean operator")
+			break
+		}
 		values = append(values, right)
 
 		if p.current().Kind != op {
@@ -932,8 +970,17 @@ func (p *Parser) parseCompareExpr(left model.Expr) model.Expr {
 			op = model.TK_IsNot
 		}
 
+		comp := p.parsePrecedence(precBitOr)
+		if comp == nil {
+			p.addError("expected expression after comparison operator")
+			break
+		}
 		ops = append(ops, op)
-		comparators = append(comparators, p.parsePrecedence(precBitOr))
+		comparators = append(comparators, comp)
+	}
+
+	if len(comparators) == 0 {
+		return left
 	}
 
 	return &model.Compare{
@@ -953,6 +1000,11 @@ func (p *Parser) parseWalrusExpr(left model.Expr) model.Expr {
 		return left
 	}
 
+	if value == nil {
+		p.addError("expected expression after ':='")
+		return left
+	}
+
 	return &model.NamedExpr{
 		Target: target,
 		Value:  value,
@@ -969,6 +1021,10 @@ func (p *Parser) parseBinaryOpExpr(left model.Expr, prec int) model.Expr {
 	}
 
 	right := p.parsePrecedence(prec + assoc)
+	if right == nil {
+		p.addError("expected expression after binary operator")
+		return left
+	}
 
 	return &model.BinaryOp{
 		Left:  left,

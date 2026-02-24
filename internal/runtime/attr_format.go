@@ -252,10 +252,3 @@ func (vm *VM) applyFormatSpec(val Value, spec string) string {
 
 	return s
 }
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}

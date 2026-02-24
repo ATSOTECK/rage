@@ -514,7 +514,10 @@ func fileSeek(vm *runtime.VM) int {
 
 	// Flush writer before seeking
 	if f.writer != nil {
-		f.writer.Flush()
+		if err := f.writer.Flush(); err != nil {
+			vm.RaiseError("OSError: %v", err)
+			return 0
+		}
 	}
 
 	pos, err := f.file.Seek(offset, whence)
@@ -577,7 +580,10 @@ func fileClose(vm *runtime.VM) int {
 
 	// Flush any buffered writes
 	if f.writer != nil {
-		f.writer.Flush()
+		if err := f.writer.Flush(); err != nil {
+			vm.RaiseError("OSError: %v", err)
+			return 0
+		}
 	}
 
 	err := f.file.Close()
@@ -612,7 +618,7 @@ func fileFlush(vm *runtime.VM) int {
 	}
 
 	// Also sync to disk
-	f.file.Sync()
+	_ = f.file.Sync()
 
 	return 0
 }
@@ -684,9 +690,9 @@ func fileExit(vm *runtime.VM) int {
 	// Always close the file on exit
 	if !f.closed {
 		if f.writer != nil {
-			f.writer.Flush()
+			_ = f.writer.Flush()
 		}
-		f.file.Close()
+		_ = f.file.Close()
 		f.closed = true
 	}
 

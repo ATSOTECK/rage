@@ -231,11 +231,9 @@ func (st *SymbolTable) MarkAsCell(name string) {
 			sym.Scope = ScopeCell
 			sym.Index = len(st.cellSyms)
 			st.cellSyms = append(st.cellSyms, sym)
-		} else if sym.Scope == ScopeFree {
-			// This is a free variable that's also captured by an even-inner scope
-			// It stays as a free variable but also needs to be passed on
-			// The VM will handle this case by looking in the closure
 		}
+		// ScopeFree: variable is already free from an outer scope and captured
+		// by an even-inner scope. The VM handles this via closure lookup.
 	}
 }
 

@@ -52,21 +52,16 @@ func (vm *VM) initBuiltinsTypes() {
 	vm.builtins["slice"] = &PyBuiltinFunc{
 		Name: "slice",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			var start, stop, step Value = None, None, None
 			switch len(args) {
 			case 1:
-				stop = args[0]
+				return &PySlice{Start: None, Stop: args[0], Step: None}, nil
 			case 2:
-				start = args[0]
-				stop = args[1]
+				return &PySlice{Start: args[0], Stop: args[1], Step: None}, nil
 			case 3:
-				start = args[0]
-				stop = args[1]
-				step = args[2]
+				return &PySlice{Start: args[0], Stop: args[1], Step: args[2]}, nil
 			default:
 				return nil, fmt.Errorf("slice expected 1 to 3 arguments, got %d", len(args))
 			}
-			return &PySlice{Start: start, Stop: stop, Step: step}, nil
 		},
 	}
 

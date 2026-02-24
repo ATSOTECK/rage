@@ -3,6 +3,7 @@ package stdlib
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/ATSOTECK/rage/internal/runtime"
@@ -1025,19 +1026,7 @@ func parseNumber(s string) (float64, error) {
 	if s == "" {
 		return 0, nil
 	}
-	var f float64
-	_, err := strings.NewReader(s).Read([]byte{})
-	if err != nil {
-		return 0, err
-	}
-	// Try parsing as float
-	_, err = strings.NewReader(s).Read([]byte{})
-	for _, c := range s {
-		if (c < '0' || c > '9') && c != '.' && c != '-' && c != '+' && c != 'e' && c != 'E' {
-			return 0, nil
-		}
-	}
-	return f, nil
+	return strconv.ParseFloat(s, 64)
 }
 
 // dictGetByStringKey looks up a value in a PyDict by string key value

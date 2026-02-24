@@ -359,21 +359,3 @@ func ResetModules() {
 	ResetTypeMetatables()
 }
 
-// =====================================
-// Built-in module: builtins
-// =====================================
-
-// InitBuiltinsModule creates and registers the builtins module
-func (vm *VM) initBuiltinsModule() {
-	builtins := NewModule("builtins")
-	builtins.Doc = "Built-in functions, exceptions, and other objects."
-
-	// Copy all builtins to the module
-	for name, value := range vm.builtins {
-		builtins.Dict[name] = value
-	}
-
-	moduleMu.Lock()
-	loadedModules["builtins"] = builtins
-	moduleMu.Unlock()
-}

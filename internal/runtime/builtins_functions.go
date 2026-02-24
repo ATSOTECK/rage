@@ -54,7 +54,9 @@ func (vm *VM) initBuiltinsFunctions() {
 	vm.builtins["range"] = &PyBuiltinFunc{
 		Name: "range",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			var start, stop, step int64 = 0, 0, 1
+			var start int64
+			var stop int64
+			var step int64 = 1
 			// Validate all arguments are integers (not floats)
 			for i, arg := range args {
 				switch arg.(type) {
@@ -433,7 +435,9 @@ func (vm *VM) initBuiltinsFunctions() {
 				fmt.Print(vm.str(args[0]))
 			}
 			var line string
-			fmt.Scanln(&line)
+			if _, err := fmt.Scanln(&line); err != nil {
+				return &PyString{Value: ""}, nil
+			}
 			return &PyString{Value: line}, nil
 		},
 	}

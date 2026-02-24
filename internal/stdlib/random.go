@@ -72,7 +72,9 @@ func randomRandrange(vm *runtime.VM) int {
 
 	top := vm.GetTop()
 
-	var start, stop, step int64 = 0, 0, 1
+	var start int64
+	var stop int64
+	var step int64 = 1
 
 	switch top {
 	case 1:

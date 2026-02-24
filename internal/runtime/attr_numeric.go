@@ -408,14 +408,6 @@ func (vm *VM) getAttrFloat(f *PyFloat, name string) (Value, error) {
 	return nil, fmt.Errorf("AttributeError: 'float' object has no attribute '%s'", name)
 }
 
-// getAttrBool handles attribute access on *PyBool values.
-// PyBool has no specific attributes beyond what PyInt provides.
-// This should not normally be called since PyBool doesn't appear in the getAttr switch,
-// but is provided for completeness.
-func (vm *VM) getAttrBool(o *PyBool, name string) (Value, error) {
-	return nil, fmt.Errorf("AttributeError: 'bool' object has no attribute '%s'", name)
-}
-
 // getAttrComplex handles attribute access on *PyComplex values.
 func (vm *VM) getAttrComplex(o *PyComplex, name string) (Value, error) {
 	switch name {

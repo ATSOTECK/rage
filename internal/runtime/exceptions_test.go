@@ -672,13 +672,13 @@ func TestExceptionCauseAndContext(t *testing.T) {
 	}
 
 	exc := &PyException{
-		ExcType:        vm.builtinClass("ValueError"),
-		Message:        "bad value",
-		Args:           &PyTuple{Items: []Value{&PyString{Value: "bad value"}}},
-		Cause:          cause,
-		Context:        context,
+		Cause:           cause,
+		Context:         context,
 		SuppressContext: true,
 	}
+	exc.ExcType = vm.builtinClass("ValueError")
+	exc.Message = "bad value"
+	exc.Args = &PyTuple{Items: []Value{&PyString{Value: "bad value"}}}
 
 	if exc.Cause != cause {
 		t.Error("Cause not set correctly")
