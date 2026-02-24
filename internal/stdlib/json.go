@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -162,20 +163,21 @@ func jsonDump(vm *runtime.VM) int {
 	if vm.GetTop() >= 4 {
 		sepVal := vm.Get(4)
 		if !runtime.IsNone(sepVal) {
+			var sepItems []runtime.Value
 			if tuple, ok := sepVal.(*runtime.PyTuple); ok && len(tuple.Items) == 2 {
-				if s, ok := tuple.Items[0].(*runtime.PyString); ok {
-					itemSep = s.Value
-				}
-				if s, ok := tuple.Items[1].(*runtime.PyString); ok {
-					keySep = s.Value
-				}
+				sepItems = tuple.Items
 			} else if list, ok := sepVal.(*runtime.PyList); ok && len(list.Items) == 2 {
-				if s, ok := list.Items[0].(*runtime.PyString); ok {
-					itemSep = s.Value
+				sepItems = list.Items
+			}
+			if sepItems != nil {
+				s0, ok0 := sepItems[0].(*runtime.PyString)
+				s1, ok1 := sepItems[1].(*runtime.PyString)
+				if !ok0 || !ok1 {
+					vm.RaiseError("TypeError: separator elements must be strings")
+					return 0
 				}
-				if s, ok := list.Items[1].(*runtime.PyString); ok {
-					keySep = s.Value
-				}
+				itemSep = s0.Value
+				keySep = s1.Value
 			}
 		}
 	}
@@ -265,10 +267,10 @@ func encodeJSON(v runtime.Value, indent, itemSep, keySep string, sortKeys bool, 
 
 	case *runtime.PyFloat:
 		// Handle special float values
-		if val.Value != val.Value { // NaN check
+		if math.IsNaN(val.Value) {
 			return "", fmt.Errorf("NaN is not JSON serializable")
 		}
-		if val.Value > 1e308 || val.Value < -1e308 {
+		if math.IsInf(val.Value, 0) {
 			return "", fmt.Errorf("Infinity is not JSON serializable")
 		}
 		return strconv.FormatFloat(val.Value, 'g', -1, 64), nil

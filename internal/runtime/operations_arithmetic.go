@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// safeIntCount converts an int64 to int, returning an error if the value
+// exceeds the platform's int range (relevant on 32-bit systems).
+func safeIntCount(v int64) (int, error) {
+	if v > math.MaxInt {
+		return 0, fmt.Errorf("MemoryError: repetition count too large for platform")
+	}
+	return int(v), nil
+}
+
 func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 	// Bool is a subclass of int - coerce for unary operations
 	if ab, ok := a.(*PyBool); ok {
@@ -253,7 +262,11 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if err := vm.trackAlloc(resultSize); err != nil {
 					return nil, err
 				}
-				return &PyString{Value: strings.Repeat(as.Value, int(bi.Value))}, nil
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
+				return &PyString{Value: strings.Repeat(as.Value, count)}, nil
 			}
 		}
 		if as, ok := b.(*PyString); ok {
@@ -268,7 +281,11 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if err := vm.trackAlloc(resultSize); err != nil {
 					return nil, err
 				}
-				return &PyString{Value: strings.Repeat(as.Value, int(ai.Value))}, nil
+				count, err := safeIntCount(ai.Value)
+				if err != nil {
+					return nil, err
+				}
+				return &PyString{Value: strings.Repeat(as.Value, count)}, nil
 			}
 		}
 		// List repetition - pre-allocate for efficiency
@@ -286,7 +303,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
 					return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
-				count := int(bi.Value)
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
 				items := make([]Value, 0, len(al.Items)*count)
 				for i := 0; i < count; i++ {
 					items = append(items, al.Items...)
@@ -306,7 +326,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
 					return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
-				count := int(bi.Value)
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
 				items := make([]Value, 0, len(al.Items)*count)
 				for i := 0; i < count; i++ {
 					items = append(items, al.Items...)
@@ -328,7 +351,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
 					return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
-				count := int(bi.Value)
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
 				items := make([]Value, 0, len(at.Items)*count)
 				for i := 0; i < count; i++ {
 					items = append(items, at.Items...)
@@ -348,7 +374,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if vm.maxCollectionSize > 0 && resultItems > vm.maxCollectionSize {
 					return nil, fmt.Errorf("MemoryError: tuple size limit exceeded (limit is %d)", vm.maxCollectionSize)
 				}
-				count := int(bi.Value)
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
 				items := make([]Value, 0, len(at.Items)*count)
 				for i := 0; i < count; i++ {
 					items = append(items, at.Items...)
@@ -367,7 +396,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if resultSize > maxBytesRepeatSize {
 					return nil, fmt.Errorf("MemoryError: bytes repetition result too large")
 				}
-				count := int(bi.Value)
+				count, err := safeIntCount(bi.Value)
+				if err != nil {
+					return nil, err
+				}
 				result := make([]byte, 0, len(ab.Value)*count)
 				for i := 0; i < count; i++ {
 					result = append(result, ab.Value...)
@@ -384,7 +416,10 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				if resultSize > maxBytesRepeatSize {
 					return nil, fmt.Errorf("MemoryError: bytes repetition result too large")
 				}
-				count := int(ai.Value)
+				count, err := safeIntCount(ai.Value)
+				if err != nil {
+					return nil, err
+				}
 				result := make([]byte, 0, len(ab.Value)*count)
 				for i := 0; i < count; i++ {
 					result = append(result, ab.Value...)

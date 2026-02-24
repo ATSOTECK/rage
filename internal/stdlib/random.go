@@ -2,10 +2,15 @@ package stdlib
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
+
+// randMu protects globalRand from concurrent access.
+// *rand.Rand is not thread-safe, and multiple VM instances may call random functions concurrently.
+var randMu sync.Mutex
 
 // globalRand is the default random source
 var globalRand = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -36,18 +41,23 @@ func InitRandomModule() {
 
 // random() -> float in [0.0, 1.0)
 func randomRandom(vm *runtime.VM) int {
-	vm.Push(runtime.NewFloat(globalRand.Float64()))
+	randMu.Lock()
+	f := globalRand.Float64()
+	randMu.Unlock()
+	vm.Push(runtime.NewFloat(f))
 	return 1
 }
 
 // seed(n) -> None
 func randomSeed(vm *runtime.VM) int {
 	n := vm.ToInt(1)
+	randMu.Lock()
 	if n == 0 {
 		globalRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	} else {
 		globalRand = rand.New(rand.NewSource(n))
 	}
+	randMu.Unlock()
 	return 0
 }
 
@@ -59,7 +69,9 @@ func randomRandint(vm *runtime.VM) int {
 		vm.RaiseError("empty range for randint()")
 		return 0
 	}
+	randMu.Lock()
 	result := a + globalRand.Int63n(b-a+1)
+	randMu.Unlock()
 	vm.Push(runtime.NewInt(result))
 	return 1
 }
@@ -108,7 +120,9 @@ func randomRandrange(vm *runtime.VM) int {
 		return 0
 	}
 
+	randMu.Lock()
 	result := start + step*globalRand.Int63n(n)
+	randMu.Unlock()
 	vm.Push(runtime.NewInt(result))
 	return 1
 }
@@ -127,7 +141,9 @@ func randomGetrandbits(vm *runtime.VM) int {
 	if k > 63 {
 		k = 63 // Limit to int64 range
 	}
+	randMu.Lock()
 	result := globalRand.Int63n(1 << k)
+	randMu.Unlock()
 	vm.Push(runtime.NewInt(result))
 	return 1
 }
@@ -157,7 +173,9 @@ func randomChoice(vm *runtime.VM) int {
 		return 0
 	}
 
+	randMu.Lock()
 	idx := globalRand.Intn(len(items))
+	randMu.Unlock()
 	vm.Push(items[idx])
 	return 1
 }
@@ -191,9 +209,11 @@ func randomChoices(vm *runtime.VM) int {
 	}
 
 	result := make([]runtime.Value, k)
+	randMu.Lock()
 	for i := 0; i < k; i++ {
 		result[i] = items[globalRand.Intn(len(items))]
 	}
+	randMu.Unlock()
 	vm.Push(runtime.NewList(result))
 	return 1
 }
@@ -210,10 +230,12 @@ func randomShuffle(vm *runtime.VM) int {
 
 	// Fisher-Yates shuffle
 	n := len(list.Items)
+	randMu.Lock()
 	for i := n - 1; i > 0; i-- {
 		j := globalRand.Intn(i + 1)
 		list.Items[i], list.Items[j] = list.Items[j], list.Items[i]
 	}
+	randMu.Unlock()
 
 	return 0
 }
@@ -249,11 +271,13 @@ func randomSample(vm *runtime.VM) int {
 	copy(pool, items)
 
 	result := make([]runtime.Value, k)
+	randMu.Lock()
 	for i := 0; i < k; i++ {
 		j := globalRand.Intn(n - i)
 		result[i] = pool[j]
 		pool[j] = pool[n-i-1]
 	}
+	randMu.Unlock()
 
 	vm.Push(runtime.NewList(result))
 	return 1
@@ -263,7 +287,9 @@ func randomSample(vm *runtime.VM) int {
 func randomUniform(vm *runtime.VM) int {
 	a := vm.CheckFloat(1)
 	b := vm.CheckFloat(2)
+	randMu.Lock()
 	result := a + (b-a)*globalRand.Float64()
+	randMu.Unlock()
 	vm.Push(runtime.NewFloat(result))
 	return 1
 }
@@ -289,7 +315,9 @@ func randomTriangular(vm *runtime.VM) int {
 		mode = vm.CheckFloat(3)
 	}
 
+	randMu.Lock()
 	u := globalRand.Float64()
+	randMu.Unlock()
 	c := (mode - low) / (high - low)
 
 	var result float64
@@ -307,7 +335,9 @@ func randomTriangular(vm *runtime.VM) int {
 func randomGauss(vm *runtime.VM) int {
 	mu := vm.CheckFloat(1)
 	sigma := vm.CheckFloat(2)
+	randMu.Lock()
 	result := globalRand.NormFloat64()*sigma + mu
+	randMu.Unlock()
 	vm.Push(runtime.NewFloat(result))
 	return 1
 }

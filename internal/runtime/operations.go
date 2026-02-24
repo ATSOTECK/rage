@@ -10,13 +10,11 @@ func (vm *VM) isInstanceOf(inst *PyInstance, cls *PyClass) bool {
 	return vm.isSubclassOf(inst.Class, cls)
 }
 
-// isSubclassOf checks if cls is a subclass of target
+// isSubclassOf checks if cls is a subclass of target.
+// Uses the pre-computed MRO (which is cycle-free) instead of recursing through Bases.
 func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
-	if cls == target {
-		return true
-	}
-	for _, base := range cls.Bases {
-		if vm.isSubclassOf(base, target) {
+	for _, c := range cls.Mro {
+		if c == target {
 			return true
 		}
 	}

@@ -888,6 +888,13 @@ func (vm *VM) contains(container, item Value) bool {
 			_ = iterMethod
 			if iter, err := vm.getIter(c); err == nil {
 				for {
+					if vm.ctx != nil {
+						select {
+						case <-vm.ctx.Done():
+							return false
+						default:
+						}
+					}
 					val, done, err := vm.iterNext(iter)
 					if done || err != nil {
 						break
@@ -948,6 +955,13 @@ func (vm *VM) contains(container, item Value) bool {
 			// Fall back to iterating via __iter__
 			if iter, err := vm.getIter(c); err == nil {
 				for {
+					if vm.ctx != nil {
+						select {
+						case <-vm.ctx.Done():
+							return false
+						default:
+						}
+					}
 					val, done, err := vm.iterNext(iter)
 					if done || err != nil {
 						break
@@ -971,6 +985,13 @@ func (vm *VM) contains(container, item Value) bool {
 			}
 			if hasGetitem {
 				for idx := 0; ; idx++ {
+					if vm.ctx != nil {
+						select {
+						case <-vm.ctx.Done():
+							return false
+						default:
+						}
+					}
 					result, _, err := vm.callDunder(c, "__getitem__", MakeInt(int64(idx)))
 					if err != nil {
 						// IndexError means we've exhausted the sequence

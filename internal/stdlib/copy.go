@@ -2,6 +2,7 @@ package stdlib
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
@@ -102,9 +103,23 @@ func shallowCopy(vm *runtime.VM, val runtime.Value) (runtime.Value, error) {
 	}
 }
 
+// ptrOf returns the pointer identity of a Value for cycle detection in deepCopy.
+func ptrOf(v runtime.Value) uintptr {
+	return reflect.ValueOf(v).Pointer()
+}
+
 // deepCopy creates a deep copy of a value.
 // For instances with __deepcopy__, calls __deepcopy__(memo).
 func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value) (runtime.Value, error) {
+	// Check memo for already-copied objects (cycle detection)
+	switch val.(type) {
+	case *runtime.PyList, *runtime.PyDict, *runtime.PySet, *runtime.PyTuple, *runtime.PyInstance:
+		key := ptrOf(val)
+		if cached, ok := memo[key]; ok {
+			return cached, nil
+		}
+	}
+
 	switch v := val.(type) {
 	case *runtime.PyInstance:
 		// Check for __deepcopy__
@@ -118,6 +133,8 @@ func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value)
 		}
 		// Default: deep copy of instance dict/slots
 		inst := &runtime.PyInstance{Class: v.Class}
+		// Store in memo before recursing to break cycles
+		memo[ptrOf(v)] = inst
 		if v.Dict != nil {
 			inst.Dict = make(map[string]runtime.Value, len(v.Dict))
 			for k, origVal := range v.Dict {
@@ -141,18 +158,21 @@ func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value)
 		return inst, nil
 
 	case *runtime.PyList:
-		items := make([]runtime.Value, len(v.Items))
+		result := &runtime.PyList{Items: make([]runtime.Value, len(v.Items))}
+		// Store in memo before recursing to break cycles
+		memo[ptrOf(v)] = result
 		for i, item := range v.Items {
 			copied, err := deepCopy(vm, item, memo)
 			if err != nil {
 				return nil, err
 			}
-			items[i] = copied
+			result.Items[i] = copied
 		}
-		return &runtime.PyList{Items: items}, nil
+		return result, nil
 
 	case *runtime.PyDict:
 		d := &runtime.PyDict{Items: make(map[runtime.Value]runtime.Value, len(v.Items))}
+		memo[ptrOf(v)] = d
 		for _, k := range v.Keys(vm) {
 			origVal, _ := v.DictGet(k, vm)
 			copiedVal, err := deepCopy(vm, origVal, memo)
@@ -165,6 +185,7 @@ func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value)
 
 	case *runtime.PySet:
 		s := &runtime.PySet{Items: make(map[runtime.Value]struct{}, len(v.Items))}
+		memo[ptrOf(v)] = s
 		for k := range v.Items {
 			s.Items[k] = struct{}{}
 		}
@@ -172,15 +193,16 @@ func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value)
 
 	case *runtime.PyTuple:
 		// Deep copy tuple contents (tuples are immutable but may contain mutable objects)
-		items := make([]runtime.Value, len(v.Items))
+		result := &runtime.PyTuple{Items: make([]runtime.Value, len(v.Items))}
+		memo[ptrOf(v)] = result
 		for i, item := range v.Items {
 			copied, err := deepCopy(vm, item, memo)
 			if err != nil {
 				return nil, err
 			}
-			items[i] = copied
+			result.Items[i] = copied
 		}
-		return &runtime.PyTuple{Items: items}, nil
+		return result, nil
 
 	case *runtime.PyFrozenSet:
 		return v, nil

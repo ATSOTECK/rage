@@ -193,7 +193,15 @@ func timeStrftime(vm *runtime.VM) int {
 
 	var t time.Time
 	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		tuple := vm.Get(2).(*runtime.PyTuple)
+		tuple, ok := vm.Get(2).(*runtime.PyTuple)
+		if !ok {
+			vm.RaiseError("TypeError: tuple expected, got %T", vm.Get(2))
+			return 0
+		}
+		if len(tuple.Items) < 6 {
+			vm.RaiseError("TypeError: time tuple must have at least 6 elements")
+			return 0
+		}
 		year := int(runtime.ToGoValue(tuple.Items[0]).(int64))
 		month := time.Month(runtime.ToGoValue(tuple.Items[1]).(int64))
 		day := int(runtime.ToGoValue(tuple.Items[2]).(int64))
@@ -276,7 +284,9 @@ func timeCtime(vm *runtime.VM) int {
 	var t time.Time
 	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
 		secs := vm.CheckFloat(1)
-		t = time.Unix(int64(secs), 0)
+		sec := int64(secs)
+		nsec := int64((secs - float64(sec)) * 1e9)
+		t = time.Unix(sec, nsec)
 	} else {
 		t = time.Now()
 	}
@@ -288,7 +298,15 @@ func timeCtime(vm *runtime.VM) int {
 func timeAsctime(vm *runtime.VM) int {
 	var t time.Time
 	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
-		tuple := vm.Get(1).(*runtime.PyTuple)
+		tuple, ok := vm.Get(1).(*runtime.PyTuple)
+		if !ok {
+			vm.RaiseError("TypeError: tuple expected, got %T", vm.Get(1))
+			return 0
+		}
+		if len(tuple.Items) < 6 {
+			vm.RaiseError("TypeError: time tuple must have at least 6 elements")
+			return 0
+		}
 		year := int(runtime.ToGoValue(tuple.Items[0]).(int64))
 		month := time.Month(runtime.ToGoValue(tuple.Items[1]).(int64))
 		day := int(runtime.ToGoValue(tuple.Items[2]).(int64))
