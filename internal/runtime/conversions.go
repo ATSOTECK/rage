@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// maxIntStringDigits is the maximum number of digits allowed when converting
+// a string to a big integer. Matches CPython 3.12+ default (sys.int_info.default_max_str_digits).
+const maxIntStringDigits = 4300
+
 // Type conversions
 
 func (vm *VM) toValue(v any) Value {
@@ -115,6 +119,9 @@ func (vm *VM) tryToIntValue(v Value) (Value, error) {
 		s = strings.ReplaceAll(s, "_", "")
 		i, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
+			if len(s) > maxIntStringDigits {
+				return nil, fmt.Errorf("ValueError: Exceeds the limit (%d digits) for integer string conversion: value has %d digits", maxIntStringDigits, len(s))
+			}
 			// Try big.Int for overflow
 			bi := new(big.Int)
 			_, ok := bi.SetString(s, 10)
@@ -227,6 +234,9 @@ func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
 
 	i, err := strconv.ParseInt(s, int(base), 64)
 	if err != nil {
+		if len(s) > maxIntStringDigits {
+			return nil, fmt.Errorf("ValueError: Exceeds the limit (%d digits) for integer string conversion: value has %d digits", maxIntStringDigits, len(s))
+		}
 		// Try big.Int for overflow
 		bi := new(big.Int)
 		_, ok := bi.SetString(s, int(base))
