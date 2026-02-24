@@ -133,12 +133,9 @@ func (c *Compiler) emitArg(op runtime.Opcode, arg int) int {
 		c.errors = append(c.errors, CompileError{
 			Message: fmt.Sprintf("bytecode argument %d exceeds 16-bit limit", arg),
 		})
-		// Clamp to valid range to avoid corrupted bytecode
-		if arg < -32768 {
-			arg = -32768
-		} else {
-			arg = 65535
-		}
+		// Clamp to 0 to avoid cascading issues. The recorded error will
+		// prevent this code from executing (CompileSource returns nil on error).
+		arg = 0
 	}
 	offset := len(c.code.Code)
 	c.code.Code = append(c.code.Code, byte(op), byte(arg), byte(arg>>8))

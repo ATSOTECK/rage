@@ -56,21 +56,28 @@ func jsonDumps(vm *runtime.VM) int {
 	if vm.GetTop() >= 3 {
 		sepVal := vm.Get(3)
 		if !runtime.IsNone(sepVal) {
-			if tuple, ok := sepVal.(*runtime.PyTuple); ok && len(tuple.Items) == 2 {
-				if s, ok := tuple.Items[0].(*runtime.PyString); ok {
-					itemSep = s.Value
-				}
-				if s, ok := tuple.Items[1].(*runtime.PyString); ok {
-					keySep = s.Value
-				}
-			} else if list, ok := sepVal.(*runtime.PyList); ok && len(list.Items) == 2 {
-				if s, ok := list.Items[0].(*runtime.PyString); ok {
-					itemSep = s.Value
-				}
-				if s, ok := list.Items[1].(*runtime.PyString); ok {
-					keySep = s.Value
-				}
+			var items []runtime.Value
+			switch v := sepVal.(type) {
+			case *runtime.PyTuple:
+				items = v.Items
+			case *runtime.PyList:
+				items = v.Items
+			default:
+				vm.RaiseError("TypeError: separators must be a tuple or list, not %T", sepVal)
+				return 0
 			}
+			if len(items) != 2 {
+				vm.RaiseError("ValueError: separators must be a 2-element tuple (item_separator, key_separator)")
+				return 0
+			}
+			s0, ok0 := items[0].(*runtime.PyString)
+			s1, ok1 := items[1].(*runtime.PyString)
+			if !ok0 || !ok1 {
+				vm.RaiseError("TypeError: separator elements must be strings")
+				return 0
+			}
+			itemSep = s0.Value
+			keySep = s1.Value
 		}
 	}
 
