@@ -989,48 +989,6 @@ func (p *Parser) parseNonlocalStmt() model.Stmt {
 	}
 }
 
-func (p *Parser) parseTypeAlias() model.Stmt {
-	startPos := p.current().Pos
-	p.expect(model.TK_Type)
-
-	name := p.parseIdentifier()
-
-	var typeParams []*model.TypeParam
-	if p.match(model.TK_LBracket) {
-		for !p.check(model.TK_RBracket) && !p.isAtEnd() {
-			paramStart := p.current().Pos
-			paramName := p.parseIdentifier()
-			var bound model.Expr
-			if p.match(model.TK_Colon) {
-				bound = p.parseExpression()
-			}
-			typeParams = append(typeParams, &model.TypeParam{
-				Name:     paramName,
-				Bound:    bound,
-				StartPos: paramStart,
-				EndPos:   p.current().Pos,
-			})
-			if !p.match(model.TK_Comma) {
-				break
-			}
-		}
-		p.expect(model.TK_RBracket)
-	}
-
-	p.expect(model.TK_Assign)
-	value := p.parseExpression()
-
-	p.match(model.TK_Newline)
-
-	return &model.TypeAlias{
-		Name:       name,
-		TypeParams: typeParams,
-		Value:      value,
-		StartPos:   startPos,
-		EndPos:     value.End(),
-	}
-}
-
 func (p *Parser) parseDecorated() model.Stmt {
 	var decorators []model.Expr
 

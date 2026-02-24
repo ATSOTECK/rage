@@ -59,11 +59,6 @@ func TestEstimateStackSizeLargeTuple(t *testing.T) {
 
 func TestEstimateStackSizeLargeDict(t *testing.T) {
 	// Build a dict with 20 key-value pairs (40 items on stack)
-	var pairs []string
-	for i := 0; i < 20; i++ {
-		pairs = append(pairs, "\"k\": 1")
-	}
-	// Use unique keys to avoid parse issues
 	source := "x = {"
 	for i := 0; i < 20; i++ {
 		if i > 0 {

@@ -1118,7 +1118,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		var err error
 		if inst, ok := a.(*PyInstance); ok {
 			var inplaceDunders = [...]string{
-				OpInplaceAdd - OpInplaceAdd:     "__iadd__",
+				0 /* OpInplaceAdd */ : "__iadd__",
 				OpInplaceSubtract - OpInplaceAdd: "__isub__",
 				OpInplaceMultiply - OpInplaceAdd: "__imul__",
 				OpInplaceDivide - OpInplaceAdd:   "__itruediv__",

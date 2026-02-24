@@ -542,32 +542,6 @@ func (o *Optimizer) isLoadOne(instr *instruction, code *runtime.CodeObject) bool
 	return false
 }
 
-// Helper to check if instruction is any LOAD_FAST variant
-func (o *Optimizer) isLoadFastFamily(instr *instruction) bool {
-	if instr.removed {
-		return false
-	}
-	switch instr.op {
-	case runtime.OpLoadFast, runtime.OpLoadFast0, runtime.OpLoadFast1,
-		runtime.OpLoadFast2, runtime.OpLoadFast3:
-		return true
-	}
-	return false
-}
-
-// Helper to check if instruction is any STORE_FAST variant
-func (o *Optimizer) isStoreFastFamily(instr *instruction) bool {
-	if instr.removed {
-		return false
-	}
-	switch instr.op {
-	case runtime.OpStoreFast, runtime.OpStoreFast0, runtime.OpStoreFast1,
-		runtime.OpStoreFast2, runtime.OpStoreFast3:
-		return true
-	}
-	return false
-}
-
 func (o *Optimizer) detectLoadFastLoadFast(instrs []*instruction) bool {
 	// Pattern: LOAD_FAST x, LOAD_FAST y -> LOAD_FAST_LOAD_FAST (packed)
 	changed := false
@@ -936,21 +910,6 @@ func (o *Optimizer) isIntegerLoad(instr *instruction, code *runtime.CodeObject) 
 	return false
 }
 
-// Helper to check if instruction is likely loading an integer
-// (heuristic: from range iteration, integer constant, or known int operations)
-func (o *Optimizer) isLikelyInteger(instr *instruction, code *runtime.CodeObject) bool {
-	if instr.removed {
-		return false
-	}
-	// Direct integer loads
-	if o.isIntegerLoad(instr, code) {
-		return true
-	}
-	// LOAD_FAST after FOR_ITER (range loop variable) is likely int
-	// This is a heuristic - we can't always be sure
-	return false
-}
-
 // SpecializeBinaryOps converts generic binary ops to specialized int versions
 // when we can prove or heuristically determine operands are integers
 func (o *Optimizer) SpecializeBinaryOps(instrs []*instruction, code *runtime.CodeObject) bool {
@@ -1089,23 +1048,6 @@ func (o *Optimizer) SpecializeBinaryOps(instrs []*instruction, code *runtime.Cod
 		}
 	}
 	return changed
-}
-
-// Simple loop unrolling for very small loops
-// This optimization unrolls loops with constant small iteration counts
-func (o *Optimizer) unrollSmallLoops(instrs []*instruction, code *runtime.CodeObject) bool {
-	// Look for patterns like:
-	// LOAD_CONST small_int
-	// GET_ITER
-	// FOR_ITER exit
-	// ... body ...
-	// JUMP back
-	//
-	// For now, this is a placeholder - true loop unrolling requires
-	// tracking loop boundaries and duplicating the body, which is complex
-	// at the bytecode level. The real benefit would come from AST-level
-	// unrolling before bytecode generation.
-	return false
 }
 
 func (o *Optimizer) detectCompareLtLocalJump(instrs []*instruction, code *runtime.CodeObject) bool {

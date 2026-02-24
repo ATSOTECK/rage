@@ -1,3 +1,4 @@
+// Package model defines the AST node types and token kinds used by the RAGE compiler.
 package model
 
 import "fmt"

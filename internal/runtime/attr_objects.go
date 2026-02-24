@@ -1486,12 +1486,6 @@ func (vm *VM) getAttrBytes(b *PyBytes, name string) (Value, error) {
 	return nil, fmt.Errorf("AttributeError: 'bytes' object has no attribute '%s'", name)
 }
 
-// getAttrNone handles attribute access on *PyNone values.
-// PyNone has no specific attributes.
-func (vm *VM) getAttrNone(o *PyNone, name string) (Value, error) {
-	return nil, fmt.Errorf("AttributeError: 'NoneType' object has no attribute '%s'", name)
-}
-
 // bytesMaketransImpl implements bytes.maketrans(from, to).
 func bytesMaketransImpl(args []Value) (Value, error) {
 	if len(args) != 2 {

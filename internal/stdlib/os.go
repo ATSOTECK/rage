@@ -182,14 +182,18 @@ func osGetenvb(vm *gopherpy.VM) int {
 func osPutenv(vm *gopherpy.VM) int {
 	key := vm.CheckString(1)
 	value := vm.CheckString(2)
-	os.Setenv(key, value)
+	if err := os.Setenv(key, value); err != nil {
+		vm.RaiseError("OSError: %s", err.Error())
+	}
 	return 0
 }
 
 // os.unsetenv(key)
 func osUnsetenv(vm *gopherpy.VM) int {
 	key := vm.CheckString(1)
-	os.Unsetenv(key)
+	if err := os.Unsetenv(key); err != nil {
+		vm.RaiseError("OSError: %s", err.Error())
+	}
 	return 0
 }
 
@@ -401,7 +405,7 @@ func osReplace(vm *gopherpy.VM) int {
 	src := vm.CheckString(1)
 	dst := vm.CheckString(2)
 	// Remove destination first to allow cross-filesystem moves
-	os.Remove(dst)
+	_ = os.Remove(dst)
 	if err := os.Rename(src, dst); err != nil {
 		vm.RaiseError("OSError: %s", err.Error())
 		return 0

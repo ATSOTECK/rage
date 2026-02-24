@@ -204,9 +204,6 @@ func functoolsReduce(vm *runtime.VM) int {
 // WRAPPER_ASSIGNMENTS are attributes to copy from wrapped function
 var wrapperAssignments = []string{"__module__", "__name__", "__qualname__", "__annotations__", "__doc__"}
 
-// WRAPPER_UPDATES are attributes to update (merge) from wrapped function
-var wrapperUpdates = []string{"__dict__"}
-
 // functools.update_wrapper(wrapper, wrapped, assigned=..., updated=...)
 func functoolsUpdateWrapper(vm *runtime.VM) int {
 	if !vm.RequireArgs("update_wrapper", 2) {

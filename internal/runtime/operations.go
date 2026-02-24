@@ -81,9 +81,9 @@ func (vm *VM) callDel(val Value) {
 			args := []Value{inst}
 			switch fn := method.(type) {
 			case *PyFunction:
-				vm.callFunction(fn, args, nil)
+				_, _ = vm.callFunction(fn, args, nil)
 			case *PyBuiltinFunc:
-				fn.Fn(args, nil)
+				_, _ = fn.Fn(args, nil)
 			}
 			return
 		}

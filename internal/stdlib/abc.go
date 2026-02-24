@@ -6,14 +6,6 @@ import (
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
-// getInstanceClass returns the PyClass of a value, or nil if not a PyInstance.
-func getInstanceClass(v runtime.Value) *runtime.PyClass {
-	if inst, ok := v.(*runtime.PyInstance); ok {
-		return inst.Class
-	}
-	return nil
-}
-
 // getValueClassOrBuiltin returns the class representation of a value for ABC checks.
 // For PyInstance, returns its Class. For builtin types (int, str, etc.), returns the
 // corresponding builtin type value (which may be *PyBuiltinFunc or *PyClass).

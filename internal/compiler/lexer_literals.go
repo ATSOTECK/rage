@@ -279,16 +279,6 @@ func (l *Lexer) processEscapeSequence(ch byte) string {
 	}
 }
 
-// processEscape is kept for backward compatibility but delegates to processEscapeSequence
-func (l *Lexer) processEscape(ch byte) byte {
-	result := l.processEscapeSequence(ch)
-	if len(result) == 1 {
-		return result[0]
-	}
-	// For multi-byte results, return just the first byte (this shouldn't happen in normal use)
-	return result[0]
-}
-
 func (l *Lexer) scanNumber() model.Token {
 	l.start = l.pos
 	l.startLine = l.line

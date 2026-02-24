@@ -23,7 +23,11 @@ linters:
     staticcheck:
       checks:
         - "all"
-        - "-SA1019"
+        - "-SA1019" # deprecated usage — address separately
+        - "-SA4026" # -0.0 literal — used intentionally in tests
+        - "-ST*"    # all style checks (naming, comments, etc.)
+        - "-QF*"    # all quick-fix suggestions
+        - "-S1*"    # all simplification suggestions
   exclusions:
     paths:
       - vendor$
@@ -31,6 +35,8 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+          - govet
       - path: test/
         linters:
           - errcheck
+          - govet

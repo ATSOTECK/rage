@@ -197,7 +197,7 @@ func jsonDump(vm *runtime.VM) int {
 	}
 
 	// Flush to ensure data is written
-	f.writer.Flush()
+	_ = f.writer.Flush()
 
 	return 0 // dump() returns None
 }
