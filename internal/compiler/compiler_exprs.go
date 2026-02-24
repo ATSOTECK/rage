@@ -12,6 +12,11 @@ import (
 // Expression compilation
 
 func (c *Compiler) compileExpr(expr model.Expr) {
+	if expr == nil {
+		c.errors = append(c.errors, CompileError{Message: "unexpected nil expression"})
+		c.emit(runtime.OpLoadNone)
+		return
+	}
 
 	switch e := expr.(type) {
 	case *model.IntLit:

@@ -414,7 +414,7 @@ func (p *Parser) parseFStringLit() model.Expr {
 				})
 			}
 
-			if expr != nil {
+			if expr != nil && len(exprParser.errors) == 0 {
 				parts = append(parts, model.FStringPart{
 					IsExpr:     true,
 					Expr:       expr,
@@ -424,6 +424,8 @@ func (p *Parser) parseFStringLit() model.Expr {
 			} else if len(exprParser.errors) == 0 {
 				p.addError("f-string: empty expression not allowed")
 			}
+		} else {
+			p.addError("f-string: empty expression not allowed")
 		}
 
 		i = exprEnd + 1 // Skip past the closing brace
