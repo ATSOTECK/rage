@@ -185,6 +185,10 @@ func (vm *VM) ExecuteWithTimeout(timeout time.Duration, code *CodeObject) (Value
 // The context is checked periodically during execution (see SetCheckInterval).
 // Returns CancelledError if the context is cancelled, or TimeoutError if it times out.
 func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, error) {
+	if err := code.Validate(); err != nil {
+		return nil, err
+	}
+
 	frame := &Frame{
 		Code:     code,
 		IP:       0,

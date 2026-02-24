@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // GoFunction is the signature for Go functions callable from Python.
@@ -362,29 +363,42 @@ type TypeMetatable struct {
 
 var typeMetatables = make(map[string]*TypeMetatable)
 
+// typeMetaMu protects typeMetatables from concurrent access
+var typeMetaMu sync.RWMutex
+
 // NewTypeMetatable creates a new type metatable
 func (vm *VM) NewTypeMetatable(typeName string) *TypeMetatable {
 	mt := &TypeMetatable{
 		Name:    typeName,
 		Methods: make(map[string]GoFunction),
 	}
+	typeMetaMu.Lock()
 	typeMetatables[typeName] = mt
+	typeMetaMu.Unlock()
 	return mt
 }
 
 // GetTypeMetatable retrieves a registered type metatable
 func (vm *VM) GetTypeMetatable(typeName string) *TypeMetatable {
-	return typeMetatables[typeName]
+	typeMetaMu.RLock()
+	mt := typeMetatables[typeName]
+	typeMetaMu.RUnlock()
+	return mt
 }
 
 // RegisterTypeMetatable registers a type metatable globally (without VM instance)
 func RegisterTypeMetatable(typeName string, mt *TypeMetatable) {
+	typeMetaMu.Lock()
 	typeMetatables[typeName] = mt
+	typeMetaMu.Unlock()
 }
 
 // GetRegisteredTypeMetatable retrieves a type metatable globally (without VM instance)
 func GetRegisteredTypeMetatable(typeName string) *TypeMetatable {
-	return typeMetatables[typeName]
+	typeMetaMu.RLock()
+	mt := typeMetatables[typeName]
+	typeMetaMu.RUnlock()
+	return mt
 }
 
 // SetMethod sets a method on a type metatable
@@ -401,7 +415,9 @@ func (mt *TypeMetatable) SetMethods(methods map[string]GoFunction) {
 
 // ResetTypeMetatables clears the type metatable registry (called by ResetModules)
 func ResetTypeMetatables() {
+	typeMetaMu.Lock()
 	typeMetatables = make(map[string]*TypeMetatable)
+	typeMetaMu.Unlock()
 }
 
 // =====================================
@@ -412,25 +428,40 @@ func ResetTypeMetatables() {
 // This allows stdlib modules (initialized before VM creation) to register builtins.
 var pendingBuiltins = make(map[string]GoFunction)
 
+// pendingBuiltinsMu protects pendingBuiltins from concurrent access
+var pendingBuiltinsMu sync.RWMutex
+
 // RegisterPendingBuiltin registers a builtin to be added to new VMs.
 // Use this from stdlib modules that need to add builtin functions.
 func RegisterPendingBuiltin(name string, fn GoFunction) {
+	pendingBuiltinsMu.Lock()
 	pendingBuiltins[name] = fn
+	pendingBuiltinsMu.Unlock()
 }
 
-// GetPendingBuiltins returns all pending builtins (called by NewVM)
+// GetPendingBuiltins returns a copy of all pending builtins (called by NewVM)
 func GetPendingBuiltins() map[string]GoFunction {
-	return pendingBuiltins
+	pendingBuiltinsMu.RLock()
+	copy := make(map[string]GoFunction, len(pendingBuiltins))
+	for k, v := range pendingBuiltins {
+		copy[k] = v
+	}
+	pendingBuiltinsMu.RUnlock()
+	return copy
 }
 
 // ResetPendingBuiltins clears the pending builtins registry (called by ResetModules)
 func ResetPendingBuiltins() {
+	pendingBuiltinsMu.Lock()
 	pendingBuiltins = make(map[string]GoFunction)
+	pendingBuiltinsMu.Unlock()
 }
 
 // ApplyPendingBuiltins applies any pending builtins to an existing VM.
 // This is useful when enabling modules after VM creation.
 func (vm *VM) ApplyPendingBuiltins() {
+	pendingBuiltinsMu.RLock()
+	defer pendingBuiltinsMu.RUnlock()
 	for name, fn := range pendingBuiltins {
 		if _, exists := vm.builtins[name]; !exists {
 			vm.builtins[name] = NewGoFunction(name, fn)

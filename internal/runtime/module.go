@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // PyModule represents a Python module
@@ -36,10 +37,15 @@ type ModuleLoader func(vm *VM) *PyModule
 // moduleRegistry holds registered modules
 var moduleRegistry = make(map[string]ModuleLoader)
 
+// moduleMu protects moduleRegistry and loadedModules from concurrent access
+var moduleMu sync.RWMutex
+
 // RegisterModule registers a module loader with the given name
 // The loader will be called when the module is first imported
 func RegisterModule(name string, loader ModuleLoader) {
+	moduleMu.Lock()
 	moduleRegistry[name] = loader
+	moduleMu.Unlock()
 }
 
 // NewModule creates a new module with the given name
@@ -96,7 +102,9 @@ func (b *ModuleBuilder) Type(typeName string, constructor GoFunction, methods ma
 		Name:    typeName,
 		Methods: methods,
 	}
+	typeMetaMu.Lock()
 	typeMetatables[typeName] = mt
+	typeMetaMu.Unlock()
 
 	// Add constructor to module
 	if constructor != nil {
@@ -134,6 +142,9 @@ var loadedModules = make(map[string]*PyModule)
 
 // ImportModule imports a module by name
 func (vm *VM) ImportModule(name string) (*PyModule, error) {
+	moduleMu.Lock()
+	defer moduleMu.Unlock()
+
 	// Check if already loaded
 	if mod, ok := loadedModules[name]; ok {
 		return mod, nil
@@ -164,7 +175,12 @@ func (vm *VM) ImportModule(name string) (*PyModule, error) {
 				// Cache before executing to handle circular imports
 				loadedModules[name] = mod
 
-				if err := vm.ExecuteInModule(code, mod); err != nil {
+				// Unlock while executing module code (may re-enter ImportModule)
+				moduleMu.Unlock()
+				err = vm.ExecuteInModule(code, mod)
+				moduleMu.Lock()
+
+				if err != nil {
 					delete(loadedModules, name)
 					return nil, fmt.Errorf("error executing '%s': %v", name, err)
 				}
@@ -179,7 +195,9 @@ func (vm *VM) ImportModule(name string) (*PyModule, error) {
 
 // GetModule retrieves a loaded module by name
 func (vm *VM) GetModule(name string) (*PyModule, bool) {
+	moduleMu.RLock()
 	mod, ok := loadedModules[name]
+	moduleMu.RUnlock()
 	return mod, ok
 }
 
@@ -263,22 +281,28 @@ func joinModuleName(parts []string) string {
 
 // RegisterModule registers a module loader on the VM
 func (vm *VM) RegisterModule(name string, loader ModuleLoader) {
+	moduleMu.Lock()
 	moduleRegistry[name] = loader
+	moduleMu.Unlock()
 }
 
 // RegisterModuleInstance directly registers a pre-built module
 func (vm *VM) RegisterModuleInstance(name string, module *PyModule) {
+	moduleMu.Lock()
 	loadedModules[name] = module
 	moduleRegistry[name] = func(vm *VM) *PyModule {
 		return module
 	}
+	moduleMu.Unlock()
 }
 
 // ResetModules clears the loaded modules cache and related registries.
 // This should be called before initializing a new State to ensure
 // a clean slate (useful for testing and creating isolated states).
 func ResetModules() {
+	moduleMu.Lock()
 	loadedModules = make(map[string]*PyModule)
+	moduleMu.Unlock()
 	ResetPendingBuiltins()
 	ResetTypeMetatables()
 }
@@ -297,5 +321,7 @@ func (vm *VM) initBuiltinsModule() {
 		builtins.Dict[name] = value
 	}
 
+	moduleMu.Lock()
 	loadedModules["builtins"] = builtins
+	moduleMu.Unlock()
 }

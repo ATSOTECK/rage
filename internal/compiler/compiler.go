@@ -98,6 +98,13 @@ func (c *Compiler) Compile(module *model.Module) (*runtime.CodeObject, []Compile
 	// Apply peephole optimizations
 	c.optimizer.PeepholeOptimize(c.code)
 
+	// Validate bytecode indices
+	if err := c.code.Validate(); err != nil {
+		c.errors = append(c.errors, CompileError{
+			Message: err.Error(),
+		})
+	}
+
 	return c.code, c.errors
 }
 
