@@ -526,7 +526,9 @@ func makeKey(args []runtime.Value) string {
 	return result
 }
 
-// valueToKey converts a value to a string key for caching
+// valueToKey converts a value to a string key for caching.
+// Uses length-prefixed strings to avoid collisions between values
+// whose string representations contain the separator character.
 func valueToKey(v runtime.Value) string {
 	switch val := v.(type) {
 	case *runtime.PyInt:
@@ -534,7 +536,7 @@ func valueToKey(v runtime.Value) string {
 	case *runtime.PyFloat:
 		return fmt.Sprintf("f:%f", val.Value)
 	case *runtime.PyString:
-		return fmt.Sprintf("s:%s", val.Value)
+		return fmt.Sprintf("s:%d:%s", len(val.Value), val.Value)
 	case *runtime.PyBool:
 		return fmt.Sprintf("b:%t", val.Value)
 	case *runtime.PyTuple:

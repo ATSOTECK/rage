@@ -144,6 +144,9 @@ func (vm *VM) tryToIntValue(v Value) (Value, error) {
 func (vm *VM) getIntIndex(v Value) (int64, error) {
 	switch val := v.(type) {
 	case *PyInt:
+		if val.BigValue != nil {
+			return 0, fmt.Errorf("OverflowError: Python int too large to convert to index")
+		}
 		return val.Value, nil
 	case *PyBool:
 		if val.Value {

@@ -7,6 +7,19 @@ import (
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
+// computeMROWithFallback computes C3 MRO, falling back to [cls] + bases if it fails.
+func computeMROWithFallback(vm *runtime.VM, cls *runtime.PyClass, bases []*runtime.PyClass) []*runtime.PyClass {
+	mro, err := vm.ComputeC3MRO(cls, bases)
+	if err != nil {
+		// Fallback: class itself followed by bases' MROs (flat)
+		mro = []*runtime.PyClass{cls}
+		for _, base := range bases {
+			mro = append(mro, base.Mro...)
+		}
+	}
+	return mro
+}
+
 // InitEnumModule registers the enum module.
 func InitEnumModule() {
 	runtime.RegisterModule("enum", func(vm *runtime.VM) *runtime.PyModule {
@@ -33,7 +46,7 @@ func InitEnumModule() {
 			Bases: []*runtime.PyClass{objectClass},
 			Dict:  make(map[string]runtime.Value),
 		}
-		autoClass.Mro, _ = vm.ComputeC3MRO(autoClass, autoClass.Bases)
+		autoClass.Mro = computeMROWithFallback(vm, autoClass, autoClass.Bases)
 		autoClass.Dict["__init__"] = &runtime.PyBuiltinFunc{
 			Name: "__init__",
 			Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
@@ -86,7 +99,7 @@ func InitEnumModule() {
 			Bases: []*runtime.PyClass{typeClass},
 			Dict:  make(map[string]runtime.Value),
 		}
-		enumType.Mro, _ = vm.ComputeC3MRO(enumType, enumType.Bases)
+		enumType.Mro = computeMROWithFallback(vm, enumType, enumType.Bases)
 
 		// isEnumBase returns true if cls is one of the base enum classes (Enum, IntEnum, etc.)
 		isEnumBase := func(cls *runtime.PyClass) bool {
@@ -199,7 +212,7 @@ func InitEnumModule() {
 							Dict:      classDict,
 							Metaclass: mcs,
 						}
-						cls.Mro, _ = vm.ComputeC3MRO(cls, bases)
+						cls.Mro = computeMROWithFallback(vm, cls, bases)
 						return cls, nil
 					}
 
@@ -212,7 +225,7 @@ func InitEnumModule() {
 						Dict:      classDict,
 						Metaclass: mcs,
 					}
-					cls.Mro, _ = vm.ComputeC3MRO(cls, bases)
+					cls.Mro = computeMROWithFallback(vm, cls, bases)
 
 					enumBase := getEnumBase(bases)
 
@@ -960,7 +973,7 @@ func InitEnumModule() {
 			Dict:      make(map[string]runtime.Value),
 			Metaclass: enumType,
 		}
-		enumClass.Mro, _ = vm.ComputeC3MRO(enumClass, enumClass.Bases)
+		enumClass.Mro = computeMROWithFallback(vm, enumClass, enumClass.Bases)
 
 		// _generate_next_value_ for Enum: sequential integers starting at 1
 		enumClass.Dict["_generate_next_value_"] = &runtime.PyStaticMethod{
@@ -1035,7 +1048,7 @@ func InitEnumModule() {
 			Dict:      make(map[string]runtime.Value),
 			Metaclass: enumType,
 		}
-		intEnumClass.Mro, _ = vm.ComputeC3MRO(intEnumClass, intEnumClass.Bases)
+		intEnumClass.Mro = computeMROWithFallback(vm, intEnumClass, intEnumClass.Bases)
 
 		// _generate_next_value_ for IntEnum: same as Enum
 		intEnumClass.Dict["_generate_next_value_"] = &runtime.PyStaticMethod{
@@ -1059,7 +1072,7 @@ func InitEnumModule() {
 			Dict:      make(map[string]runtime.Value),
 			Metaclass: enumType,
 		}
-		strEnumClass.Mro, _ = vm.ComputeC3MRO(strEnumClass, strEnumClass.Bases)
+		strEnumClass.Mro = computeMROWithFallback(vm, strEnumClass, strEnumClass.Bases)
 
 		// _generate_next_value_ for StrEnum: lowercased member name
 		strEnumClass.Dict["_generate_next_value_"] = &runtime.PyStaticMethod{
@@ -1084,7 +1097,7 @@ func InitEnumModule() {
 			Dict:      make(map[string]runtime.Value),
 			Metaclass: enumType,
 		}
-		flagClass.Mro, _ = vm.ComputeC3MRO(flagClass, flagClass.Bases)
+		flagClass.Mro = computeMROWithFallback(vm, flagClass, flagClass.Bases)
 
 		// _generate_next_value_ for Flag: next power of 2
 		flagClass.Dict["_generate_next_value_"] = &runtime.PyStaticMethod{
@@ -1121,7 +1134,7 @@ func InitEnumModule() {
 			Dict:      make(map[string]runtime.Value),
 			Metaclass: enumType,
 		}
-		intFlagClass.Mro, _ = vm.ComputeC3MRO(intFlagClass, intFlagClass.Bases)
+		intFlagClass.Mro = computeMROWithFallback(vm, intFlagClass, intFlagClass.Bases)
 
 		intFlagClass.Dict["_generate_next_value_"] = flagClass.Dict["_generate_next_value_"]
 
