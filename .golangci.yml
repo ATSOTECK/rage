@@ -11,7 +11,6 @@ linters:
     - errcheck
     - ineffassign
     - unused
-    - gosimple
   settings:
     govet:
       enable-all: true
