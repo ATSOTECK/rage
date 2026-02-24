@@ -184,10 +184,25 @@ func (vm *VM) ExecuteWithTimeout(timeout time.Duration, code *CodeObject) (Value
 	return vm.ExecuteWithContext(ctx, code)
 }
 
+// recoverPanic converts VM panics (e.g. stack underflow) into errors so that
+// a bug in the VM or malformed bytecode doesn't crash the host Go process.
+func recoverPanic(result *Value, err *error) {
+	if r := recover(); r != nil {
+		*result = nil
+		if pe, ok := r.(*PyPanicError); ok {
+			*err = fmt.Errorf("%s: %s", pe.ExcType, pe.Message)
+		} else {
+			*err = fmt.Errorf("RuntimeError: internal VM error: %v", r)
+		}
+	}
+}
+
 // ExecuteWithContext runs bytecode with a context for cancellation/timeout support.
 // The context is checked periodically during execution (see SetCheckInterval).
 // Returns CancelledError if the context is cancelled, or TimeoutError if it times out.
-func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, error) {
+func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (result Value, err error) {
+	defer recoverPanic(&result, &err)
+
 	if err := code.Validate(); err != nil {
 		return nil, err
 	}
@@ -220,7 +235,10 @@ func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, 
 
 // ExecuteInModule runs bytecode with a module's dict as the global namespace.
 // This is used to populate a module's namespace when registering Python modules.
-func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) error {
+func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) (err error) {
+	var result Value
+	defer recoverPanic(&result, &err)
+
 	frame := &Frame{
 		Code:     code,
 		IP:       0,
@@ -244,7 +262,7 @@ func (vm *VM) ExecuteInModule(code *CodeObject, mod *PyModule) error {
 	vm.ctx = context.Background()
 	vm.checkCounter = vm.checkInterval
 
-	_, err := vm.run()
+	_, err = vm.run()
 	return err
 }
 
