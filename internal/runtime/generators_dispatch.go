@@ -399,36 +399,60 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	// Specialized fast loads
 	case OpLoadFast0:
+		if len(frame.Locals) < 1 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 0")
+		}
 		val := frame.Locals[0]
 		if val == nil {
 			return nil, unboundLocalError(frame, 0)
 		}
 		vm.push(val)
 	case OpLoadFast1:
+		if len(frame.Locals) < 2 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 1")
+		}
 		val := frame.Locals[1]
 		if val == nil {
 			return nil, unboundLocalError(frame, 1)
 		}
 		vm.push(val)
 	case OpLoadFast2:
+		if len(frame.Locals) < 3 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 2")
+		}
 		val := frame.Locals[2]
 		if val == nil {
 			return nil, unboundLocalError(frame, 2)
 		}
 		vm.push(val)
 	case OpLoadFast3:
+		if len(frame.Locals) < 4 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 3")
+		}
 		val := frame.Locals[3]
 		if val == nil {
 			return nil, unboundLocalError(frame, 3)
 		}
 		vm.push(val)
 	case OpStoreFast0:
+		if len(frame.Locals) < 1 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 0")
+		}
 		frame.Locals[0] = vm.pop()
 	case OpStoreFast1:
+		if len(frame.Locals) < 2 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 1")
+		}
 		frame.Locals[1] = vm.pop()
 	case OpStoreFast2:
+		if len(frame.Locals) < 3 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 2")
+		}
 		frame.Locals[2] = vm.pop()
 	case OpStoreFast3:
+		if len(frame.Locals) < 4 {
+			return nil, fmt.Errorf("RuntimeError: invalid fast local index 3")
+		}
 		frame.Locals[3] = vm.pop()
 
 	case OpNop:

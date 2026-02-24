@@ -205,6 +205,9 @@ func (vm *VM) run() (Value, error) {
 		// ==========================================
 
 		case OpLoadFast0:
+			if len(frame.Locals) < 1 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 0")
+			}
 			val := frame.Locals[0]
 			if val == nil {
 				return nil, unboundLocalError(frame, 0)
@@ -213,6 +216,9 @@ func (vm *VM) run() (Value, error) {
 			frame.SP++
 
 		case OpLoadFast1:
+			if len(frame.Locals) < 2 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 1")
+			}
 			val := frame.Locals[1]
 			if val == nil {
 				return nil, unboundLocalError(frame, 1)
@@ -221,6 +227,9 @@ func (vm *VM) run() (Value, error) {
 			frame.SP++
 
 		case OpLoadFast2:
+			if len(frame.Locals) < 3 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 2")
+			}
 			val := frame.Locals[2]
 			if val == nil {
 				return nil, unboundLocalError(frame, 2)
@@ -229,6 +238,9 @@ func (vm *VM) run() (Value, error) {
 			frame.SP++
 
 		case OpLoadFast3:
+			if len(frame.Locals) < 4 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 3")
+			}
 			val := frame.Locals[3]
 			if val == nil {
 				return nil, unboundLocalError(frame, 3)
@@ -237,18 +249,30 @@ func (vm *VM) run() (Value, error) {
 			frame.SP++
 
 		case OpStoreFast0:
+			if len(frame.Locals) < 1 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 0")
+			}
 			frame.SP--
 			frame.Locals[0] = frame.Stack[frame.SP]
 
 		case OpStoreFast1:
+			if len(frame.Locals) < 2 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 1")
+			}
 			frame.SP--
 			frame.Locals[1] = frame.Stack[frame.SP]
 
 		case OpStoreFast2:
+			if len(frame.Locals) < 3 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 2")
+			}
 			frame.SP--
 			frame.Locals[2] = frame.Stack[frame.SP]
 
 		case OpStoreFast3:
+			if len(frame.Locals) < 4 {
+				return nil, fmt.Errorf("RuntimeError: invalid fast local index 3")
+			}
 			frame.SP--
 			frame.Locals[3] = frame.Stack[frame.SP]
 
