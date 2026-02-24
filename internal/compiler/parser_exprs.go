@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/ATSOTECK/rage/internal/model"
@@ -405,14 +406,26 @@ func (p *Parser) parseFStringLit() model.Expr {
 			exprParser := NewParser(exprText)
 			expr := exprParser.parseExpression()
 
-			if expr != nil {
+			// Propagate any parse errors from the f-string expression
+			for _, err := range exprParser.errors {
+				p.errors = append(p.errors, ParseError{
+					Pos:     tok.Pos,
+					Message: fmt.Sprintf("f-string expression: %s", err.Message),
+				})
+			}
+
+			if expr != nil && len(exprParser.errors) == 0 {
 				parts = append(parts, model.FStringPart{
 					IsExpr:     true,
 					Expr:       expr,
 					FormatSpec: formatSpec,
 					Conversion: conversion,
 				})
+			} else if len(exprParser.errors) == 0 {
+				p.addError("f-string: empty expression not allowed")
 			}
+		} else {
+			p.addError("f-string: empty expression not allowed")
 		}
 
 		i = exprEnd + 1 // Skip past the closing brace

@@ -131,8 +131,14 @@ func makeRegisterMethod(owner *runtime.PyClass) *runtime.PyBuiltinFunc {
 // InitAbcModule registers the abc (Abstract Base Classes) module.
 func InitAbcModule() {
 	runtime.RegisterModule("abc", func(vm *runtime.VM) *runtime.PyModule {
-		objectClass := vm.GetBuiltin("object").(*runtime.PyClass)
-		typeClass := vm.GetBuiltin("type").(*runtime.PyClass)
+		objectClass, ok := vm.GetBuiltin("object").(*runtime.PyClass)
+		if !ok {
+			return nil
+		}
+		typeClass, ok := vm.GetBuiltin("type").(*runtime.PyClass)
+		if !ok {
+			return nil
+		}
 
 		// Create ABCMeta class inheriting from type (the metaclass)
 		abcMetaClass := &runtime.PyClass{

@@ -185,8 +185,8 @@ func (vm *VM) initBuiltinsClasses() {
 			}
 
 			// If no bases specified, implicitly inherit from object (Python 3 behavior)
-			objectClass := vm.builtins["object"].(*PyClass)
-			if len(bases) == 0 {
+			objectClass := vm.builtinClass("object")
+			if len(bases) == 0 && objectClass != nil {
 				bases = []*PyClass{objectClass}
 			}
 
@@ -197,7 +197,7 @@ func (vm *VM) initBuiltinsClasses() {
 			}
 
 			// Check for metaclass kwarg
-			typeClass := vm.builtins["type"].(*PyClass)
+			typeClass := vm.builtinClass("type")
 			var metaclass *PyClass
 			if mc, ok := kwargs["metaclass"]; ok {
 				if mcClass, ok := mc.(*PyClass); ok {
@@ -588,7 +588,10 @@ func (vm *VM) initBuiltinsClasses() {
 		Mro:   nil,
 	}
 	// Set object's MRO to just itself
-	objectClass := vm.builtins["object"].(*PyClass)
+	objectClass, _ := vm.builtins["object"].(*PyClass)
+	if objectClass == nil {
+		return
+	}
 	objectClass.Mro = []*PyClass{objectClass}
 
 	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
@@ -985,7 +988,7 @@ func (vm *VM) ComputeC3MRO(class *PyClass, bases []*PyClass) ([]*PyClass, error)
 			msg := fmt.Sprintf("Cannot create a consistent method resolution order (MRO) for bases %s",
 				vm.formatBases(bases))
 			return nil, &PyException{
-				ExcType:  vm.builtins["TypeError"].(*PyClass),
+				ExcType:  vm.builtinClass("TypeError"),
 				Args:     &PyTuple{Items: []Value{&PyString{Value: msg}}},
 				Message:  "TypeError: " + msg,
 				TypeName: "TypeError",

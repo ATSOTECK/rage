@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // PyModule represents a Python module
@@ -36,10 +37,25 @@ type ModuleLoader func(vm *VM) *PyModule
 // moduleRegistry holds registered modules
 var moduleRegistry = make(map[string]ModuleLoader)
 
+// moduleMu protects moduleRegistry, loadedModules, and moduleLoading from concurrent access
+var moduleMu sync.RWMutex
+
+// moduleLoadState tracks an in-progress filesystem module load
+type moduleLoadState struct {
+	vm   *VM          // VM performing the load
+	done chan struct{} // closed when loading completes
+	err  error        // non-nil if loading failed
+}
+
+// moduleLoading tracks modules currently being loaded from the filesystem
+var moduleLoading = make(map[string]*moduleLoadState)
+
 // RegisterModule registers a module loader with the given name
 // The loader will be called when the module is first imported
 func RegisterModule(name string, loader ModuleLoader) {
+	moduleMu.Lock()
 	moduleRegistry[name] = loader
+	moduleMu.Unlock()
 }
 
 // NewModule creates a new module with the given name
@@ -96,7 +112,9 @@ func (b *ModuleBuilder) Type(typeName string, constructor GoFunction, methods ma
 		Name:    typeName,
 		Methods: methods,
 	}
+	typeMetaMu.Lock()
 	typeMetatables[typeName] = mt
+	typeMetaMu.Unlock()
 
 	// Add constructor to module
 	if constructor != nil {
@@ -134,9 +152,43 @@ var loadedModules = make(map[string]*PyModule)
 
 // ImportModule imports a module by name
 func (vm *VM) ImportModule(name string) (*PyModule, error) {
+	moduleMu.Lock()
+	defer moduleMu.Unlock()
+
 	// Check if already loaded
 	if mod, ok := loadedModules[name]; ok {
+		// If another VM is still loading this module, wait for it to finish
+		// so we don't return a half-initialized module. Same-VM loads are
+		// circular imports and should return the partial module (like CPython).
+		if ls, loading := moduleLoading[name]; loading && ls.vm != vm {
+			moduleMu.Unlock()
+			<-ls.done
+			moduleMu.Lock()
+			if ls.err != nil {
+				return nil, fmt.Errorf("error executing '%s': %v", name, ls.err)
+			}
+			// Re-check cache after waiting (may have been deleted on failure)
+			if mod, ok := loadedModules[name]; ok {
+				return mod, nil
+			}
+			return nil, fmt.Errorf("ModuleNotFoundError: No module named '%s'", name)
+		}
 		return mod, nil
+	}
+
+	// If another VM is loading this module but hasn't cached it yet,
+	// wait for it (handles the window between moduleLoading entry and cache)
+	if ls, loading := moduleLoading[name]; loading && ls.vm != vm {
+		moduleMu.Unlock()
+		<-ls.done
+		moduleMu.Lock()
+		if ls.err != nil {
+			return nil, fmt.Errorf("error executing '%s': %v", name, ls.err)
+		}
+		if mod, ok := loadedModules[name]; ok {
+			return mod, nil
+		}
+		return nil, fmt.Errorf("ModuleNotFoundError: No module named '%s'", name)
 	}
 
 	// Check if there's a registered loader
@@ -161,11 +213,26 @@ func (vm *VM) ImportModule(name string) (*PyModule, error) {
 				mod.Dict["__package__"] = NewString(name)
 				mod.Dict["__file__"] = NewString(pyFile)
 
+				// Track loading state so concurrent importers can wait
+				ls := &moduleLoadState{vm: vm, done: make(chan struct{})}
+				moduleLoading[name] = ls
+
 				// Cache before executing to handle circular imports
 				loadedModules[name] = mod
 
-				if err := vm.ExecuteInModule(code, mod); err != nil {
+				// Unlock while executing module code (may re-enter ImportModule)
+				moduleMu.Unlock()
+				err = vm.ExecuteInModule(code, mod)
+				moduleMu.Lock()
+
+				if err != nil {
+					ls.err = err
 					delete(loadedModules, name)
+				}
+				close(ls.done)
+				delete(moduleLoading, name)
+
+				if err != nil {
 					return nil, fmt.Errorf("error executing '%s': %v", name, err)
 				}
 
@@ -179,7 +246,9 @@ func (vm *VM) ImportModule(name string) (*PyModule, error) {
 
 // GetModule retrieves a loaded module by name
 func (vm *VM) GetModule(name string) (*PyModule, bool) {
+	moduleMu.RLock()
 	mod, ok := loadedModules[name]
+	moduleMu.RUnlock()
 	return mod, ok
 }
 
@@ -263,22 +332,29 @@ func joinModuleName(parts []string) string {
 
 // RegisterModule registers a module loader on the VM
 func (vm *VM) RegisterModule(name string, loader ModuleLoader) {
+	moduleMu.Lock()
 	moduleRegistry[name] = loader
+	moduleMu.Unlock()
 }
 
 // RegisterModuleInstance directly registers a pre-built module
 func (vm *VM) RegisterModuleInstance(name string, module *PyModule) {
+	moduleMu.Lock()
 	loadedModules[name] = module
 	moduleRegistry[name] = func(vm *VM) *PyModule {
 		return module
 	}
+	moduleMu.Unlock()
 }
 
 // ResetModules clears the loaded modules cache and related registries.
 // This should be called before initializing a new State to ensure
 // a clean slate (useful for testing and creating isolated states).
 func ResetModules() {
+	moduleMu.Lock()
 	loadedModules = make(map[string]*PyModule)
+	moduleLoading = make(map[string]*moduleLoadState)
+	moduleMu.Unlock()
 	ResetPendingBuiltins()
 	ResetTypeMetatables()
 }
@@ -297,5 +373,7 @@ func (vm *VM) initBuiltinsModule() {
 		builtins.Dict[name] = value
 	}
 
+	moduleMu.Lock()
 	loadedModules["builtins"] = builtins
+	moduleMu.Unlock()
 }

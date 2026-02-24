@@ -44,6 +44,9 @@ type VM struct {
 	// Filesystem module imports
 	SearchPaths  []string                              // Directories to search for .py modules
 	FileImporter func(filename string) (*CodeObject, error) // Callback to compile a .py file (avoids circular dep)
+
+	// Pending memory error from stack growth (checked in run loop)
+	pendingMemError bool
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
@@ -185,6 +188,10 @@ func (vm *VM) ExecuteWithTimeout(timeout time.Duration, code *CodeObject) (Value
 // The context is checked periodically during execution (see SetCheckInterval).
 // Returns CancelledError if the context is cancelled, or TimeoutError if it times out.
 func (vm *VM) ExecuteWithContext(ctx context.Context, code *CodeObject) (Value, error) {
+	if err := code.Validate(); err != nil {
+		return nil, err
+	}
+
 	frame := &Frame{
 		Code:     code,
 		IP:       0,
@@ -285,8 +292,9 @@ func (vm *VM) push(v Value) {
 		newStack := make([]Value, oldSize*2)
 		copy(newStack, f.Stack)
 		f.Stack = newStack
-		// Best-effort memory tracking (no error return)
-		vm.trackAlloc(int64(oldSize) * 16)
+		if err := vm.trackAlloc(int64(oldSize) * 16); err != nil {
+			vm.pendingMemError = true
+		}
 	}
 	f.Stack[f.SP] = v
 	f.SP++
@@ -305,8 +313,9 @@ func (vm *VM) ensureStack(n int) {
 		newStack := make([]Value, newSize)
 		copy(newStack, f.Stack)
 		f.Stack = newStack
-		// Best-effort memory tracking
-		vm.trackAlloc(int64(newSize-oldSize) * 16)
+		if err := vm.trackAlloc(int64(newSize-oldSize) * 16); err != nil {
+			vm.pendingMemError = true
+		}
 	}
 }
 

@@ -115,7 +115,7 @@ func (vm *VM) initExceptionClasses() {
 	makeExc("ModuleNotFoundError", importError)
 
 	// UnicodeError and its subclasses (under ValueError)
-	valError := vm.builtins["ValueError"].(*PyClass)
+	valError := vm.builtinClass("ValueError")
 	unicodeError := makeExc("UnicodeError", valError)
 	makeExc("UnicodeDecodeError", unicodeError)
 	makeExc("UnicodeEncodeError", unicodeError)

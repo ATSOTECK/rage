@@ -621,6 +621,186 @@ func formatInstruction(offset, line int, op Opcode, arg int, argStr string) stri
 	return fmt.Sprintf("%4d %4d %-20s\n", line, offset, op.String())
 }
 
+// Validate scans all bytecode instructions and verifies every index reference
+// is within bounds. It also recursively validates any CodeObject found in the
+// constants pool. Returns an error describing the first invalid reference found.
+func (co *CodeObject) Validate() error {
+	numNames := len(co.Names)
+	numConsts := len(co.Constants)
+	numLocals := len(co.VarNames)
+	numCellFree := len(co.CellVars) + len(co.FreeVars)
+
+	checkName := func(offset int, op Opcode, arg int) error {
+		if arg >= numNames {
+			return fmt.Errorf("bytecode validation error in %s at offset %d: %s arg %d out of range (Names has %d entries)", co.Name, offset, op, arg, numNames)
+		}
+		return nil
+	}
+	checkConst := func(offset int, op Opcode, arg int) error {
+		if arg >= numConsts {
+			return fmt.Errorf("bytecode validation error in %s at offset %d: %s arg %d out of range (Constants has %d entries)", co.Name, offset, op, arg, numConsts)
+		}
+		return nil
+	}
+	checkLocal := func(offset int, op Opcode, arg int) error {
+		if arg >= numLocals {
+			return fmt.Errorf("bytecode validation error in %s at offset %d: %s arg %d out of range (VarNames has %d entries)", co.Name, offset, op, arg, numLocals)
+		}
+		return nil
+	}
+	checkCellFree := func(offset int, op Opcode, arg int) error {
+		if arg >= numCellFree {
+			return fmt.Errorf("bytecode validation error in %s at offset %d: %s arg %d out of range (CellVars+FreeVars has %d entries)", co.Name, offset, op, arg, numCellFree)
+		}
+		return nil
+	}
+
+	offset := 0
+	for offset < len(co.Code) {
+		op := Opcode(co.Code[offset])
+
+		if !op.HasArg() {
+			// Specialized no-arg opcodes that imply local indices 0-3
+			switch op {
+			case OpLoadFast0, OpStoreFast0:
+				if numLocals < 1 {
+					return fmt.Errorf("bytecode validation error in %s at offset %d: %s requires at least 1 local (VarNames has %d)", co.Name, offset, op, numLocals)
+				}
+			case OpLoadFast1, OpStoreFast1:
+				if numLocals < 2 {
+					return fmt.Errorf("bytecode validation error in %s at offset %d: %s requires at least 2 locals (VarNames has %d)", co.Name, offset, op, numLocals)
+				}
+			case OpLoadFast2, OpStoreFast2:
+				if numLocals < 3 {
+					return fmt.Errorf("bytecode validation error in %s at offset %d: %s requires at least 3 locals (VarNames has %d)", co.Name, offset, op, numLocals)
+				}
+			case OpLoadFast3, OpStoreFast3:
+				if numLocals < 4 {
+					return fmt.Errorf("bytecode validation error in %s at offset %d: %s requires at least 4 locals (VarNames has %d)", co.Name, offset, op, numLocals)
+				}
+			}
+			offset++
+			continue
+		}
+
+		// Ensure arg bytes are available
+		if offset+2 >= len(co.Code) {
+			return fmt.Errorf("bytecode validation error in %s at offset %d: %s expects argument but bytecode is truncated", co.Name, offset, op)
+		}
+		arg := int(co.Code[offset+1]) | int(co.Code[offset+2])<<8
+
+		switch op {
+		// Name-indexed opcodes
+		case OpLoadName, OpStoreName, OpDeleteName,
+			OpLoadGlobal, OpStoreGlobal, OpDeleteGlobal,
+			OpLoadAttr, OpStoreAttr, OpDeleteAttr,
+			OpImportName, OpImportFrom, OpLoadMethod:
+			if err := checkName(offset, op, arg); err != nil {
+				return err
+			}
+
+		// Constant-indexed opcodes
+		case OpLoadConst:
+			if err := checkConst(offset, op, arg); err != nil {
+				return err
+			}
+
+		// Local-indexed opcodes
+		case OpLoadFast, OpStoreFast, OpDeleteFast,
+			OpIncrementFast, OpDecrementFast, OpNegateFast, OpAccumulateFast:
+			if err := checkLocal(offset, op, arg); err != nil {
+				return err
+			}
+
+		// Cell/free-indexed opcodes
+		case OpLoadDeref, OpStoreDeref, OpDeleteDeref, OpLoadClosure, OpStoreClosure:
+			if err := checkCellFree(offset, op, arg); err != nil {
+				return err
+			}
+
+		// Superinstructions with packed indices
+		case OpAddConstFast:
+			// low byte = local index, high byte = const index
+			localIdx := arg & 0xFF
+			constIdx := (arg >> 8) & 0xFF
+			if err := checkLocal(offset, op, localIdx); err != nil {
+				return err
+			}
+			if err := checkConst(offset, op, constIdx); err != nil {
+				return err
+			}
+
+		case OpLoadFastLoadFast, OpStoreFastLoadFast:
+			// low byte = first local, high byte = second local
+			idx1 := arg & 0xFF
+			idx2 := (arg >> 8) & 0xFF
+			if err := checkLocal(offset, op, idx1); err != nil {
+				return err
+			}
+			if err := checkLocal(offset, op, idx2); err != nil {
+				return err
+			}
+
+		case OpLoadFastLoadConst:
+			// low byte = local, high byte = const
+			localIdx := arg & 0xFF
+			constIdx := (arg >> 8) & 0xFF
+			if err := checkLocal(offset, op, localIdx); err != nil {
+				return err
+			}
+			if err := checkConst(offset, op, constIdx); err != nil {
+				return err
+			}
+
+		case OpLoadConstLoadFast:
+			// high byte = const, low byte = local
+			constIdx := (arg >> 8) & 0xFF
+			localIdx := arg & 0xFF
+			if err := checkConst(offset, op, constIdx); err != nil {
+				return err
+			}
+			if err := checkLocal(offset, op, localIdx); err != nil {
+				return err
+			}
+
+		case OpLoadGlobalLoadFast:
+			// high byte = name index, low byte = local
+			nameIdx := (arg >> 8) & 0xFF
+			localIdx := arg & 0xFF
+			if err := checkName(offset, op, nameIdx); err != nil {
+				return err
+			}
+			if err := checkLocal(offset, op, localIdx); err != nil {
+				return err
+			}
+
+		case OpCompareLtLocalJump:
+			// bits 0-7 = local1, bits 8-15 = local2
+			local1 := arg & 0xFF
+			local2 := (arg >> 8) & 0xFF
+			if err := checkLocal(offset, op, local1); err != nil {
+				return err
+			}
+			if err := checkLocal(offset, op, local2); err != nil {
+				return err
+			}
+		}
+
+		offset += 3
+	}
+
+	// Recursively validate CodeObjects in the constants pool
+	for i, c := range co.Constants {
+		if subCode, ok := c.(*CodeObject); ok {
+			if err := subCode.Validate(); err != nil {
+				return fmt.Errorf("in constant %d of %s: %w", i, co.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func formatArg(co *CodeObject, op Opcode, arg int) string {
 	switch op {
 	case OpLoadConst:

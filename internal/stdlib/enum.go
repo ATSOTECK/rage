@@ -10,8 +10,14 @@ import (
 // InitEnumModule registers the enum module.
 func InitEnumModule() {
 	runtime.RegisterModule("enum", func(vm *runtime.VM) *runtime.PyModule {
-		objectClass := vm.GetBuiltin("object").(*runtime.PyClass)
-		typeClass := vm.GetBuiltin("type").(*runtime.PyClass)
+		objectClass, ok := vm.GetBuiltin("object").(*runtime.PyClass)
+		if !ok {
+			return nil
+		}
+		typeClass, ok := vm.GetBuiltin("type").(*runtime.PyClass)
+		if !ok {
+			return nil
+		}
 
 		// Forward declarations — filled in after enumType is built.
 		var enumClass *runtime.PyClass
@@ -147,15 +153,32 @@ func InitEnumModule() {
 					if len(args) < 4 {
 						return nil, fmt.Errorf("TypeError: EnumType.__new__() takes 4 arguments")
 					}
-					mcs := args[0].(*runtime.PyClass)
-					nameStr := args[1].(*runtime.PyString).Value
-					basesTuple := args[2].(*runtime.PyTuple)
-					nsDict := args[3].(*runtime.PyDict)
+					mcs, ok := args[0].(*runtime.PyClass)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: EnumType.__new__() argument 1 must be a class")
+					}
+					nameVal, ok := args[1].(*runtime.PyString)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: EnumType.__new__() argument 2 must be a string")
+					}
+					nameStr := nameVal.Value
+					basesTuple, ok := args[2].(*runtime.PyTuple)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: EnumType.__new__() argument 3 must be a tuple")
+					}
+					nsDict, ok := args[3].(*runtime.PyDict)
+					if !ok {
+						return nil, fmt.Errorf("TypeError: EnumType.__new__() argument 4 must be a dict")
+					}
 
 					// Convert bases
 					bases := make([]*runtime.PyClass, len(basesTuple.Items))
 					for i, b := range basesTuple.Items {
-						bases[i] = b.(*runtime.PyClass)
+						bc, ok := b.(*runtime.PyClass)
+						if !ok {
+							return nil, fmt.Errorf("TypeError: EnumType bases must be classes")
+						}
+						bases[i] = bc
 					}
 
 					// Build class dict from namespace
