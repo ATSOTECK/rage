@@ -1,8 +1,10 @@
+version: "2"
+
 run:
   timeout: 5m
-  tests: true
 
 linters:
+  default: none
   enable:
     - govet
     - staticcheck
@@ -10,30 +12,26 @@ linters:
     - ineffassign
     - unused
     - gosimple
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-      - shadow
-  errcheck:
-    check-type-assertions: false
-    check-blank: false
-  staticcheck:
-    checks:
-      - "all"
-      - "-SA1019" # deprecated usage — address separately
-
-issues:
-  exclude-dirs:
-    - vendor
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-    - path: test/
-      linters:
-        - errcheck
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019"
+  exclusions:
+    paths:
+      - vendor$
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: test/
+        linters:
+          - errcheck
