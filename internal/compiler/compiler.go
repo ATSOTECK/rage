@@ -150,6 +150,12 @@ func (c *Compiler) emitJump(op runtime.Opcode) int {
 }
 
 func (c *Compiler) patchJump(offset int, target int) {
+	if offset+2 >= len(c.code.Code) {
+		c.errors = append(c.errors, CompileError{
+			Message: fmt.Sprintf("patchJump: offset %d out of bounds (code length %d)", offset, len(c.code.Code)),
+		})
+		return
+	}
 	c.code.Code[offset+1] = byte(target)
 	c.code.Code[offset+2] = byte(target >> 8)
 }
@@ -266,9 +272,14 @@ func (c *Compiler) finalizeCode() {
 func (c *Compiler) estimateStackSize() int {
 	// Conservative estimate based on code length
 	maxStack := 10
-	for i := 0; i < len(c.code.Code); {
-		op := runtime.Opcode(c.code.Code[i])
+	code := c.code.Code
+	for i := 0; i < len(code); {
+		op := runtime.Opcode(code[i])
+		var arg int
 		if op.HasArg() {
+			if i+2 < len(code) {
+				arg = int(code[i+1]) | int(code[i+2])<<8
+			}
 			i += 3
 		} else {
 			i++
@@ -276,11 +287,8 @@ func (c *Compiler) estimateStackSize() int {
 		// Certain ops increase stack needs
 		switch op {
 		case runtime.OpBuildList, runtime.OpBuildTuple, runtime.OpBuildSet, runtime.OpBuildMap:
-			if i > 2 {
-				arg := int(c.code.Code[i-2]) | int(c.code.Code[i-1])<<8
-				if arg > maxStack {
-					maxStack = arg + 10
-				}
+			if arg > maxStack {
+				maxStack = arg + 10
 			}
 		}
 	}

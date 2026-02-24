@@ -209,6 +209,10 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			// This cleans up entries from any nested handlers that were abandoned
 			// when the exception propagated through them.
 			if block.ExcStackLevel < len(vm.excHandlerStack) {
+				// Clear references in truncated portion for GC
+				for i := block.ExcStackLevel; i < len(vm.excHandlerStack); i++ {
+					vm.excHandlerStack[i] = nil
+				}
 				vm.excHandlerStack = vm.excHandlerStack[:block.ExcStackLevel]
 			}
 			vm.push(exc)    // Push exception onto stack for handler

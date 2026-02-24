@@ -962,8 +962,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	case OpPopExceptHandler:
 		vm.currentException = nil
-		if len(vm.excHandlerStack) > 0 {
-			vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+		if n := len(vm.excHandlerStack); n > 0 {
+			vm.excHandlerStack[n-1] = nil // Clear reference for GC
+			vm.excHandlerStack = vm.excHandlerStack[:n-1]
 		}
 
 	case OpClearException:

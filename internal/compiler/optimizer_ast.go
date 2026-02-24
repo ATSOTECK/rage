@@ -110,7 +110,11 @@ func (o *Optimizer) evalIntBinaryOp(op model.TokenKind, left, right int64) model
 		result = left % right
 	case model.TK_DoubleStar:
 		if right >= 0 && right <= 63 { // Limit exponent
-			result = int64(math.Pow(float64(left), float64(right)))
+			f := math.Pow(float64(left), float64(right))
+			if math.IsInf(f, 0) || math.IsNaN(f) || f > math.MaxInt64 || f < math.MinInt64 {
+				return nil // Result doesn't fit in int64, don't fold
+			}
+			result = int64(f)
 		} else {
 			return nil
 		}
