@@ -403,7 +403,7 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	switch o := obj.(type) {
 	case *PyInstance:
 		// Check for user-defined __setattr__ (skip object base class)
-		objectClass := vm.builtins["object"].(*PyClass)
+		objectClass := vm.builtinClass("object")
 		for _, cls := range o.Class.Mro {
 			if cls == objectClass {
 				break
@@ -495,7 +495,7 @@ func (vm *VM) delAttr(obj Value, name string) error {
 	switch o := obj.(type) {
 	case *PyInstance:
 		// Check for user-defined __delattr__ (skip object base class)
-		objectClass := vm.builtins["object"].(*PyClass)
+		objectClass := vm.builtinClass("object")
 		for _, cls := range o.Class.Mro {
 			if cls == objectClass {
 				break

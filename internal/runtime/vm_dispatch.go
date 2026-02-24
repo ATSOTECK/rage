@@ -11,6 +11,22 @@ func (vm *VM) run() (Value, error) {
 	frame := vm.frame
 
 	for frame.IP < len(frame.Code.Code) {
+		// Check for pending memory error from stack growth
+		if vm.pendingMemError {
+			vm.pendingMemError = false
+			memExc := &PyException{
+				ExcType:  vm.builtinClass("MemoryError"),
+				Args:     &PyTuple{Items: []Value{&PyString{Value: "memory limit exceeded during stack growth"}}},
+				Message:  "MemoryError: memory limit exceeded during stack growth",
+				TypeName: "MemoryError",
+			}
+			if _, err := vm.handleException(memExc); err != nil {
+				return nil, err
+			}
+			frame = vm.frame
+			continue
+		}
+
 		// Check for timeout/cancellation periodically (counter decrement is faster than modulo)
 		if vm.ctx != nil {
 			vm.checkCounter--

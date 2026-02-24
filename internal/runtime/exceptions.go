@@ -4,6 +4,16 @@ import "fmt"
 
 // Exception handling helpers
 
+// builtinClass safely retrieves a builtin class by name, returning nil if not found or wrong type.
+func (vm *VM) builtinClass(name string) *PyClass {
+	if v, ok := vm.builtins[name]; ok {
+		if cls, ok := v.(*PyClass); ok {
+			return cls
+		}
+	}
+	return nil
+}
+
 // createException creates a PyException from a value
 func (vm *VM) createException(excVal Value, cause Value) *PyException {
 	exc := &PyException{}
@@ -28,7 +38,7 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 			exc.Message = v.Name
 		} else {
 			// Not an exception class
-			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+			exc.ExcType = vm.builtinClass("TypeError")
 			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
 			exc.Message = "TypeError: exceptions must derive from BaseException"
 		}
@@ -56,17 +66,17 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 				}
 			}
 		} else {
-			exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+			exc.ExcType = vm.builtinClass("TypeError")
 			exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
 			exc.Message = "TypeError: exceptions must derive from BaseException"
 		}
 	case *PyString:
 		// String used as exception (legacy style, but we'll support it)
-		exc.ExcType = vm.builtins["Exception"].(*PyClass)
+		exc.ExcType = vm.builtinClass("Exception")
 		exc.Args = &PyTuple{Items: []Value{v}}
 		exc.Message = v.Value
 	default:
-		exc.ExcType = vm.builtins["TypeError"].(*PyClass)
+		exc.ExcType = vm.builtinClass("TypeError")
 		exc.Args = &PyTuple{Items: []Value{&PyString{Value: "exceptions must derive from BaseException"}}}
 		exc.Message = "TypeError: exceptions must derive from BaseException"
 	}
