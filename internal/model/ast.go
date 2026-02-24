@@ -157,8 +157,13 @@ type UnaryOp struct {
 }
 
 func (u *UnaryOp) Pos() Position { return u.StartPos }
-func (u *UnaryOp) End() Position { return u.Operand.End() }
-func (u *UnaryOp) exprNode()     {}
+func (u *UnaryOp) End() Position {
+	if u.Operand != nil {
+		return u.Operand.End()
+	}
+	return u.StartPos
+}
+func (u *UnaryOp) exprNode() {}
 
 // BinaryOp represents a binary operation.
 type BinaryOp struct {
@@ -167,9 +172,22 @@ type BinaryOp struct {
 	Right Expr
 }
 
-func (b *BinaryOp) Pos() Position { return b.Left.Pos() }
-func (b *BinaryOp) End() Position { return b.Right.End() }
-func (b *BinaryOp) exprNode()     {}
+func (b *BinaryOp) Pos() Position {
+	if b.Left != nil {
+		return b.Left.Pos()
+	}
+	return Position{}
+}
+func (b *BinaryOp) End() Position {
+	if b.Right != nil {
+		return b.Right.End()
+	}
+	if b.Left != nil {
+		return b.Left.End()
+	}
+	return Position{}
+}
+func (b *BinaryOp) exprNode() {}
 
 // BoolOp represents 'and' / 'or' with multiple values.
 type BoolOp struct {
@@ -177,9 +195,19 @@ type BoolOp struct {
 	Values []Expr
 }
 
-func (b *BoolOp) Pos() Position { return b.Values[0].Pos() }
-func (b *BoolOp) End() Position { return b.Values[len(b.Values)-1].End() }
-func (b *BoolOp) exprNode()     {}
+func (b *BoolOp) Pos() Position {
+	if len(b.Values) > 0 && b.Values[0] != nil {
+		return b.Values[0].Pos()
+	}
+	return Position{}
+}
+func (b *BoolOp) End() Position {
+	if n := len(b.Values); n > 0 && b.Values[n-1] != nil {
+		return b.Values[n-1].End()
+	}
+	return b.Pos()
+}
+func (b *BoolOp) exprNode() {}
 
 // Compare represents a comparison (can be chained: a < b < c).
 type Compare struct {
@@ -188,9 +216,22 @@ type Compare struct {
 	Comparators []Expr
 }
 
-func (c *Compare) Pos() Position { return c.Left.Pos() }
-func (c *Compare) End() Position { return c.Comparators[len(c.Comparators)-1].End() }
-func (c *Compare) exprNode()     {}
+func (c *Compare) Pos() Position {
+	if c.Left != nil {
+		return c.Left.Pos()
+	}
+	return Position{}
+}
+func (c *Compare) End() Position {
+	if n := len(c.Comparators); n > 0 && c.Comparators[n-1] != nil {
+		return c.Comparators[n-1].End()
+	}
+	if c.Left != nil {
+		return c.Left.End()
+	}
+	return Position{}
+}
+func (c *Compare) exprNode() {}
 
 // Call represents a function call.
 type Call struct {
@@ -212,7 +253,12 @@ type Keyword struct {
 }
 
 func (k *Keyword) Pos() Position { return k.StartPos }
-func (k *Keyword) End() Position { return k.Value.End() }
+func (k *Keyword) End() Position {
+	if k.Value != nil {
+		return k.Value.End()
+	}
+	return k.StartPos
+}
 
 // Attribute represents attribute access (obj.attr).
 type Attribute struct {
@@ -220,9 +266,19 @@ type Attribute struct {
 	Attr  *Identifier
 }
 
-func (a *Attribute) Pos() Position { return a.Value.Pos() }
-func (a *Attribute) End() Position { return a.Attr.End() }
-func (a *Attribute) exprNode()     {}
+func (a *Attribute) Pos() Position {
+	if a.Value != nil {
+		return a.Value.Pos()
+	}
+	return Position{}
+}
+func (a *Attribute) End() Position {
+	if a.Attr != nil {
+		return a.Attr.End()
+	}
+	return a.Pos()
+}
+func (a *Attribute) exprNode() {}
 
 // Subscript represents subscription (obj[index]).
 type Subscript struct {
@@ -357,9 +413,22 @@ type IfExpr struct {
 	OrElse Expr
 }
 
-func (i *IfExpr) Pos() Position { return i.Body.Pos() }
-func (i *IfExpr) End() Position { return i.OrElse.End() }
-func (i *IfExpr) exprNode()     {}
+func (i *IfExpr) Pos() Position {
+	if i.Body != nil {
+		return i.Body.Pos()
+	}
+	return Position{}
+}
+func (i *IfExpr) End() Position {
+	if i.OrElse != nil {
+		return i.OrElse.End()
+	}
+	if i.Body != nil {
+		return i.Body.End()
+	}
+	return Position{}
+}
+func (i *IfExpr) exprNode() {}
 
 // Lambda represents a lambda expression.
 type Lambda struct {
@@ -369,8 +438,13 @@ type Lambda struct {
 }
 
 func (l *Lambda) Pos() Position { return l.StartPos }
-func (l *Lambda) End() Position { return l.Body.End() }
-func (l *Lambda) exprNode()     {}
+func (l *Lambda) End() Position {
+	if l.Body != nil {
+		return l.Body.End()
+	}
+	return l.StartPos
+}
+func (l *Lambda) exprNode() {}
 
 // Yield represents a yield expression.
 type Yield struct {
@@ -390,8 +464,13 @@ type YieldFrom struct {
 }
 
 func (y *YieldFrom) Pos() Position { return y.StartPos }
-func (y *YieldFrom) End() Position { return y.Value.End() }
-func (y *YieldFrom) exprNode()     {}
+func (y *YieldFrom) End() Position {
+	if y.Value != nil {
+		return y.Value.End()
+	}
+	return y.StartPos
+}
+func (y *YieldFrom) exprNode() {}
 
 // Await represents an await expression.
 type Await struct {
@@ -400,8 +479,13 @@ type Await struct {
 }
 
 func (a *Await) Pos() Position { return a.StartPos }
-func (a *Await) End() Position { return a.Value.End() }
-func (a *Await) exprNode()     {}
+func (a *Await) End() Position {
+	if a.Value != nil {
+		return a.Value.End()
+	}
+	return a.StartPos
+}
+func (a *Await) exprNode() {}
 
 // Starred represents a starred expression (*x).
 type Starred struct {
@@ -410,8 +494,13 @@ type Starred struct {
 }
 
 func (s *Starred) Pos() Position { return s.StartPos }
-func (s *Starred) End() Position { return s.Value.End() }
-func (s *Starred) exprNode()     {}
+func (s *Starred) End() Position {
+	if s.Value != nil {
+		return s.Value.End()
+	}
+	return s.StartPos
+}
+func (s *Starred) exprNode() {}
 
 // NamedExpr represents a named expression (walrus operator x := value).
 type NamedExpr struct {
@@ -419,9 +508,19 @@ type NamedExpr struct {
 	Value  Expr
 }
 
-func (n *NamedExpr) Pos() Position { return n.Target.Pos() }
-func (n *NamedExpr) End() Position { return n.Value.End() }
-func (n *NamedExpr) exprNode()     {}
+func (n *NamedExpr) Pos() Position {
+	if n.Target != nil {
+		return n.Target.Pos()
+	}
+	return Position{}
+}
+func (n *NamedExpr) End() Position {
+	if n.Value != nil {
+		return n.Value.End()
+	}
+	return n.Pos()
+}
+func (n *NamedExpr) exprNode() {}
 
 // ----------------------------------------------------------------------------
 // Statements
@@ -432,9 +531,19 @@ type ExprStmt struct {
 	Value Expr
 }
 
-func (e *ExprStmt) Pos() Position { return e.Value.Pos() }
-func (e *ExprStmt) End() Position { return e.Value.End() }
-func (e *ExprStmt) stmtNode()     {}
+func (e *ExprStmt) Pos() Position {
+	if e.Value != nil {
+		return e.Value.Pos()
+	}
+	return Position{}
+}
+func (e *ExprStmt) End() Position {
+	if e.Value != nil {
+		return e.Value.End()
+	}
+	return Position{}
+}
+func (e *ExprStmt) stmtNode() {}
 
 // Assign represents an assignment statement.
 type Assign struct {
@@ -442,9 +551,19 @@ type Assign struct {
 	Value   Expr
 }
 
-func (a *Assign) Pos() Position { return a.Targets[0].Pos() }
-func (a *Assign) End() Position { return a.Value.End() }
-func (a *Assign) stmtNode()     {}
+func (a *Assign) Pos() Position {
+	if len(a.Targets) > 0 && a.Targets[0] != nil {
+		return a.Targets[0].Pos()
+	}
+	return Position{}
+}
+func (a *Assign) End() Position {
+	if a.Value != nil {
+		return a.Value.End()
+	}
+	return a.Pos()
+}
+func (a *Assign) stmtNode() {}
 
 // AnnAssign represents an annotated assignment.
 type AnnAssign struct {
@@ -460,7 +579,10 @@ func (a *AnnAssign) End() Position {
 	if a.Value != nil {
 		return a.Value.End()
 	}
-	return a.Annotation.End()
+	if a.Annotation != nil {
+		return a.Annotation.End()
+	}
+	return a.StartPos
 }
 func (a *AnnAssign) stmtNode() {}
 
@@ -471,9 +593,19 @@ type AugAssign struct {
 	Value  Expr
 }
 
-func (a *AugAssign) Pos() Position { return a.Target.Pos() }
-func (a *AugAssign) End() Position { return a.Value.End() }
-func (a *AugAssign) stmtNode()     {}
+func (a *AugAssign) Pos() Position {
+	if a.Target != nil {
+		return a.Target.Pos()
+	}
+	return Position{}
+}
+func (a *AugAssign) End() Position {
+	if a.Value != nil {
+		return a.Value.End()
+	}
+	return a.Pos()
+}
+func (a *AugAssign) stmtNode() {}
 
 // Pass represents a pass statement.
 type Pass struct {

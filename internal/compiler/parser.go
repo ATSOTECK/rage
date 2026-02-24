@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/ATSOTECK/rage/internal/model"
 )
@@ -80,7 +81,7 @@ func (p *Parser) Parse() (*model.Module, []ParseError) {
 			break
 		}
 
-		stmt := p.parseStatement()
+		stmt := p.safeParseStatement()
 		if stmt != nil {
 			module.Body = append(module.Body, stmt)
 		}
@@ -91,6 +92,22 @@ func (p *Parser) Parse() (*model.Module, []ParseError) {
 	}
 
 	return module, p.errors
+}
+
+// safeParseStatement wraps parseStatement with panic recovery so malformed
+// input cannot crash the parser.
+func (p *Parser) safeParseStatement() (stmt model.Stmt) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.addError(fmt.Sprintf("internal parser error: %v\n%s", r, debug.Stack()))
+			stmt = nil
+			// Skip to next line to try to continue parsing.
+			for !p.isAtEnd() && !p.check(model.TK_Newline) && !p.check(model.TK_EOF) {
+				p.advance()
+			}
+		}
+	}()
+	return p.parseStatement()
 }
 
 // Errors returns the parsing errors.

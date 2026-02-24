@@ -70,7 +70,11 @@ func (p *Parser) parseExpressionStmt() model.Stmt {
 			if p.check(model.TK_Assign) || p.check(model.TK_Newline) || p.isAtEnd() {
 				break
 			}
-			elts = append(elts, p.parseExpression())
+			next := p.parseExpression()
+			if next == nil {
+				break
+			}
+			elts = append(elts, next)
 		}
 		if len(elts) > 1 {
 			expr = &model.Tuple{
@@ -310,6 +314,10 @@ func (p *Parser) parseForStmt() model.Stmt {
 
 func (p *Parser) parseTargetList() model.Expr {
 	first := p.parsePrimaryExpr()
+	if first == nil {
+		p.addError("expected target expression")
+		return nil
+	}
 
 	if p.check(model.TK_Comma) {
 		elts := []model.Expr{first}
@@ -318,7 +326,11 @@ func (p *Parser) parseTargetList() model.Expr {
 			if p.check(model.TK_In) {
 				break
 			}
-			elts = append(elts, p.parsePrimaryExpr())
+			next := p.parsePrimaryExpr()
+			if next == nil {
+				break
+			}
+			elts = append(elts, next)
 		}
 		return &model.Tuple{
 			Elts:     elts,
@@ -535,7 +547,9 @@ func (p *Parser) parseReturnStmt() model.Stmt {
 
 	if !p.check(model.TK_Newline) && !p.check(model.TK_EOF) {
 		value = p.parseTupleOrExpr()
-		endPos = value.End()
+		if value != nil {
+			endPos = value.End()
+		}
 	}
 
 	p.match(model.TK_Newline)
@@ -699,11 +713,15 @@ func (p *Parser) parseRaiseStmt() model.Stmt {
 
 	if !p.check(model.TK_Newline) && !p.check(model.TK_Comment) && !p.check(model.TK_EOF) {
 		exc = p.parseExpression()
-		endPos = exc.End()
+		if exc != nil {
+			endPos = exc.End()
+		}
 
 		if p.match(model.TK_From) {
 			cause = p.parseExpression()
-			endPos = cause.End()
+			if cause != nil {
+				endPos = cause.End()
+			}
 		}
 	}
 
@@ -878,12 +896,18 @@ func (p *Parser) parseAssertStmt() model.Stmt {
 	p.expect(model.TK_Assert)
 
 	test := p.parseExpression()
+	if test == nil {
+		p.addError("expected expression after 'assert'")
+		return nil
+	}
 	endPos := test.End()
 
 	var msg model.Expr
 	if p.match(model.TK_Comma) {
 		msg = p.parseExpression()
-		endPos = msg.End()
+		if msg != nil {
+			endPos = msg.End()
+		}
 	}
 
 	p.match(model.TK_Newline)
@@ -902,7 +926,12 @@ func (p *Parser) parseDelStmt() model.Stmt {
 
 	var targets []model.Expr
 	for {
-		targets = append(targets, p.parsePrimaryExpr())
+		target := p.parsePrimaryExpr()
+		if target == nil {
+			p.addError("expected expression after 'del'")
+			break
+		}
+		targets = append(targets, target)
 		if !p.match(model.TK_Comma) {
 			break
 		}
