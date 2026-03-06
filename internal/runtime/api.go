@@ -54,6 +54,13 @@ func NewString(v string) *PyString {
 	return InternString(v)
 }
 
+// StringInternPoolSize returns the current size of the global string intern pool.
+func StringInternPoolSize() int {
+	stringInternPoolLock.RLock()
+	defer stringInternPoolLock.RUnlock()
+	return len(stringInternPool)
+}
+
 // NewBool creates a Python bool from a Go bool
 func NewBool(v bool) *PyBool {
 	if v {

@@ -268,7 +268,9 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 		}
 	}
 
-	// No handler in this frame, pop frame and propagate to caller
+	// No handler in this frame, pop frame and propagate to caller.
+	// Nil out the frame reference before truncating to allow GC to collect it.
+	vm.frames[len(vm.frames)-1] = nil
 	vm.frames = vm.frames[:len(vm.frames)-1]
 	if len(vm.frames) > 0 {
 		vm.frame = vm.frames[len(vm.frames)-1]
