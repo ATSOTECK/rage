@@ -1915,6 +1915,10 @@ func (vm *VM) run() (Value, error) {
 			frame.SP--
 			result := frame.Stack[frame.SP]
 			if len(vm.frames) > 0 {
+				// Nil out the frame reference before truncating to allow GC to collect it.
+				// Without this, the underlying slice array retains a pointer to the popped
+				// frame (and all its locals/stack), preventing garbage collection.
+				vm.frames[len(vm.frames)-1] = nil
 				vm.frames = vm.frames[:len(vm.frames)-1]
 				if len(vm.frames) > 0 {
 					vm.frame = vm.frames[len(vm.frames)-1]

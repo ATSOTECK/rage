@@ -534,6 +534,12 @@ func (s *State) SetMaxCollectionSize(n int64) {
 	s.vm.SetMaxCollectionSize(n)
 }
 
+// StringInternPoolSize returns the current size of the global string intern pool.
+// This is useful for diagnostics and profiling.
+func StringInternPoolSize() int {
+	return runtime.StringInternPoolSize()
+}
+
 // AllocatedBytes returns the approximate number of bytes currently tracked by the VM.
 func (s *State) AllocatedBytes() int64 {
 	if s.closed {
