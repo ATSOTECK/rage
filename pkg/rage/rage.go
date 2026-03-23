@@ -53,6 +53,8 @@ const (
 	ModuleCopy
 	ModuleOperator
 	ModuleEnum
+	ModuleHeapq
+	ModuleBisect
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -79,6 +81,8 @@ var AllModules = []Module{
 	ModuleCopy,
 	ModuleOperator,
 	ModuleEnum,
+	ModuleHeapq,
+	ModuleBisect,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -410,6 +414,10 @@ func initModule(m Module) {
 		stdlib.InitOperatorModule()
 	case ModuleEnum:
 		stdlib.InitEnumModule()
+	case ModuleHeapq:
+		stdlib.InitHeapqModule()
+	case ModuleBisect:
+		stdlib.InitBisectModule()
 	}
 }
 
