@@ -224,6 +224,25 @@ result = deleted
 }
 
 // =============================================================================
+// Static __init__ dispatch
+// =============================================================================
+
+func TestStaticMethodInit(t *testing.T) {
+	// __init__ decorated with @staticmethod should be called during instantiation
+	vm := runCode(t, `
+class MyClass:
+    @staticmethod
+    def __init__(self, val):
+        self.val = val
+
+obj = MyClass(42)
+result = obj.val
+`)
+	result := vm.GetGlobal("result").(*runtime.PyInt)
+	assert.Equal(t, int64(42), result.Value)
+}
+
+// =============================================================================
 // __slots__ Tests
 // =============================================================================
 

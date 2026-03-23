@@ -255,4 +255,42 @@ test("generator_in_set_constructor", test_generator_in_set_constructor)
 test("generator_chained", test_generator_chained)
 test("generator_yield_none", test_generator_yield_none)
 
+# --- Generator negate and close edge cases ---
+
+def test_generator_negate_normal():
+    def gen():
+        x = 10
+        x = -x
+        yield x
+    expect(list(gen())).to_be([-10])
+
+def test_generator_negate_unbound():
+    caught = False
+    try:
+        def gen():
+            x = -x
+            yield x
+        g = gen()
+        next(g)
+    except UnboundLocalError:
+        caught = True
+    expect(caught).to_be(True)
+
+def test_generator_close_runs_finally():
+    finally_ran = [False]
+    def gen():
+        try:
+            yield 1
+            yield 2
+        finally:
+            finally_ran[0] = True
+    g = gen()
+    next(g)
+    g.close()
+    expect(finally_ran[0]).to_be(True)
+
+test("generator_negate_normal", test_generator_negate_normal)
+test("generator_negate_unbound", test_generator_negate_unbound)
+test("generator_close_runs_finally", test_generator_close_runs_finally)
+
 print("CPython generator tests completed")

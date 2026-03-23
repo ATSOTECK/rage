@@ -605,3 +605,55 @@ g = echo_gen()
 	g := vm.GetGlobal("g")
 	assert.NotNil(t, g)
 }
+
+// =====================================
+// Generator negate and close edge cases
+// =====================================
+
+func TestGeneratorNegateFastUnbound(t *testing.T) {
+	// OpNegateFast in generator dispatch should raise UnboundLocalError, not panic
+	runCodeExpectError(t, `
+def gen():
+    x = -x
+    yield x
+
+g = gen()
+next(g)
+`, "UnboundLocalError")
+}
+
+func TestGeneratorCloseRunsFinally(t *testing.T) {
+	source := `
+finally_ran = False
+
+def gen():
+    global finally_ran
+    try:
+        yield 1
+        yield 2
+    finally:
+        finally_ran = True
+
+g = gen()
+next(g)
+g.close()
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("finally_ran")
+	assert.Equal(t, runtime.True, result)
+}
+
+func TestGeneratorNegateNormal(t *testing.T) {
+	source := `
+def gen():
+    x = 10
+    x = -x
+    yield x
+
+result = list(gen())
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyList)
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, int64(-10), result.Items[0].(*runtime.PyInt).Value)
+}

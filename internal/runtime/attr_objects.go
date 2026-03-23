@@ -110,7 +110,10 @@ func (vm *VM) getAttrCoroutine(coro *PyCoroutine, name string) (Value, error) {
 		}}, nil
 	case "close":
 		return &PyBuiltinFunc{Name: "coroutine.close", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			coro.State = GenClosed
+			err := vm.CoroutineClose(coro)
+			if err != nil {
+				return nil, err
+			}
 			return None, nil
 		}}, nil
 	}
@@ -419,7 +422,18 @@ func (vm *VM) getAttrClass(o *PyClass, name string) (Value, error) {
 				if fn, ok := cm.Func.(*PyFunction); ok {
 					return &PyMethod{Func: fn, Instance: o}, nil
 				}
-				// For non-PyFunction callables, return a wrapper
+				if fn, ok := cm.Func.(*PyBuiltinFunc); ok {
+					return &PyBuiltinFunc{
+						Name: fn.Name,
+						Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+							newArgs := make([]Value, len(args)+1)
+							newArgs[0] = o
+							copy(newArgs[1:], args)
+							return fn.Fn(newArgs, kwargs)
+						},
+					}, nil
+				}
+				// For other callables, return a generic wrapper
 				return &PyBuiltinFunc{
 					Name: "bound_classmethod",
 					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

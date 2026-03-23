@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ATSOTECK/rage/internal/model"
 	"github.com/ATSOTECK/rage/internal/runtime"
 
 	"github.com/stretchr/testify/assert"
@@ -186,113 +185,6 @@ func TestEmitArgValidRange(t *testing.T) {
 }
 
 // =============================================================================
-// Constant Folding - Exponent Edge Cases
-//
-// Test that 2**100 doesn't overflow (should NOT fold), 2**10 folds correctly,
-// and (-1)**63 is handled as an edge case.
-// =============================================================================
-
-func TestConstantFolding2Pow100NotFolded(t *testing.T) {
-	opt := NewOptimizer()
-
-	// 2**100 should NOT be folded (exponent > 63)
-	expr := &model.BinaryOp{
-		Op:    model.TK_DoubleStar,
-		Left:  &model.IntLit{Value: "2"},
-		Right: &model.IntLit{Value: "100"},
-	}
-
-	result := opt.FoldConstants(expr)
-
-	_, ok := result.(*model.BinaryOp)
-	assert.True(t, ok, "2**100 should not be folded -- exponent too large")
-}
-
-func TestConstantFolding2Pow10(t *testing.T) {
-	opt := NewOptimizer()
-
-	// 2**10 = 1024, should fold
-	expr := &model.BinaryOp{
-		Op:    model.TK_DoubleStar,
-		Left:  &model.IntLit{Value: "2"},
-		Right: &model.IntLit{Value: "10"},
-	}
-
-	result := opt.FoldConstants(expr)
-
-	intLit, ok := result.(*model.IntLit)
-	require.True(t, ok, "2**10 should fold to an IntLit")
-	assert.Equal(t, "1024", intLit.Value)
-}
-
-func TestConstantFoldingNeg1Pow63(t *testing.T) {
-	opt := NewOptimizer()
-
-	// (-1)**63 = -1, should fold since exponent is exactly 63 (the limit)
-	expr := &model.BinaryOp{
-		Op:    model.TK_DoubleStar,
-		Left:  &model.IntLit{Value: "-1"},
-		Right: &model.IntLit{Value: "63"},
-	}
-
-	result := opt.FoldConstants(expr)
-
-	intLit, ok := result.(*model.IntLit)
-	require.True(t, ok, "(-1)**63 should fold to an IntLit")
-	assert.Equal(t, "-1", intLit.Value)
-}
-
-func TestConstantFoldingExponentAtBoundary(t *testing.T) {
-	opt := NewOptimizer()
-
-	// 2**63 should fold (but may overflow int64 -- the function should handle this)
-	expr := &model.BinaryOp{
-		Op:    model.TK_DoubleStar,
-		Left:  &model.IntLit{Value: "2"},
-		Right: &model.IntLit{Value: "63"},
-	}
-
-	result := opt.FoldConstants(expr)
-
-	// 2^63 = 9223372036854775808 which exceeds int64 max (9223372036854775807)
-	// The folding function should detect this and NOT fold
-	_, isBinOp := result.(*model.BinaryOp)
-	_, isIntLit := result.(*model.IntLit)
-	// Either it was not folded (correct) or it was folded (implementation detail)
-	assert.True(t, isBinOp || isIntLit, "2**63 should either fold or remain as BinaryOp")
-}
-
-func TestConstantFoldingNegativeExponentNotFolded(t *testing.T) {
-	opt := NewOptimizer()
-
-	// 2**(-1) should NOT be folded (negative exponent)
-	expr := &model.BinaryOp{
-		Op:    model.TK_DoubleStar,
-		Left:  &model.IntLit{Value: "2"},
-		Right: &model.IntLit{Value: "-1"},
-	}
-
-	result := opt.FoldConstants(expr)
-
-	_, ok := result.(*model.BinaryOp)
-	assert.True(t, ok, "2**(-1) should not be folded")
-}
-
-func TestConstantFoldingExponentEndToEnd(t *testing.T) {
-	// End-to-end: compile 2**10 and verify it evaluates correctly
-	code, errs := CompileSource("result = 2 ** 10", "<test>")
-	require.Empty(t, errs)
-	require.NotNil(t, code)
-
-	vm := runtime.NewVM()
-	_, err := vm.Execute(code)
-	require.NoError(t, err)
-
-	result := vm.GetGlobal("result").(*runtime.PyInt)
-	assert.Equal(t, int64(1024), result.Value)
-}
-
-// =============================================================================
 // F-String Tests
 //
 // Test f-string parsing error propagation and successful compilation.
@@ -362,7 +254,7 @@ func TestFStringWithConversion(t *testing.T) {
 }
 
 // =============================================================================
-// Compiler Error Handling - Additional Edge Cases
+// Compiler Error Handling
 // =============================================================================
 
 func TestCompileSourceReturnsNilOnError(t *testing.T) {

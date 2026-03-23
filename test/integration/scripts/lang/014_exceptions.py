@@ -426,4 +426,32 @@ test("generator_close_finally", test_generator_close_finally)
 test("generator_internal_except", test_generator_internal_except)
 test("throw_into_closed_gen", test_throw_into_closed_gen)
 
+# --- UnboundLocalError from negation of unassigned variable ---
+
+def test_negate_unbound_raises():
+    caught = False
+    try:
+        def f():
+            x = -x
+            return x
+        f()
+    except UnboundLocalError:
+        caught = True
+    expect(caught).to_be(True)
+
+def test_negate_normal():
+    x = 42
+    x = -x
+    expect(x).to_be(-42)
+
+def test_negate_float():
+    x = 3.14
+    x = -x
+    expect(x < -3.13).to_be(True)
+    expect(x > -3.15).to_be(True)
+
+test("negate_unbound_raises", test_negate_unbound_raises)
+test("negate_normal", test_negate_normal)
+test("negate_float", test_negate_float)
+
 print("Exceptions tests completed")

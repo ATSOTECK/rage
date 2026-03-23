@@ -88,6 +88,10 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 					allArgs := append([]Value{fn}, args...)
 					return vm.callFunction(callFn, allArgs, kwargs)
 				}
+				if callBuiltin, ok := method.(*PyBuiltinFunc); ok {
+					allArgs := append([]Value{fn}, args...)
+					return callBuiltin.Fn(allArgs, kwargs)
+				}
 			}
 		}
 		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))
@@ -294,6 +298,11 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 					}
 				case *PyBuiltinFunc:
 					_, err := initFn.Fn(allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
+				case *PyStaticMethod:
+					_, err := vm.call(initFn.Func, allArgs, kwargs)
 					if err != nil {
 						return nil, err
 					}

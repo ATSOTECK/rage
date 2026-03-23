@@ -1051,19 +1051,21 @@ func (o *Optimizer) SpecializeBinaryOps(instrs []*instruction, code *runtime.Cod
 }
 
 func (o *Optimizer) detectCompareLtLocalJump(instrs []*instruction, code *runtime.CodeObject) bool {
-	// Pattern: LOAD_FAST x, LOAD_FAST y, COMPARE_LT, POP_JUMP_IF_FALSE target
-	// -> COMPARE_LT_LOCAL_JUMP (x, y, target)
+	// Pattern: LOAD_FAST x, LOAD_FAST y, COMPARE_LT
+	// -> COMPARE_LT_LOCAL (x, y) — pushes bool result
+	// The POP_JUMP_IF_FALSE is left in place to handle the jump separately,
+	// since the jump target doesn't fit in the 16-bit arg alongside two local indices.
 	// IMPORTANT: Don't fuse if any inner instruction is a jump target.
 	jumpTargets := o.computeJumpTargets(instrs)
 
 	changed := false
-	for i := 0; i < len(instrs)-3; i++ {
-		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+	for i := 0; i < len(instrs)-2; i++ {
+		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed {
 			continue
 		}
 
 		// Don't fuse if any of the inner instructions are jump targets
-		if jumpTargets[i+1] || jumpTargets[i+2] || jumpTargets[i+3] {
+		if jumpTargets[i+1] || jumpTargets[i+2] {
 			continue
 		}
 
@@ -1084,24 +1086,12 @@ func (o *Optimizer) detectCompareLtLocalJump(instrs []*instruction, code *runtim
 			continue
 		}
 
-		// Check for POP_JUMP_IF_FALSE
-		if instrs[i+3].op != runtime.OpPopJumpIfFalse {
-			continue
-		}
-
-		jumpTarget := instrs[i+3].arg
-		// Jump target must fit in remaining bits (16 bits after two 8-bit indices)
-		if jumpTarget > 0xFFFF {
-			continue
-		}
-
-		// Convert to COMPARE_LT_LOCAL_JUMP
-		// Pack: bits 0-7 = local1, bits 8-15 = local2, bits 16-31 = jump target
-		instrs[i].op = runtime.OpCompareLtLocalJump
-		instrs[i].arg = local1 | (local2 << 8) | (jumpTarget << 16)
+		// Convert to COMPARE_LT_LOCAL
+		// Pack: bits 0-7 = local1, bits 8-15 = local2
+		instrs[i].op = runtime.OpCompareLtLocal
+		instrs[i].arg = local1 | (local2 << 8)
 		instrs[i+1].removed = true
 		instrs[i+2].removed = true
-		instrs[i+3].removed = true
 		changed = true
 	}
 	return changed

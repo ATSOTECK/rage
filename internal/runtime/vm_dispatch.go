@@ -307,6 +307,11 @@ func (vm *VM) run() (Value, error) {
 				// Fallback for non-int
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -322,6 +327,11 @@ func (vm *VM) run() (Value, error) {
 			} else {
 				result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -329,6 +339,9 @@ func (vm *VM) run() (Value, error) {
 
 		case OpNegateFast:
 			// Negate local variable in place: sign = -sign
+			if frame.Locals[arg] == nil {
+				return nil, unboundLocalError(frame, arg)
+			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(-v.Value)
 			} else if v, ok := frame.Locals[arg].(*PyFloat); ok {
@@ -337,6 +350,11 @@ func (vm *VM) run() (Value, error) {
 				// Fallback
 				result, err := vm.unaryOp(OpUnaryNegative, frame.Locals[arg])
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -358,6 +376,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, localVal, constVal)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Locals[localIdx] = result
@@ -392,6 +415,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, localVal, addend)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Locals[arg] = result
@@ -457,6 +485,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -476,6 +509,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(OpBinarySubtract, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -495,6 +533,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(OpBinaryMultiply, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -603,6 +646,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -746,12 +794,11 @@ func (vm *VM) run() (Value, error) {
 				frame.IP = arg
 			}
 
-		case OpCompareLtLocalJump:
-			// Ultra-optimized: compare two locals and jump if false
-			// arg format: bits 0-7 = local1, bits 8-15 = local2, bits 16+ = jump offset
+		case OpCompareLtLocal:
+			// Optimized: load two locals and compare, push bool result
+			// arg format: bits 0-7 = local1, bits 8-15 = local2
 			local1 := arg & 0xFF
 			local2 := (arg >> 8) & 0xFF
-			jumpOffset := arg >> 16
 			a := frame.Locals[local1]
 			if a == nil {
 				return nil, unboundLocalError(frame, local1)
@@ -763,8 +810,10 @@ func (vm *VM) run() (Value, error) {
 			// Fast path for ints
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
-					if ai.Value >= bi.Value {
-						frame.IP = jumpOffset
+					if ai.Value < bi.Value {
+						vm.push(True)
+					} else {
+						vm.push(False)
 					}
 					break
 				}
@@ -780,9 +829,7 @@ func (vm *VM) run() (Value, error) {
 				}
 				break
 			}
-			if cmp == False || cmp == nil {
-				frame.IP = jumpOffset
-			}
+			vm.push(cmp)
 
 		// ==========================================
 		// Inline len() opcodes
@@ -795,17 +842,29 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(list.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenString:
 			frame.SP--
 			obj := frame.Stack[frame.SP]
 			if str, ok := obj.(*PyString); ok {
-				frame.Stack[frame.SP] = MakeInt(int64(len(str.Value)))
+				frame.Stack[frame.SP] = MakeInt(int64(utf8.RuneCountInString(str.Value)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenTuple:
@@ -815,7 +874,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(tup.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenDict:
@@ -825,7 +890,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(dict.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenGeneric:
@@ -851,18 +922,41 @@ func (vm *VM) run() (Value, error) {
 				// Check for __len__ method
 				if result, found, err := vm.callDunder(v, "__len__"); found {
 					if err != nil {
+						if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 						return nil, err
 					}
 					if i, ok := result.(*PyInt); ok {
 						length = i.Value
 					} else {
-						return nil, fmt.Errorf("__len__() should return an integer")
+						lenErr := fmt.Errorf("__len__() should return an integer")
+						if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
+						return nil, lenErr
 					}
 				} else {
-					return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+					lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+					if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+					return nil, lenErr
 				}
 			default:
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 			frame.Stack[frame.SP] = MakeInt(length)
 			frame.SP++
@@ -1395,6 +1489,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			iter, err := vm.getIter(obj)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			vm.push(iter)
@@ -1626,22 +1725,39 @@ func (vm *VM) run() (Value, error) {
 			dict.DictSet(key, val, vm)
 
 		case OpMakeFunction:
-			name := vm.pop().(*PyString).Value
-			code := vm.pop().(*CodeObject)
+			nameVal, ok := vm.pop().(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("internal error: OpMakeFunction expected string name on stack")
+			}
+			name := nameVal.Value
+			code, ok := vm.pop().(*CodeObject)
+			if !ok {
+				return nil, fmt.Errorf("internal error: OpMakeFunction expected CodeObject on stack")
+			}
 			var defaults *PyTuple
 			var kwDefaults map[string]Value
 			var closure []*PyCell
 			if arg&8 != 0 {
 				// Has closure - pop tuple of cells
-				closureTuple := vm.pop().(*PyTuple)
+				closureTuple, ok := vm.pop().(*PyTuple)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected tuple for closure")
+				}
 				closure = make([]*PyCell, len(closureTuple.Items))
 				for i, item := range closureTuple.Items {
-					closure[i] = item.(*PyCell)
+					cell, ok := item.(*PyCell)
+					if !ok {
+						return nil, fmt.Errorf("internal error: OpMakeFunction expected cell in closure tuple")
+					}
+					closure[i] = cell
 				}
 			}
 			if arg&2 != 0 {
 				// Has kwonly defaults dict
-				kwDefaultsDict := vm.pop().(*PyDict)
+				kwDefaultsDict, ok := vm.pop().(*PyDict)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected dict for kwdefaults")
+				}
 				kwDefaults = make(map[string]Value)
 				for _, key := range kwDefaultsDict.Keys(vm) {
 					if ks, ok := key.(*PyString); ok {
@@ -1650,7 +1766,11 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			if arg&1 != 0 {
-				defaults = vm.pop().(*PyTuple)
+				d, ok := vm.pop().(*PyTuple)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected tuple for defaults")
+				}
+				defaults = d
 			}
 
 			// If the code has FreeVars but we don't have a closure tuple,
@@ -2505,8 +2625,9 @@ func (vm *VM) run() (Value, error) {
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
 			// Pop the handler stack entry that was pushed when entering finally
-			if len(vm.excHandlerStack) > 0 {
-				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			if n := len(vm.excHandlerStack); n > 0 {
+				vm.excHandlerStack[n-1] = nil // Clear reference for GC
+				vm.excHandlerStack = vm.excHandlerStack[:n-1]
 			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err

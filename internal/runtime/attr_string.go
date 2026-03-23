@@ -249,19 +249,32 @@ func (vm *VM) getAttrString(str *PyString, name string) (Value, error) {
 			}
 			sub := vm.str(args[0])
 			s := str.Value
+			n := len(s)
 			start := 0
-			end := len(s)
+			end := n
 			if len(args) > 1 {
 				start = int(vm.toInt(args[1]))
+				if start < 0 {
+					start += n
+				}
+				if start < 0 {
+					start = 0
+				}
 			}
 			if len(args) > 2 {
 				end = int(vm.toInt(args[2]))
+				if end < 0 {
+					end += n
+				}
+				if end < 0 {
+					end = 0
+				}
 			}
-			if start > len(s) {
+			if start > n {
 				return MakeInt(0), nil
 			}
-			if end > len(s) {
-				end = len(s)
+			if end > n {
+				end = n
 			}
 			return MakeInt(int64(strings.Count(s[start:end], sub))), nil
 		}}, nil

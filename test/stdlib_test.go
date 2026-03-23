@@ -3,8 +3,11 @@ package test
 import (
 	"testing"
 
+	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // =====================================
@@ -497,10 +500,219 @@ od = collections.OrderedDict()
 	assert.True(t, ok, "OrderedDict should be a dict")
 }
 
+func TestCollectionsDequeInsertMaxlen(t *testing.T) {
+	// deque.insert() should raise IndexError when at maxlen
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import deque
+d = deque([1, 2, 3], 3)
+d.insert(1, 99)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "IndexError")
+}
+
+func TestCollectionsCounterDictNonInt(t *testing.T) {
+	// Counter(dict) with non-int values should raise TypeError
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import Counter
+c = Counter({"a": "not_an_int"})
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCollectionsDefaultdictNonCallable(t *testing.T) {
+	// defaultdict with non-callable first arg should raise TypeError
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import defaultdict
+d = defaultdict(42)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCollectionsDefaultdictCallable(t *testing.T) {
+	// defaultdict with callable first arg should be accepted
+	runCodeWithStdlib(t, `
+from collections import defaultdict
+d = defaultdict(int)
+`)
+}
+
 func TestFromCollectionsImport(t *testing.T) {
 	runCodeWithStdlib(t, `
 from collections import Counter, deque
 c = Counter([1, 1, 2])
 d = deque([1, 2, 3])
 `)
+}
+
+// =============================================================================
+// deque.index() Negative Index Normalization
+// =============================================================================
+
+func TestDequeIndexNegativeStart(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+result = d.index(2, -3)
+`)
+	// -3 normalizes to index 2; first 2 at or after index 2 is at index 3
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestDequeIndexNegativeStop(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+result = d.index(2, 0, -2)
+`)
+	// -2 normalizes to index 3; search [0, 3), first 2 is at index 1
+	assert.Equal(t, int64(1), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestDequeIndexNegativeStartNotFound(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+d.index(5, -3)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "x not in deque")
+}
+
+// =============================================================================
+// deque.insert() Negative Index
+// =============================================================================
+
+func TestDequeInsertNegativeIndex(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3])
+d.insert(-1, 99)
+# insert(-1, 99) should insert before the last element: [1, 2, 99, 3]
+pos = d.index(99)
+`)
+	assert.Equal(t, int64(2), vm.GetGlobal("pos").(*runtime.PyInt).Value)
+}
+
+func TestDequeInsertNegativeIndexZero(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3])
+d.insert(-100, 99)
+# Very negative index clamps to 0: insert at front
+pos = d.index(99)
+`)
+	assert.Equal(t, int64(0), vm.GetGlobal("pos").(*runtime.PyInt).Value)
+}
+
+// =============================================================================
+// namedtuple() Field Name Validation
+// =============================================================================
+
+func TestNamedtupleNonStringFieldRaises(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import namedtuple
+P = namedtuple('P', [1, 'x'])
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+	assert.Contains(t, err.Error(), "Field names must be strings")
+}
+
+func TestNamedtupleValidFieldsStillWork(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import namedtuple
+Point = namedtuple('Point', ['x', 'y'])
+p = Point(3, 4)
+result = p['x'] + p['y']
+`)
+	assert.Equal(t, int64(7), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+// =============================================================================
+// itertools.islice() Bounds Clamping
+// =============================================================================
+
+func TestIsliceStartBeyondLength(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([1, 2, 3], 10, 20))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 0, len(lst.Items))
+}
+
+func TestIsliceStopBeyondLength(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([1, 2, 3], 1, 100))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 2, len(lst.Items))
+	assert.Equal(t, int64(2), lst.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(3), lst.Items[1].(*runtime.PyInt).Value)
+}
+
+func TestIsliceNormalRange(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([10, 20, 30, 40, 50], 1, 4))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 3, len(lst.Items))
+	assert.Equal(t, int64(20), lst.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(30), lst.Items[1].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(40), lst.Items[2].(*runtime.PyInt).Value)
+}
+
+// =============================================================================
+// Counter.update() Type Validation
+// =============================================================================
+
+func TestCounterUpdateNonIntValueRaises(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import Counter
+c = Counter()
+c.update({"a": "hello"})
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCounterUpdateIntValueWorks(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import Counter
+c = Counter()
+c.update({"a": 3, "b": 1})
+# Verify via most_common which returns (key, count) pairs
+pairs = c.most_common()
+result = pairs[0][1]
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
 }

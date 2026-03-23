@@ -219,8 +219,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	vm.generatorHasPendingReturn = oldHasPendingReturn
 	vm.generatorPendingJump = oldPendingJump
 	vm.generatorHasPendingJump = oldHasPendingJump
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
 
 	if err != nil {
 		gen.State = GenClosed
@@ -320,11 +318,26 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	coro.State = GenRunning
 	coro.YieldValue = value
 
+	// Save current frame and VM state, switch to coroutine's frame
 	oldFrame := vm.frame
 	oldFrames := vm.frames
+	oldCurrentException := vm.currentException
+	oldLastException := vm.lastException
+	oldExcHandlerStack := vm.excHandlerStack
+	oldPendingReturn := vm.generatorPendingReturn
+	oldHasPendingReturn := vm.generatorHasPendingReturn
+	oldPendingJump := vm.generatorPendingJump
+	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
+	vm.currentException = coro.SavedCurrentException
+	vm.lastException = coro.SavedLastException
+	vm.excHandlerStack = coro.SavedExcHandlerStack
+	vm.generatorPendingReturn = coro.SavedPendingReturn
+	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
+	vm.generatorPendingJump = coro.SavedPendingJump
+	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	if coro.Frame.IP > 0 {
 		vm.push(value)
@@ -332,8 +345,25 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 
 	result, yielded, err := vm.runGenerator()
 
+	// Save coroutine's state
+	coro.SavedCurrentException = vm.currentException
+	coro.SavedLastException = vm.lastException
+	coro.SavedExcHandlerStack = vm.excHandlerStack
+	coro.SavedPendingReturn = vm.generatorPendingReturn
+	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
+	coro.SavedPendingJump = vm.generatorPendingJump
+	coro.SavedHasPendingJump = vm.generatorHasPendingJump
+
+	// Restore caller's frame and VM state
 	vm.frame = oldFrame
 	vm.frames = oldFrames
+	vm.currentException = oldCurrentException
+	vm.lastException = oldLastException
+	vm.excHandlerStack = oldExcHandlerStack
+	vm.generatorPendingReturn = oldPendingReturn
+	vm.generatorHasPendingReturn = oldHasPendingReturn
+	vm.generatorPendingJump = oldPendingJump
+	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
@@ -417,19 +447,49 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	vm.generatorThrow = exc
 	coro.State = GenRunning
 
-	// Save current frame and switch to coroutine's frame
+	// Save current frame and VM state, switch to coroutine's frame
 	oldFrame := vm.frame
 	oldFrames := vm.frames
+	oldCurrentException := vm.currentException
+	oldLastException := vm.lastException
+	oldExcHandlerStack := vm.excHandlerStack
+	oldPendingReturn := vm.generatorPendingReturn
+	oldHasPendingReturn := vm.generatorHasPendingReturn
+	oldPendingJump := vm.generatorPendingJump
+	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
+	vm.currentException = coro.SavedCurrentException
+	vm.lastException = coro.SavedLastException
+	vm.excHandlerStack = coro.SavedExcHandlerStack
+	vm.generatorPendingReturn = coro.SavedPendingReturn
+	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
+	vm.generatorPendingJump = coro.SavedPendingJump
+	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
 
-	// Restore old frame
+	// Save coroutine's state
+	coro.SavedCurrentException = vm.currentException
+	coro.SavedLastException = vm.lastException
+	coro.SavedExcHandlerStack = vm.excHandlerStack
+	coro.SavedPendingReturn = vm.generatorPendingReturn
+	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
+	coro.SavedPendingJump = vm.generatorPendingJump
+	coro.SavedHasPendingJump = vm.generatorHasPendingJump
+
+	// Restore caller's frame and VM state
 	vm.frame = oldFrame
 	vm.frames = oldFrames
+	vm.currentException = oldCurrentException
+	vm.lastException = oldLastException
+	vm.excHandlerStack = oldExcHandlerStack
+	vm.generatorPendingReturn = oldPendingReturn
+	vm.generatorHasPendingReturn = oldHasPendingReturn
+	vm.generatorPendingJump = oldPendingJump
+	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
@@ -448,6 +508,58 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 		Message:  "coroutine finished",
 		Args:     &PyTuple{Items: []Value{result}},
 	}
+}
+
+// CoroutineClose closes a coroutine, throwing GeneratorExit to run cleanup code
+func (vm *VM) CoroutineClose(coro *PyCoroutine) error {
+	if coro.State == GenClosed {
+		return nil
+	}
+
+	if coro.State == GenCreated {
+		coro.State = GenClosed
+		return nil
+	}
+
+	// Throw GeneratorExit into the coroutine
+	genExitClass, _ := vm.builtins["GeneratorExit"]
+	genExitExc := &PyException{
+		TypeName: "GeneratorExit",
+		Message:  "generator exit",
+	}
+	if cls, ok := genExitClass.(*PyClass); ok {
+		genExitExc.ExcType = cls
+	}
+	_, _, err := vm.CoroutineThrow(coro, genExitExc, None)
+
+	// GeneratorExit is expected - if we get it back, ignore it
+	if err != nil {
+		if pyErr, ok := err.(*PyException); ok {
+			if pyErr.Type() == "GeneratorExit" {
+				coro.State = GenClosed
+				return nil
+			}
+		}
+		// StopIteration means the coroutine returned normally after catching
+		// GeneratorExit - suppress it
+		if pyErr, ok := err.(*PyException); ok && pyErr.Type() == "StopIteration" {
+			coro.State = GenClosed
+			return nil
+		}
+	}
+
+	// No error means coroutine yielded - this is illegal after close
+	if err == nil {
+		coro.State = GenClosed
+		return &PyException{
+			TypeName: "RuntimeError",
+			Message:  "coroutine ignored GeneratorExit",
+		}
+	}
+
+	// Any other exception should be propagated
+	coro.State = GenClosed
+	return err
 }
 
 // runGenerator runs a generator frame until yield or return

@@ -410,7 +410,11 @@ func lruCacheCall(vm *runtime.VM) int {
 	for i := 2; i <= vm.GetTop(); i++ {
 		args = append(args, vm.Get(i))
 	}
-	key := makeKey(args)
+	key, err := makeKey(args)
+	if err != nil {
+		vm.RaiseError("%v", err)
+		return 0
+	}
 
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -436,6 +440,12 @@ func lruCacheCall(vm *runtime.VM) int {
 	if err != nil {
 		vm.RaiseError("%v", err)
 		return 0
+	}
+
+	// Another goroutine may have cached this key while we were unlocked
+	if existing, found := cache.Cache[key]; found {
+		vm.Push(existing)
+		return 1
 	}
 
 	// Store in cache
@@ -515,44 +525,55 @@ func lruCacheCacheClear(vm *runtime.VM) int {
 }
 
 // makeKey creates a cache key from arguments
-func makeKey(args []runtime.Value) string {
+func makeKey(args []runtime.Value) (string, error) {
 	result := ""
 	for i, arg := range args {
 		if i > 0 {
 			result += ","
 		}
-		result += valueToKey(arg)
+		k, err := valueToKey(arg)
+		if err != nil {
+			return "", err
+		}
+		result += k
 	}
-	return result
+	return result, nil
 }
 
 // valueToKey converts a value to a string key for caching.
 // Uses length-prefixed strings to avoid collisions between values
 // whose string representations contain the separator character.
-func valueToKey(v runtime.Value) string {
+// Returns an error for unhashable types (lists, dicts, sets).
+func valueToKey(v runtime.Value) (string, error) {
 	switch val := v.(type) {
 	case *runtime.PyInt:
-		return fmt.Sprintf("i:%d", val.Value)
+		return fmt.Sprintf("i:%d", val.Value), nil
 	case *runtime.PyFloat:
-		return fmt.Sprintf("f:%f", val.Value)
+		return fmt.Sprintf("f:%f", val.Value), nil
 	case *runtime.PyString:
-		return fmt.Sprintf("s:%d:%s", len(val.Value), val.Value)
+		return fmt.Sprintf("s:%d:%s", len(val.Value), val.Value), nil
 	case *runtime.PyBool:
-		return fmt.Sprintf("b:%t", val.Value)
+		return fmt.Sprintf("b:%t", val.Value), nil
 	case *runtime.PyTuple:
 		result := "t:("
 		for i, item := range val.Items {
 			if i > 0 {
 				result += ","
 			}
-			result += valueToKey(item)
+			k, err := valueToKey(item)
+			if err != nil {
+				return "", err
+			}
+			result += k
 		}
-		return result + ")"
+		return result + ")", nil
 	case *runtime.PyNone:
-		return "n:None"
+		return "n:None", nil
+	case *runtime.PyFrozenSet:
+		_ = val
+		return fmt.Sprintf("fs:%p", v), nil
 	default:
-		// For unhashable types, use identity (pointer)
-		return fmt.Sprintf("o:%p", v)
+		return "", fmt.Errorf("TypeError: unhashable type: '%T'", v)
 	}
 }
 

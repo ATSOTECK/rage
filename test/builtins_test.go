@@ -789,3 +789,169 @@ has_after = hasattr(o, "x")
 	assert.True(t, vm.GetGlobal("has_before").(*runtime.PyBool).Value)
 	assert.False(t, vm.GetGlobal("has_after").(*runtime.PyBool).Value)
 }
+
+// =============================================================================
+// Dict keys returns a copy, not internal slice
+// =============================================================================
+
+func TestDictKeysReturnsCopy(t *testing.T) {
+	vm := runCode(t, `
+d = {"a": 1, "b": 2, "c": 3}
+keys1 = list(d.keys())
+keys2 = list(d.keys())
+same = keys1 == keys2
+length = len(d)
+`)
+	assert.True(t, vm.GetGlobal("same").(*runtime.PyBool).Value)
+	assert.Equal(t, int64(3), vm.GetGlobal("length").(*runtime.PyInt).Value)
+}
+
+func TestDictIterationDuringModification(t *testing.T) {
+	vm := runCode(t, `
+d = {"x": 10, "y": 20}
+vals = list(d.values())
+items = list(d.items())
+val_sum = vals[0] + vals[1]
+`)
+	valSum := vm.GetGlobal("val_sum").(*runtime.PyInt)
+	assert.Equal(t, int64(30), valSum.Value)
+}
+
+// =============================================================================
+// BigInt to float conversion
+// =============================================================================
+
+func TestBigIntToFloat(t *testing.T) {
+	vm := runCode(t, `
+big = 10 ** 18
+result = float(big)
+expected = 1e18
+close_enough = abs(result - expected) < 1.0
+`)
+	result := vm.GetGlobal("close_enough").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestIntToFloatNormal(t *testing.T) {
+	vm := runCode(t, `
+result = float(42)
+`)
+	result := vm.GetGlobal("result").(*runtime.PyFloat)
+	assert.Equal(t, 42.0, result.Value)
+}
+
+func TestIntToFloatNegative(t *testing.T) {
+	vm := runCode(t, `
+result = float(-100)
+`)
+	result := vm.GetGlobal("result").(*runtime.PyFloat)
+	assert.Equal(t, -100.0, result.Value)
+}
+
+// =============================================================================
+// Set remove/discard with value equality
+// =============================================================================
+
+func TestSetRemoveByValue(t *testing.T) {
+	vm := runCode(t, `
+s = {1, 2, 3}
+s.remove(2)
+result = 2 not in s
+length = len(s)
+`)
+	assert.True(t, vm.GetGlobal("result").(*runtime.PyBool).Value)
+	assert.Equal(t, int64(2), vm.GetGlobal("length").(*runtime.PyInt).Value)
+}
+
+func TestSetDiscardByValue(t *testing.T) {
+	vm := runCode(t, `
+s = {1, 2, 3}
+s.discard(2)
+has_two = 2 in s
+length = len(s)
+`)
+	assert.False(t, vm.GetGlobal("has_two").(*runtime.PyBool).Value)
+	assert.Equal(t, int64(2), vm.GetGlobal("length").(*runtime.PyInt).Value)
+}
+
+func TestSetRemoveValueEquality(t *testing.T) {
+	vm := runCode(t, `
+s = set()
+s.add(1)
+s.add(2)
+s.add(3)
+s.remove(2)
+result = list(s)
+result.sort()
+length = len(result)
+`)
+	result := vm.GetGlobal("result").(*runtime.PyList)
+	require.Equal(t, 2, len(result.Items))
+	assert.Equal(t, int64(1), result.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(3), result.Items[1].(*runtime.PyInt).Value)
+}
+
+func TestSetRemoveString(t *testing.T) {
+	vm := runCode(t, `
+s = {"apple", "banana", "cherry"}
+s.remove("banana")
+has_banana = "banana" in s
+length = len(s)
+`)
+	assert.False(t, vm.GetGlobal("has_banana").(*runtime.PyBool).Value)
+	assert.Equal(t, int64(2), vm.GetGlobal("length").(*runtime.PyInt).Value)
+}
+
+// =====================================
+// len() on Unicode strings
+// =====================================
+
+func TestBuiltinLenUnicode(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   int64
+	}{
+		{"ascii", `result = len("hello")`, 5},
+		{"chinese", `result = len("世界")`, 2},
+		{"mixed_ascii_unicode", `result = len("hello 世界")`, 8},
+		{"emoji", `result = len("café")`, 4},
+		{"single_multibyte", `result = len("日")`, 1},
+		{"empty", `result = len("")`, 0},
+		{"cyrillic", `result = len("Привет")`, 6},
+		{"accented", `result = len("résumé")`, 6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := runCode(t, tt.source)
+			result := vm.GetGlobal("result").(*runtime.PyInt)
+			assert.Equal(t, tt.want, result.Value)
+		})
+	}
+}
+
+func TestBuiltinLenUnicodeVariable(t *testing.T) {
+	// Ensures the optimized OpLenString opcode path handles multi-byte correctly
+	source := `
+s = "αβγδε"
+result = len(s)
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyInt)
+	assert.Equal(t, int64(5), result.Value)
+}
+
+func TestBuiltinLenUnicodeConsistentWithIteration(t *testing.T) {
+	// len() and iteration should agree on character count
+	source := `
+s = "こんにちは"
+length = len(s)
+count = 0
+for c in s:
+    count = count + 1
+result = length == count
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result")
+	assert.Equal(t, runtime.True, result)
+}

@@ -4,8 +4,11 @@ import (
 	"math"
 	"testing"
 
+	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // =====================================
@@ -532,4 +535,61 @@ r3 = math.isfinite(float("nan"))
 	assert.True(t, vm.GetGlobal("r1").(*runtime.PyBool).Value)
 	assert.False(t, vm.GetGlobal("r2").(*runtime.PyBool).Value)
 	assert.False(t, vm.GetGlobal("r3").(*runtime.PyBool).Value)
+}
+
+// =============================================================================
+// LRU cache
+// =============================================================================
+
+func TestLruCacheBasic(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+result = fib(10)
+`)
+	assert.Equal(t, int64(55), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestLruCacheUnhashableTypeError(t *testing.T) {
+	runCodeExpectError(t, `
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def f(x):
+    return x
+
+f([1, 2, 3])
+`, "unhashable type")
+}
+
+// =============================================================================
+// CSV delimiter/quotechar validation
+// =============================================================================
+
+func TestCSVReaderEmptyDelimiter(t *testing.T) {
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+import csv
+r = csv.reader(["a,b,c"], "")
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1-character string")
+}
+
+func TestCSVReaderValidDelimiter(t *testing.T) {
+	runCodeWithStdlib(t, `
+import csv
+r = csv.reader(["a;b;c"], ";")
+row = r.__next__()
+`)
 }

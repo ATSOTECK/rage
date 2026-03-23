@@ -96,6 +96,9 @@ func (vm *VM) tryToInt(v Value) (int64, error) {
 				return 0, err
 			}
 			if i, ok := result.(*PyInt); ok {
+				if i.BigValue != nil {
+					return 0, fmt.Errorf("OverflowError: Python int too large to convert to int64")
+				}
 				return i.Value, nil
 			}
 			return 0, fmt.Errorf("TypeError: __int__ returned non-int")
@@ -267,6 +270,10 @@ func (vm *VM) toFloat(v Value) float64 {
 func (vm *VM) tryToFloat(v Value) (float64, error) {
 	switch val := v.(type) {
 	case *PyInt:
+		if val.BigValue != nil {
+			f, _ := new(big.Float).SetInt(val.BigValue).Float64()
+			return f, nil
+		}
 		return float64(val.Value), nil
 	case *PyComplex:
 		_ = val

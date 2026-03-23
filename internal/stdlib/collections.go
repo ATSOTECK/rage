@@ -99,8 +99,14 @@ func collectionsCounter(vm *runtime.VM) int {
 			}
 		case *runtime.PyDict:
 			for k, val := range v.Items {
-				if intVal, ok := val.(*runtime.PyInt); ok {
-					counter.Items[k] = intVal.Value
+				switch cv := val.(type) {
+				case *runtime.PyInt:
+					counter.Items[k] = cv.Value
+				case *runtime.PyFloat:
+					counter.Items[k] = int64(cv.Value)
+				default:
+					vm.RaiseError("TypeError: '%T' object cannot be interpreted as an integer", val)
+					return 0
 				}
 			}
 		}
@@ -218,9 +224,12 @@ func counterUpdate(vm *runtime.VM) int {
 			}
 		case *runtime.PyDict:
 			for k, val := range v.Items {
-				if intVal, ok := val.(*runtime.PyInt); ok {
-					counter.Items[k] += intVal.Value
+				intVal, ok := val.(*runtime.PyInt)
+				if !ok {
+					vm.RaiseError("TypeError: Counter update value must be an integer, not '%s'", vm.TypeNameOf(val))
+					return 0
 				}
+				counter.Items[k] += intVal.Value
 			}
 		case *runtime.PyUserData:
 			if otherCounter, ok := v.Value.(*PyCounter); ok {
@@ -617,7 +626,22 @@ func dequeIndex(vm *runtime.VM) int {
 	start := vm.OptionalInt(3, 0)
 	stop := vm.OptionalInt(4, int64(len(deque.Items)))
 
-	for i := start; i < stop && i < int64(len(deque.Items)); i++ {
+	// Normalize negative indices
+	n := int64(len(deque.Items))
+	if start < 0 {
+		start += n
+	}
+	if start < 0 {
+		start = 0
+	}
+	if stop < 0 {
+		stop += n
+	}
+	if stop < 0 {
+		stop = 0
+	}
+
+	for i := start; i < stop && i < n; i++ {
 		if vm.Equal(deque.Items[i], x) {
 			vm.Push(runtime.NewInt(i))
 			return 1
@@ -645,13 +669,13 @@ func dequeInsert(vm *runtime.VM) int {
 	x := vm.Get(3)
 
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) >= deque.Maxlen {
-		vm.RaiseError("deque already at its maximum size")
+		vm.RaiseError("IndexError: deque already at its maximum size")
 		return 0
 	}
 
 	// Handle negative index
 	if i < 0 {
-		i = len(deque.Items) + i + 1
+		i = len(deque.Items) + i
 	}
 	if i < 0 {
 		i = 0
@@ -776,7 +800,15 @@ func collectionsDefaultdict(vm *runtime.VM) int {
 	}
 
 	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
-		dd.DefaultFactory = vm.Get(1)
+		factory := vm.Get(1)
+		// Validate that default_factory is callable or None
+		switch factory.(type) {
+		case *runtime.PyFunction, *runtime.PyBuiltinFunc, *runtime.PyClass, *runtime.PyMethod:
+			dd.DefaultFactory = factory
+		default:
+			vm.RaiseError("TypeError: first argument must be callable or None")
+			return 0
+		}
 	}
 
 	// Initialize from additional args if provided
@@ -869,15 +901,21 @@ func collectionsNamedtuple(vm *runtime.VM) int {
 		}
 	case *runtime.PyList:
 		for _, item := range v.Items {
-			if s, ok := item.(*runtime.PyString); ok {
-				fieldNames = append(fieldNames, s.Value)
+			s, ok := item.(*runtime.PyString)
+			if !ok {
+				vm.RaiseError("TypeError: Field names must be strings, not '%s'", vm.TypeNameOf(item))
+				return 0
 			}
+			fieldNames = append(fieldNames, s.Value)
 		}
 	case *runtime.PyTuple:
 		for _, item := range v.Items {
-			if s, ok := item.(*runtime.PyString); ok {
-				fieldNames = append(fieldNames, s.Value)
+			s, ok := item.(*runtime.PyString)
+			if !ok {
+				vm.RaiseError("TypeError: Field names must be strings, not '%s'", vm.TypeNameOf(item))
+				return 0
 			}
+			fieldNames = append(fieldNames, s.Value)
 		}
 	}
 

@@ -680,6 +680,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 
 	case OpNegateFast:
+		if frame.Locals[arg] == nil {
+			return nil, unboundLocalError(frame, arg)
+		}
 		if v, ok := frame.Locals[arg].(*PyInt); ok {
 			frame.Locals[arg] = MakeInt(-v.Value)
 		} else {

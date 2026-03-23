@@ -241,7 +241,7 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 			var leafExcs []*PyException
 			var msg string
 			var isBase bool
-			if vm.isExceptionGroup(exc) {
+			if vm.isExceptionGroup(exc) && exc.Instance != nil {
 				leafExcs = vm.getEGExceptions(exc.Instance)
 				if m, ok := exc.Instance.Dict["message"].(*PyString); ok {
 					msg = m.Value

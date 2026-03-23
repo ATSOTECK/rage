@@ -244,9 +244,9 @@ const (
 	OpCompareEqJump // Compare == and jump if false (arg: offset)
 	OpCompareNeJump // Compare != and jump if false (arg: offset)
 
-	// Compare two locals and jump (ultra-optimized loop conditions)
-	// arg format: low 4 bits = local1, next 4 bits = local2, remaining = jump offset >> 4
-	OpCompareLtLocalJump // local1 < local2, jump if false
+	// Compare two locals (optimized loop conditions)
+	// arg format: bits 0-7 = local1, bits 8-15 = local2; pushes bool result
+	OpCompareLtLocal // load local1 and local2, compare <, push result
 
 	// Inline builtins (no function call overhead)
 	OpLenList    // len(list) - inline
@@ -440,7 +440,7 @@ var OpcodeNames = map[Opcode]string{
 	OpCompareGeJump:      "COMPARE_GE_JUMP",
 	OpCompareEqJump:      "COMPARE_EQ_JUMP",
 	OpCompareNeJump:      "COMPARE_NE_JUMP",
-	OpCompareLtLocalJump: "COMPARE_LT_LOCAL_JUMP",
+	OpCompareLtLocal: "COMPARE_LT_LOCAL",
 	OpLenList:            "LEN_LIST",
 	OpLenString:          "LEN_STRING",
 	OpLenTuple:           "LEN_TUPLE",
@@ -774,7 +774,7 @@ func (co *CodeObject) Validate() error {
 				return err
 			}
 
-		case OpCompareLtLocalJump:
+		case OpCompareLtLocal:
 			// bits 0-7 = local1, bits 8-15 = local2
 			local1 := arg & 0xFF
 			local2 := (arg >> 8) & 0xFF
