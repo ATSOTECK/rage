@@ -457,3 +457,97 @@ result = a == reconstructed
 	result := vm.GetGlobal("result").(*runtime.PyBool)
 	assert.True(t, result.Value)
 }
+
+// =============================================================================
+// OpCompareLtLocal Regression Tests
+//
+// The peephole optimizer fuses LOAD_FAST + LOAD_FAST + COMPARE_LT into a single
+// OpCompareLtLocal instruction. Previously it also absorbed POP_JUMP_IF_FALSE and
+// packed the jump target into bits 16+ of the 16-bit arg, truncating the jump
+// target to zero and causing jumps to the start of the function.
+// =============================================================================
+
+func TestWhileLoopLocalComparison(t *testing.T) {
+	// Basic while loop — both loop variable and bound are locals
+	vm := runCode(t, `
+def f():
+    i = 0
+    n = 10
+    while i < n:
+        i = i + 1
+    return i
+result = f()
+`)
+	assert.Equal(t, int64(10), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestWhileLoopLocalComparisonSum(t *testing.T) {
+	// Accumulator pattern — exercises the optimizer's fused compare path
+	vm := runCode(t, `
+def sum_to(n):
+    i = 0
+    total = 0
+    while i < n:
+        total = total + i
+        i = i + 1
+    return total
+result = sum_to(50)
+`)
+	assert.Equal(t, int64(1225), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestNestedWhileLoopsLocalComparison(t *testing.T) {
+	// Nested loops — both inner and outer use local comparisons
+	vm := runCode(t, `
+def nested():
+    count = 0
+    i = 0
+    while i < 5:
+        j = 0
+        while j < 4:
+            count = count + 1
+            j = j + 1
+        i = i + 1
+    return count
+result = nested()
+`)
+	assert.Equal(t, int64(20), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestWhileLoopLocalComparisonLargeBody(t *testing.T) {
+	// Larger function body — jump target is further away, which is exactly
+	// the scenario where the old 16-bit truncation bug would corrupt control flow.
+	vm := runCode(t, `
+def big_loop():
+    i = 0
+    limit = 100
+    a = 0
+    b = 0
+    c = 0
+    while i < limit:
+        a = a + i
+        b = b + i * 2
+        c = c + i * 3
+        i = i + 1
+    return a + b + c
+result = big_loop()
+`)
+	// a=4950, b=9900, c=14850 → total=29700
+	assert.Equal(t, int64(29700), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestWhileLoopFloatComparison(t *testing.T) {
+	// Float comparison — OpCompareLtLocal falls back to generic compare
+	vm := runCode(t, `
+def f():
+    x = 0.0
+    limit = 5.0
+    count = 0
+    while x < limit:
+        count = count + 1
+        x = x + 1.0
+    return count
+result = f()
+`)
+	assert.Equal(t, int64(5), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}

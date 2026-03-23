@@ -462,3 +462,107 @@ except ValueError as caught:
 	assert.Equal(t, int64(1), vm.GetGlobal("count").(*runtime.PyInt).Value)
 	assert.Equal(t, "added before raise", vm.GetGlobal("first").(*runtime.PyString).Value)
 }
+
+// =============================================================================
+// except* with type-only exceptions (no Instance) — nil dereference regression
+//
+// isExceptionGroup() can return true when exc.ExcType != nil but exc.Instance is
+// nil. The except* handler (BlockExceptStar) previously dereferenced exc.Instance
+// unconditionally, causing a nil pointer panic.
+// =============================================================================
+
+func TestExceptStarPlainValueError(t *testing.T) {
+	// A plain (non-group) exception caught by except* should not panic.
+	// This exercises the path where the exception may have ExcType set but
+	// Instance could vary depending on how it was constructed.
+	vm := runCode(t, `
+caught = False
+try:
+    raise ValueError("test")
+except* ValueError:
+    caught = True
+`)
+	assert.Equal(t, runtime.True, vm.GetGlobal("caught"))
+}
+
+func TestExceptStarPlainTypeErrorWithBinding(t *testing.T) {
+	// except* with 'as' binding on a plain exception — verify it doesn't panic
+	// and that the bound variable is usable.
+	vm := runCode(t, `
+msg = ""
+try:
+    raise TypeError("bad type")
+except* TypeError as eg:
+    msg = str(eg)
+`)
+	msg := vm.GetGlobal("msg").(*runtime.PyString).Value
+	assert.Contains(t, msg, "TypeError")
+}
+
+func TestExceptStarExceptionGroupNormal(t *testing.T) {
+	// Normal ExceptionGroup (with Instance) — verify the happy path still works
+	// after the nil-guard fix.
+	vm := runCode(t, `
+caught_v = False
+caught_t = False
+try:
+    raise ExceptionGroup("errors", [ValueError("v"), TypeError("t")])
+except* ValueError:
+    caught_v = True
+except* TypeError:
+    caught_t = True
+`)
+	assert.Equal(t, runtime.True, vm.GetGlobal("caught_v"))
+	assert.Equal(t, runtime.True, vm.GetGlobal("caught_t"))
+}
+
+func TestExceptStarNonGroupInFunction(t *testing.T) {
+	// except* inside a function with a non-group exception.
+	// Functions have different frame handling, so test both paths.
+	vm := runCode(t, `
+def f():
+    try:
+        raise RuntimeError("oops")
+    except* RuntimeError:
+        return "caught"
+    return "not caught"
+result = f()
+`)
+	assert.Equal(t, "caught", vm.GetGlobal("result").(*runtime.PyString).Value)
+}
+
+func TestExceptStarMultipleClausesNonGroup(t *testing.T) {
+	// Multiple except* clauses with a plain exception — only the matching
+	// clause should fire.
+	vm := runCode(t, `
+caught_v = False
+caught_t = False
+try:
+    raise TypeError("t")
+except* ValueError:
+    caught_v = True
+except* TypeError:
+    caught_t = True
+`)
+	assert.Equal(t, runtime.False, vm.GetGlobal("caught_v"))
+	assert.Equal(t, runtime.True, vm.GetGlobal("caught_t"))
+}
+
+func TestExceptStarNilInstanceRegressionDirect(t *testing.T) {
+	// Direct regression test: construct a scenario where the exception flows
+	// through except* handling. The key is that the VM must not panic.
+	code, errs := compiler.CompileSource(`
+result = "no panic"
+try:
+    raise KeyError("k")
+except* KeyError:
+    result = "caught KeyError"
+`, "<test>")
+	require.Empty(t, errs)
+	require.NotNil(t, code)
+
+	vm := runtime.NewVM()
+	_, err := vm.Execute(code)
+	require.NoError(t, err, "except* with non-group exception should not panic")
+	assert.Equal(t, "caught KeyError", vm.GetGlobal("result").(*runtime.PyString).Value)
+}

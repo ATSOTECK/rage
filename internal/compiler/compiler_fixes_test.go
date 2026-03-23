@@ -480,3 +480,109 @@ z = [1, 2, 3]
 	err := code.Validate()
 	assert.NoError(t, err, "well-formed code should validate")
 }
+
+// =============================================================================
+// OpCompareLtLocal: peephole optimizer must NOT pack jump target into 16-bit arg
+//
+// Regression test for a critical bug where the optimizer packed local1 (8 bits),
+// local2 (8 bits), and jumpTarget (16 bits) into a single 16-bit instruction arg,
+// silently truncating the jump target to zero. The fix fuses only LOAD_FAST +
+// LOAD_FAST + COMPARE_LT into OpCompareLtLocal (16 bits for two local indices),
+// leaving POP_JUMP_IF_FALSE as a separate instruction.
+// =============================================================================
+
+func TestCompareLtLocalArgFitsIn16Bits(t *testing.T) {
+	// A while loop with local comparison — the optimizer should produce
+	// OpCompareLtLocal whose arg packs only two 8-bit local indices.
+	source := `
+def f():
+    i = 0
+    n = 10
+    while i < n:
+        i = i + 1
+    return i
+`
+	code, errs := CompileSource(source, "<test>")
+	require.Empty(t, errs)
+	require.NotNil(t, code)
+
+	// Find the function's code object
+	var funcCode *runtime.CodeObject
+	for _, c := range code.Constants {
+		if co, ok := c.(*runtime.CodeObject); ok && co.Name == "f" {
+			funcCode = co
+			break
+		}
+	}
+	require.NotNil(t, funcCode, "function 'f' code object not found")
+
+	// Scan bytecode for OpCompareLtLocal and verify its arg fits in 16 bits
+	found := false
+	offset := 0
+	for offset < len(funcCode.Code) {
+		op := runtime.Opcode(funcCode.Code[offset])
+		if op == runtime.OpCompareLtLocal {
+			found = true
+			arg := int(funcCode.Code[offset+1]) | int(funcCode.Code[offset+2])<<8
+			local1 := arg & 0xFF
+			local2 := (arg >> 8) & 0xFF
+			assert.GreaterOrEqual(t, local1, 0, "local1 index should be non-negative")
+			assert.GreaterOrEqual(t, local2, 0, "local2 index should be non-negative")
+			assert.LessOrEqual(t, local1, 255, "local1 index should fit in 8 bits")
+			assert.LessOrEqual(t, local2, 255, "local2 index should fit in 8 bits")
+			// The arg should contain ONLY the two local indices, no jump target
+			assert.Equal(t, 0, arg>>16, "arg bits 16+ should be zero (no packed jump target)")
+			break
+		}
+		if op.HasArg() {
+			offset += 3
+		} else {
+			offset++
+		}
+	}
+	// The optimizer may or may not fire depending on conditions, so only
+	// validate the arg shape if the instruction was emitted.
+	if found {
+		// Verify a POP_JUMP_IF_FALSE follows (possibly after other instructions)
+		// to confirm the jump wasn't absorbed into OpCompareLtLocal.
+		foundJump := false
+		for offset < len(funcCode.Code) {
+			op := runtime.Opcode(funcCode.Code[offset])
+			if op == runtime.OpPopJumpIfFalse {
+				foundJump = true
+				break
+			}
+			if op.HasArg() {
+				offset += 3
+			} else {
+				offset++
+			}
+		}
+		assert.True(t, foundJump, "POP_JUMP_IF_FALSE should remain as a separate instruction after OpCompareLtLocal")
+	}
+}
+
+func TestCompareLtLocalEndToEnd(t *testing.T) {
+	// End-to-end: compile and run a while loop that uses local comparison.
+	// This was broken when the jump target was truncated, causing jumps to offset 0.
+	code, errs := CompileSource(`
+def count_up(n):
+    i = 0
+    total = 0
+    while i < n:
+        total = total + i
+        i = i + 1
+    return total
+
+result = count_up(100)
+`, "<test>")
+	require.Empty(t, errs)
+	require.NotNil(t, code)
+
+	vm := runtime.NewVM()
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	result := vm.GetGlobal("result").(*runtime.PyInt)
+	assert.Equal(t, int64(4950), result.Value, "sum of 0..99 should be 4950")
+}

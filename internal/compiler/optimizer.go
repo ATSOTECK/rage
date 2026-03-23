@@ -211,8 +211,7 @@ func isJumpOp(op runtime.Opcode) bool {
 		// New compare+jump superinstructions
 		runtime.OpCompareLtJump, runtime.OpCompareLeJump,
 		runtime.OpCompareGtJump, runtime.OpCompareGeJump,
-		runtime.OpCompareEqJump, runtime.OpCompareNeJump,
-		runtime.OpCompareLtLocalJump:
+		runtime.OpCompareEqJump, runtime.OpCompareNeJump:
 		return true
 	}
 	return false

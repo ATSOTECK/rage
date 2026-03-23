@@ -791,12 +791,11 @@ func (vm *VM) run() (Value, error) {
 				frame.IP = arg
 			}
 
-		case OpCompareLtLocalJump:
-			// Ultra-optimized: compare two locals and jump if false
-			// arg format: bits 0-7 = local1, bits 8-15 = local2, bits 16+ = jump offset
+		case OpCompareLtLocal:
+			// Optimized: load two locals and compare, push bool result
+			// arg format: bits 0-7 = local1, bits 8-15 = local2
 			local1 := arg & 0xFF
 			local2 := (arg >> 8) & 0xFF
-			jumpOffset := arg >> 16
 			a := frame.Locals[local1]
 			if a == nil {
 				return nil, unboundLocalError(frame, local1)
@@ -808,8 +807,10 @@ func (vm *VM) run() (Value, error) {
 			// Fast path for ints
 			if ai, ok := a.(*PyInt); ok {
 				if bi, ok := b.(*PyInt); ok {
-					if ai.Value >= bi.Value {
-						frame.IP = jumpOffset
+					if ai.Value < bi.Value {
+						vm.push(True)
+					} else {
+						vm.push(False)
 					}
 					break
 				}
@@ -825,9 +826,7 @@ func (vm *VM) run() (Value, error) {
 				}
 				break
 			}
-			if cmp == False || cmp == nil {
-				frame.IP = jumpOffset
-			}
+			vm.push(cmp)
 
 		// ==========================================
 		// Inline len() opcodes
