@@ -84,14 +84,25 @@ func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (pas
 		return 0, 0, "", fmt.Errorf("failed to read script: %w", err)
 	}
 
+	// Determine which capabilities the script needs
+	scriptName := filepath.Base(scriptPath)
+	sourceStr := string(source)
+	needsFileIO := strings.Contains(scriptName, "file_io") ||
+		strings.Contains(scriptName, "io_") ||
+		strings.Contains(scriptName, "_os") ||
+		strings.Contains(sourceStr, "open(")
+	needsReflection := strings.Contains(scriptName, "reflection")
+
 	// Create a new state with all modules enabled
-	// Enable reflection builtins for the reflection test
-	var state *rage.State
-	if strings.Contains(filepath.Base(scriptPath), "reflection") {
-		state = rage.NewStateWithModules(rage.WithAllModules(), rage.WithAllBuiltins())
-	} else {
-		state = rage.NewState()
+	var opts []rage.StateOption
+	opts = append(opts, rage.WithAllModules())
+	if needsReflection {
+		opts = append(opts, rage.WithAllBuiltins())
 	}
+	if needsFileIO {
+		opts = append(opts, rage.WithFileIO())
+	}
+	state := rage.NewStateWithModules(opts...)
 	defer state.Close()
 
 	// Inject color setting into the test framework source
@@ -107,9 +118,7 @@ func runScript(scriptPath string, scriptsDir string, timeout time.Duration) (pas
 	}
 
 	// Set up temp directory for file I/O tests
-	if strings.Contains(filepath.Base(scriptPath), "file_io") ||
-		strings.Contains(filepath.Base(scriptPath), "io_") ||
-		strings.Contains(filepath.Base(scriptPath), "_os") {
+	if needsFileIO {
 		tmpDir, err := os.MkdirTemp("", "rage_io_test_")
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("failed to create temp dir: %w", err)

@@ -104,16 +104,16 @@ func InitIOModule() {
 	}
 	runtime.RegisterTypeMetatable("file", fileMT)
 
-	// Register open() as a pending builtin
-	runtime.RegisterPendingBuiltin("open", builtinOpen)
+	// Note: open() is NOT registered here — neither as a pending builtin nor in
+	// the io module dict. It must be explicitly enabled via rage.WithFileIO() or
+	// rage.WithBuiltin(rage.BuiltinOpen) for security.
 
-	// Also register an io module with constants
+	// Register an io module with constants only
 	runtime.NewModuleBuilder("io").
 		Doc("Core tools for working with streams.").
 		Const("SEEK_SET", runtime.NewInt(0)).
 		Const("SEEK_CUR", runtime.NewInt(1)).
 		Const("SEEK_END", runtime.NewInt(2)).
-		Func("open", builtinOpen).
 		Register()
 }
 
@@ -165,9 +165,9 @@ func parseMode(mode string) (readable, writable, binary, append bool, flag int, 
 	return
 }
 
-// builtinOpen implements the open() builtin function
+// BuiltinOpen implements the open() builtin function
 // open(file, mode='r', encoding='utf-8') -> file object
-func builtinOpen(vm *runtime.VM) int {
+func BuiltinOpen(vm *runtime.VM) int {
 	nargs := vm.GetTop()
 	if nargs < 1 {
 		vm.RaiseError("open() missing required argument: 'file'")

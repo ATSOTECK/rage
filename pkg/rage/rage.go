@@ -101,6 +101,14 @@ const (
 	BuiltinCompile
 	BuiltinExec
 	BuiltinEval
+
+	// BuiltinOpen enables the open() builtin for filesystem access.
+	// This is intentionally excluded from AllBuiltins — you must enable it
+	// explicitly via WithFileIO() or WithBuiltin(BuiltinOpen).
+	//
+	// WARNING: Enabling open() gives Python code full read/write access to
+	// the filesystem with the permissions of the host process.
+	BuiltinOpen
 )
 
 // ReflectionBuiltins contains all reflection-related builtins (repr, dir, globals, locals, vars).
@@ -121,7 +129,8 @@ var ExecutionBuiltins = []Builtin{
 	BuiltinEval,
 }
 
-// AllBuiltins contains all opt-in builtins.
+// AllBuiltins contains all opt-in builtins EXCEPT file I/O.
+// open() is deliberately excluded — use WithFileIO() to enable filesystem access.
 var AllBuiltins = []Builtin{
 	BuiltinRepr,
 	BuiltinDir,
@@ -203,7 +212,21 @@ func WithExecutionBuiltins() StateOption {
 	}
 }
 
-// WithAllBuiltins enables all opt-in builtins.
+// WithFileIO enables the open() builtin, giving Python code filesystem access.
+//
+// WARNING: This grants read/write access to the filesystem with the permissions
+// of the host process. Only enable this for trusted code.
+//
+// This is intentionally NOT included in WithAllBuiltins() — you must opt in
+// explicitly by calling WithFileIO() or WithBuiltin(BuiltinOpen).
+func WithFileIO() StateOption {
+	return func(c *stateConfig) {
+		c.builtins[BuiltinOpen] = true
+	}
+}
+
+// WithAllBuiltins enables all opt-in builtins EXCEPT file I/O.
+// Use WithFileIO() separately to enable open().
 func WithAllBuiltins() StateOption {
 	return func(c *stateConfig) {
 		for _, b := range AllBuiltins {
@@ -366,6 +389,8 @@ func initBuiltin(vm *runtime.VM, b Builtin) {
 		vm.RegisterBuiltin("exec", runtime.BuiltinExec)
 	case BuiltinEval:
 		vm.RegisterBuiltin("eval", runtime.BuiltinEval)
+	case BuiltinOpen:
+		vm.RegisterBuiltin("open", stdlib.BuiltinOpen)
 	}
 }
 
@@ -497,7 +522,16 @@ func (s *State) EnableExecutionBuiltins() {
 	}
 }
 
-// EnableAllBuiltins enables all opt-in builtins.
+// EnableFileIO enables the open() builtin, giving Python code filesystem access.
+//
+// WARNING: This grants read/write access to the filesystem with the permissions
+// of the host process. Only enable this for trusted code.
+func (s *State) EnableFileIO() {
+	s.EnableBuiltin(BuiltinOpen)
+}
+
+// EnableAllBuiltins enables all opt-in builtins EXCEPT file I/O.
+// Use EnableFileIO() separately to enable open().
 func (s *State) EnableAllBuiltins() {
 	for _, b := range AllBuiltins {
 		s.EnableBuiltin(b)
