@@ -687,3 +687,32 @@ result = list(islice([10, 20, 30, 40, 50], 1, 4))
 	assert.Equal(t, int64(30), lst.Items[1].(*runtime.PyInt).Value)
 	assert.Equal(t, int64(40), lst.Items[2].(*runtime.PyInt).Value)
 }
+
+// =============================================================================
+// Counter.update() Type Validation
+// =============================================================================
+
+func TestCounterUpdateNonIntValueRaises(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import Counter
+c = Counter()
+c.update({"a": "hello"})
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCounterUpdateIntValueWorks(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import Counter
+c = Counter()
+c.update({"a": 3, "b": 1})
+# Verify via most_common which returns (key, count) pairs
+pairs = c.most_common()
+result = pairs[0][1]
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}

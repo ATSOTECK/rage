@@ -1678,3 +1678,37 @@ tpl = (1, 2, 3, 2, 1)
 tpl.index(5, -3)
 `, "x not in tuple")
 }
+
+// =============================================================================
+// str.count() Negative Index Normalization
+// =============================================================================
+
+func TestStrCountNegativeStart(t *testing.T) {
+	// "hello" count 'l' from -3 → index 2; "llo" has 2 l's
+	vm := runCode(t, `result = "hello".count("l", -3)`)
+	assert.Equal(t, int64(2), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestStrCountNegativeEnd(t *testing.T) {
+	// "hello" count 'l' with end -1 → index 4; "hell" has 2 l's
+	vm := runCode(t, `result = "hello".count("l", 0, -1)`)
+	assert.Equal(t, int64(2), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestStrCountNegativeStartAndEnd(t *testing.T) {
+	// "hello" count 'l' from -4 to -1 → [1, 4) → "ell"; 2 l's
+	vm := runCode(t, `result = "hello".count("l", -4, -1)`)
+	assert.Equal(t, int64(2), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestStrCountNegativeStartClamps(t *testing.T) {
+	// Very negative start clamps to 0
+	vm := runCode(t, `result = "hello".count("l", -100)`)
+	assert.Equal(t, int64(2), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestStrCountNegativeEndEmpty(t *testing.T) {
+	// -5 on len 5 → index 0; count in "" is 0
+	vm := runCode(t, `result = "hello".count("l", 0, -5)`)
+	assert.Equal(t, int64(0), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}

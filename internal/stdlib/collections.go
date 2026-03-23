@@ -224,9 +224,12 @@ func counterUpdate(vm *runtime.VM) int {
 			}
 		case *runtime.PyDict:
 			for k, val := range v.Items {
-				if intVal, ok := val.(*runtime.PyInt); ok {
-					counter.Items[k] += intVal.Value
+				intVal, ok := val.(*runtime.PyInt)
+				if !ok {
+					vm.RaiseError("TypeError: Counter update value must be an integer, not '%s'", vm.TypeNameOf(val))
+					return 0
 				}
+				counter.Items[k] += intVal.Value
 			}
 		case *runtime.PyUserData:
 			if otherCounter, ok := v.Value.(*PyCounter); ok {
