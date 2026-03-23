@@ -516,6 +516,44 @@ d.insert(1, 99)
 	assert.Contains(t, err.Error(), "IndexError")
 }
 
+func TestCollectionsCounterDictNonInt(t *testing.T) {
+	// Counter(dict) with non-int values should raise TypeError
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import Counter
+c = Counter({"a": "not_an_int"})
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCollectionsDefaultdictNonCallable(t *testing.T) {
+	// defaultdict with non-callable first arg should raise TypeError
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import defaultdict
+d = defaultdict(42)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+}
+
+func TestCollectionsDefaultdictCallable(t *testing.T) {
+	// defaultdict with callable first arg should be accepted
+	runCodeWithStdlib(t, `
+from collections import defaultdict
+d = defaultdict(int)
+`)
+}
+
 func TestFromCollectionsImport(t *testing.T) {
 	runCodeWithStdlib(t, `
 from collections import Counter, deque

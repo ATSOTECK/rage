@@ -99,8 +99,14 @@ func collectionsCounter(vm *runtime.VM) int {
 			}
 		case *runtime.PyDict:
 			for k, val := range v.Items {
-				if intVal, ok := val.(*runtime.PyInt); ok {
-					counter.Items[k] = intVal.Value
+				switch cv := val.(type) {
+				case *runtime.PyInt:
+					counter.Items[k] = cv.Value
+				case *runtime.PyFloat:
+					counter.Items[k] = int64(cv.Value)
+				default:
+					vm.RaiseError("TypeError: '%T' object cannot be interpreted as an integer", val)
+					return 0
 				}
 			}
 		}
@@ -776,7 +782,15 @@ func collectionsDefaultdict(vm *runtime.VM) int {
 	}
 
 	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
-		dd.DefaultFactory = vm.Get(1)
+		factory := vm.Get(1)
+		// Validate that default_factory is callable or None
+		switch factory.(type) {
+		case *runtime.PyFunction, *runtime.PyBuiltinFunc, *runtime.PyClass, *runtime.PyMethod:
+			dd.DefaultFactory = factory
+		default:
+			vm.RaiseError("TypeError: first argument must be callable or None")
+			return 0
+		}
 	}
 
 	// Initialize from additional args if provided

@@ -219,8 +219,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	vm.generatorHasPendingReturn = oldHasPendingReturn
 	vm.generatorPendingJump = oldPendingJump
 	vm.generatorHasPendingJump = oldHasPendingJump
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
 
 	if err != nil {
 		gen.State = GenClosed

@@ -4,8 +4,11 @@ import (
 	"math"
 	"testing"
 
+	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // =====================================
@@ -563,4 +566,30 @@ def f(x):
 
 f([1, 2, 3])
 `, "unhashable type")
+}
+
+// =============================================================================
+// CSV delimiter/quotechar validation
+// =============================================================================
+
+func TestCSVReaderEmptyDelimiter(t *testing.T) {
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+import csv
+r = csv.reader(["a,b,c"], "")
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1-character string")
+}
+
+func TestCSVReaderValidDelimiter(t *testing.T) {
+	runCodeWithStdlib(t, `
+import csv
+r = csv.reader(["a;b;c"], ";")
+row = r.__next__()
+`)
 }

@@ -1723,22 +1723,39 @@ func (vm *VM) run() (Value, error) {
 			dict.DictSet(key, val, vm)
 
 		case OpMakeFunction:
-			name := vm.pop().(*PyString).Value
-			code := vm.pop().(*CodeObject)
+			nameVal, ok := vm.pop().(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("internal error: OpMakeFunction expected string name on stack")
+			}
+			name := nameVal.Value
+			code, ok := vm.pop().(*CodeObject)
+			if !ok {
+				return nil, fmt.Errorf("internal error: OpMakeFunction expected CodeObject on stack")
+			}
 			var defaults *PyTuple
 			var kwDefaults map[string]Value
 			var closure []*PyCell
 			if arg&8 != 0 {
 				// Has closure - pop tuple of cells
-				closureTuple := vm.pop().(*PyTuple)
+				closureTuple, ok := vm.pop().(*PyTuple)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected tuple for closure")
+				}
 				closure = make([]*PyCell, len(closureTuple.Items))
 				for i, item := range closureTuple.Items {
-					closure[i] = item.(*PyCell)
+					cell, ok := item.(*PyCell)
+					if !ok {
+						return nil, fmt.Errorf("internal error: OpMakeFunction expected cell in closure tuple")
+					}
+					closure[i] = cell
 				}
 			}
 			if arg&2 != 0 {
 				// Has kwonly defaults dict
-				kwDefaultsDict := vm.pop().(*PyDict)
+				kwDefaultsDict, ok := vm.pop().(*PyDict)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected dict for kwdefaults")
+				}
 				kwDefaults = make(map[string]Value)
 				for _, key := range kwDefaultsDict.Keys(vm) {
 					if ks, ok := key.(*PyString); ok {
@@ -1747,7 +1764,11 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			if arg&1 != 0 {
-				defaults = vm.pop().(*PyTuple)
+				d, ok := vm.pop().(*PyTuple)
+				if !ok {
+					return nil, fmt.Errorf("internal error: OpMakeFunction expected tuple for defaults")
+				}
+				defaults = d
 			}
 
 			// If the code has FreeVars but we don't have a closure tuple,

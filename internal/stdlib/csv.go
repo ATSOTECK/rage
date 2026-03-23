@@ -9,6 +9,26 @@ import (
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
+// parseCSVCharParam validates and extracts a single-character CSV parameter (delimiter/quotechar).
+// Returns the character and true if valid, or raises a ValueError and returns false.
+func parseCSVCharParam(vm *runtime.VM, argIdx int, paramName string) (rune, bool) {
+	val := vm.Get(argIdx)
+	if runtime.IsNone(val) {
+		return 0, false
+	}
+	s, ok := val.(*runtime.PyString)
+	if !ok {
+		vm.RaiseError("TypeError: \"%s\" must be a string, not %T", paramName, val)
+		return 0, false
+	}
+	runes := []rune(s.Value)
+	if len(runes) != 1 {
+		vm.RaiseError("TypeError: \"%s\" must be a 1-character string", paramName)
+		return 0, false
+	}
+	return runes[0], true
+}
+
 // CSV quoting constants
 const (
 	quoteMinimal    = 0
@@ -114,15 +134,19 @@ func csvReader(vm *runtime.VM) int {
 	delimiter := ','
 	quotechar := '"'
 
-	if vm.GetTop() >= 2 {
-		if s, ok := vm.Get(2).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		if d, ok := parseCSVCharParam(vm, 2, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
-	if vm.GetTop() >= 3 {
-		if s, ok := vm.Get(3).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		if q, ok := parseCSVCharParam(vm, 3, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
@@ -230,16 +254,20 @@ func csvDictReader(vm *runtime.VM) int {
 	}
 
 	// Parse delimiter (arg 5)
-	if vm.GetTop() >= 5 {
-		if s, ok := vm.Get(5).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 5 && !runtime.IsNone(vm.Get(5)) {
+		if d, ok := parseCSVCharParam(vm, 5, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
 	// Parse quotechar (arg 6)
-	if vm.GetTop() >= 6 {
-		if s, ok := vm.Get(6).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 6 && !runtime.IsNone(vm.Get(6)) {
+		if q, ok := parseCSVCharParam(vm, 6, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
@@ -368,15 +396,19 @@ func csvWriter(vm *runtime.VM) int {
 	lineterminator := "\n"
 
 	// Parse optional arguments
-	if vm.GetTop() >= 1 {
-		if s, ok := vm.Get(1).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
+		if d, ok := parseCSVCharParam(vm, 1, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
-	if vm.GetTop() >= 2 {
-		if s, ok := vm.Get(2).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		if q, ok := parseCSVCharParam(vm, 2, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
@@ -529,15 +561,19 @@ func csvDictWriter(vm *runtime.VM) int {
 	restval := ""
 	extrasaction := "raise"
 
-	if vm.GetTop() >= 2 {
-		if s, ok := vm.Get(2).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		if d, ok := parseCSVCharParam(vm, 2, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
-	if vm.GetTop() >= 3 {
-		if s, ok := vm.Get(3).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		if q, ok := parseCSVCharParam(vm, 3, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
@@ -773,15 +809,19 @@ func csvParseRow(vm *runtime.VM) int {
 	delimiter := ','
 	quotechar := '"'
 
-	if vm.GetTop() >= 2 {
-		if s, ok := vm.Get(2).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		if d, ok := parseCSVCharParam(vm, 2, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
-	if vm.GetTop() >= 3 {
-		if s, ok := vm.Get(3).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		if q, ok := parseCSVCharParam(vm, 3, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
@@ -802,15 +842,19 @@ func csvFormatRow(vm *runtime.VM) int {
 	quotechar := '"'
 	quoting := quoteMinimal
 
-	if vm.GetTop() >= 2 {
-		if s, ok := vm.Get(2).(*runtime.PyString); ok && len(s.Value) > 0 {
-			delimiter = rune(s.Value[0])
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		if d, ok := parseCSVCharParam(vm, 2, "delimiter"); ok {
+			delimiter = d
+		} else {
+			return 0
 		}
 	}
 
-	if vm.GetTop() >= 3 {
-		if s, ok := vm.Get(3).(*runtime.PyString); ok && len(s.Value) > 0 {
-			quotechar = rune(s.Value[0])
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		if q, ok := parseCSVCharParam(vm, 3, "quotechar"); ok {
+			quotechar = q
+		} else {
+			return 0
 		}
 	}
 
