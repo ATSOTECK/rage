@@ -762,6 +762,17 @@ func (vm *VM) HashValue(v Value) uint64 {
 	return vm.hashValueVM(v)
 }
 
+// ExceptionMatches checks if a PyException matches an exception type (exported wrapper).
+// The exceptionType can be a *PyClass, *PyTuple of classes, or *UnionType.
+func (vm *VM) ExceptionMatches(exc *PyException, exceptionType Value) bool {
+	return vm.exceptionMatches(exc, exceptionType)
+}
+
+// GetAttr retrieves an attribute from a Python value (exported wrapper).
+func (vm *VM) GetAttr(obj Value, name string) (Value, error) {
+	return vm.getAttr(obj, name)
+}
+
 // ToList converts a Python iterable to a Go slice of Values (exported wrapper).
 // Handles lists, tuples, strings, ranges, sets, dicts, iterators, generators, etc.
 func (vm *VM) ToList(v Value) ([]Value, error) {

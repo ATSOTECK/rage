@@ -27,4 +27,5 @@ func InitAllModules() {
 	InitEnumModule()
 	InitHeapqModule()
 	InitBisectModule()
+	InitContextlibModule()
 }

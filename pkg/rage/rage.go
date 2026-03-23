@@ -55,6 +55,7 @@ const (
 	ModuleEnum
 	ModuleHeapq
 	ModuleBisect
+	ModuleContextlib
 )
 
 // AllModules is a convenience slice containing all available modules.
@@ -83,6 +84,7 @@ var AllModules = []Module{
 	ModuleEnum,
 	ModuleHeapq,
 	ModuleBisect,
+	ModuleContextlib,
 }
 
 // Builtin represents an opt-in builtin function that can be enabled.
@@ -418,6 +420,8 @@ func initModule(m Module) {
 		stdlib.InitHeapqModule()
 	case ModuleBisect:
 		stdlib.InitBisectModule()
+	case ModuleContextlib:
+		stdlib.InitContextlibModule()
 	}
 }
 
