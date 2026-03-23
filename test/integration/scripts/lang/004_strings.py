@@ -171,4 +171,45 @@ test("utf8_function_names", test_utf8_function_names)
 test("utf8_class_names", test_utf8_class_names)
 test("utf8_mixed", test_utf8_mixed)
 
+# --- len() on Unicode strings (character count, not byte count) ---
+
+def test_len_chinese():
+    expect(len("世界")).to_be(2)
+
+def test_len_mixed_ascii_unicode():
+    expect(len("hello 世界")).to_be(8)
+
+def test_len_cafe():
+    expect(len("café")).to_be(4)
+
+def test_len_japanese():
+    expect(len("日本語")).to_be(3)
+
+def test_len_cyrillic():
+    expect(len("Привет")).to_be(6)
+
+def test_len_single_multibyte():
+    expect(len("日")).to_be(1)
+
+def test_len_unicode_consistency():
+    s = "こんにちは"
+    count = 0
+    for c in s:
+        count = count + 1
+    expect(len(s)).to_be(count)
+    expect(count).to_be(5)
+
+def test_len_unicode_variable():
+    s = "αβγδε"
+    expect(len(s)).to_be(5)
+
+test("len_chinese", test_len_chinese)
+test("len_mixed_ascii_unicode", test_len_mixed_ascii_unicode)
+test("len_cafe", test_len_cafe)
+test("len_japanese", test_len_japanese)
+test("len_cyrillic", test_len_cyrillic)
+test("len_single_multibyte", test_len_single_multibyte)
+test("len_unicode_consistency", test_len_unicode_consistency)
+test("len_unicode_variable", test_len_unicode_variable)
+
 print("Strings tests completed")

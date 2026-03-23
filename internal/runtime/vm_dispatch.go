@@ -339,6 +339,9 @@ func (vm *VM) run() (Value, error) {
 
 		case OpNegateFast:
 			// Negate local variable in place: sign = -sign
+			if frame.Locals[arg] == nil {
+				return nil, unboundLocalError(frame, arg)
+			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
 				frame.Locals[arg] = MakeInt(-v.Value)
 			} else if v, ok := frame.Locals[arg].(*PyFloat); ok {
@@ -852,7 +855,7 @@ func (vm *VM) run() (Value, error) {
 			frame.SP--
 			obj := frame.Stack[frame.SP]
 			if str, ok := obj.(*PyString); ok {
-				frame.Stack[frame.SP] = MakeInt(int64(len(str.Value)))
+				frame.Stack[frame.SP] = MakeInt(int64(utf8.RuneCountInString(str.Value)))
 				frame.SP++
 			} else {
 				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))

@@ -186,4 +186,99 @@ test("coroutine_throw_into_new", test_coroutine_throw_into_new)
 test("coroutine_throw_method_exists", test_coroutine_throw_method_exists)
 test("coroutine_throw_exception_type", test_coroutine_throw_exception_type)
 
+# --- Coroutine exception state isolation ---
+
+def test_coroutine_internal_exception():
+    async def might_fail():
+        try:
+            raise ValueError("inner")
+        except ValueError:
+            pass
+        return "ok"
+    expect(asyncio.run(might_fail())).to_be("ok")
+
+def test_coroutine_in_except_handler():
+    async def inner():
+        return 42
+    caught = False
+    try:
+        raise ValueError("outer")
+    except ValueError:
+        result = asyncio.run(inner())
+        caught = True
+    expect(result).to_be(42)
+    expect(caught).to_be(True)
+
+def test_coroutine_nested_exceptions():
+    async def inner():
+        try:
+            raise KeyError("k")
+        except KeyError:
+            return "caught_inner"
+
+    async def outer():
+        try:
+            r = await inner()
+            return r
+        except Exception:
+            return "wrong"
+
+    expect(asyncio.run(outer())).to_be("caught_inner")
+
+def test_coroutine_try_finally():
+    async def with_finally():
+        result = []
+        try:
+            result.append("try")
+            return result
+        finally:
+            result.append("finally")
+
+    result = asyncio.run(with_finally())
+    expect(len(result)).to_be(2)
+    expect(result[0]).to_be("try")
+    expect(result[1]).to_be("finally")
+
+test("coroutine_internal_exception", test_coroutine_internal_exception)
+test("coroutine_in_except_handler", test_coroutine_in_except_handler)
+test("coroutine_nested_exceptions", test_coroutine_nested_exceptions)
+test("coroutine_try_finally", test_coroutine_try_finally)
+
+# --- Coroutine close ---
+
+def test_coroutine_close_not_started():
+    async def never_started():
+        return 1
+    c = never_started()
+    c.close()
+    closed_ok = True
+    expect(closed_ok).to_be(True)
+
+def test_coroutine_close_already_finished():
+    async def simple():
+        return 1
+    c = simple()
+    result = asyncio.run(c)
+    c.close()
+    c.close()  # double close
+    expect(result).to_be(1)
+
+def test_coroutine_close_with_finally():
+    finally_ran = [False]
+
+    async def coro():
+        try:
+            x = 1
+        finally:
+            finally_ran[0] = True
+        return x
+
+    result = asyncio.run(coro())
+    expect(finally_ran[0]).to_be(True)
+    expect(result).to_be(1)
+
+test("coroutine_close_not_started", test_coroutine_close_not_started)
+test("coroutine_close_already_finished", test_coroutine_close_already_finished)
+test("coroutine_close_with_finally", test_coroutine_close_with_finally)
+
 print("Asyncio tests completed")

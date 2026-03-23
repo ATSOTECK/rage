@@ -110,7 +110,10 @@ func (vm *VM) getAttrCoroutine(coro *PyCoroutine, name string) (Value, error) {
 		}}, nil
 	case "close":
 		return &PyBuiltinFunc{Name: "coroutine.close", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			coro.State = GenClosed
+			err := vm.CoroutineClose(coro)
+			if err != nil {
+				return nil, err
+			}
 			return None, nil
 		}}, nil
 	}

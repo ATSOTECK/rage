@@ -378,6 +378,15 @@ type PyCoroutine struct {
 	Name       string         // Coroutine function name
 	State      GeneratorState // Current state (reuses generator states)
 	YieldValue Value          // Value to send into coroutine on resume
+
+	// Saved VM exception state (isolated per-coroutine)
+	SavedCurrentException *PyException
+	SavedLastException    *PyException
+	SavedExcHandlerStack  []*PyException
+	SavedPendingReturn    Value
+	SavedHasPendingReturn bool
+	SavedPendingJump      int
+	SavedHasPendingJump   bool
 }
 
 func (c *PyCoroutine) Type() string   { return "coroutine" }

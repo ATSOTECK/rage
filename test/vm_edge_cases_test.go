@@ -1712,3 +1712,53 @@ func TestStrCountNegativeEndEmpty(t *testing.T) {
 	vm := runCode(t, `result = "hello".count("l", 0, -5)`)
 	assert.Equal(t, int64(0), vm.GetGlobal("result").(*runtime.PyInt).Value)
 }
+
+// =====================================
+// OpNegateFast nil check
+// =====================================
+
+func TestNegateFastUnboundLocal(t *testing.T) {
+	// Negating an unassigned variable should raise UnboundLocalError, not panic
+	runCodeExpectError(t, `
+def f():
+    x = -x
+    return x
+f()
+`, "UnboundLocalError")
+}
+
+func TestNegateFastUnboundLocalInLoop(t *testing.T) {
+	runCodeExpectError(t, `
+def f():
+    for i in range(1):
+        y = -y
+    return y
+f()
+`, "UnboundLocalError")
+}
+
+func TestNegateFastNormalInt(t *testing.T) {
+	source := `
+def f():
+    x = 42
+    x = -x
+    return x
+result = f()
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyInt)
+	assert.Equal(t, int64(-42), result.Value)
+}
+
+func TestNegateFastNormalFloat(t *testing.T) {
+	source := `
+def f():
+    x = 3.14
+    x = -x
+    return x
+result = f()
+`
+	vm := runCode(t, source)
+	result := vm.GetGlobal("result").(*runtime.PyFloat)
+	assert.InDelta(t, -3.14, result.Value, 0.001)
+}
