@@ -623,7 +623,22 @@ func dequeIndex(vm *runtime.VM) int {
 	start := vm.OptionalInt(3, 0)
 	stop := vm.OptionalInt(4, int64(len(deque.Items)))
 
-	for i := start; i < stop && i < int64(len(deque.Items)); i++ {
+	// Normalize negative indices
+	n := int64(len(deque.Items))
+	if start < 0 {
+		start += n
+	}
+	if start < 0 {
+		start = 0
+	}
+	if stop < 0 {
+		stop += n
+	}
+	if stop < 0 {
+		stop = 0
+	}
+
+	for i := start; i < stop && i < n; i++ {
 		if vm.Equal(deque.Items[i], x) {
 			vm.Push(runtime.NewInt(i))
 			return 1
@@ -657,7 +672,7 @@ func dequeInsert(vm *runtime.VM) int {
 
 	// Handle negative index
 	if i < 0 {
-		i = len(deque.Items) + i + 1
+		i = len(deque.Items) + i
 	}
 	if i < 0 {
 		i = 0
@@ -883,15 +898,21 @@ func collectionsNamedtuple(vm *runtime.VM) int {
 		}
 	case *runtime.PyList:
 		for _, item := range v.Items {
-			if s, ok := item.(*runtime.PyString); ok {
-				fieldNames = append(fieldNames, s.Value)
+			s, ok := item.(*runtime.PyString)
+			if !ok {
+				vm.RaiseError("TypeError: Field names must be strings, not '%s'", vm.TypeNameOf(item))
+				return 0
 			}
+			fieldNames = append(fieldNames, s.Value)
 		}
 	case *runtime.PyTuple:
 		for _, item := range v.Items {
-			if s, ok := item.(*runtime.PyString); ok {
-				fieldNames = append(fieldNames, s.Value)
+			s, ok := item.(*runtime.PyString)
+			if !ok {
+				vm.RaiseError("TypeError: Field names must be strings, not '%s'", vm.TypeNameOf(item))
+				return 0
 			}
+			fieldNames = append(fieldNames, s.Value)
 		}
 	}
 

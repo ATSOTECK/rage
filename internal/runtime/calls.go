@@ -88,6 +88,10 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 					allArgs := append([]Value{fn}, args...)
 					return vm.callFunction(callFn, allArgs, kwargs)
 				}
+				if callBuiltin, ok := method.(*PyBuiltinFunc); ok {
+					allArgs := append([]Value{fn}, args...)
+					return callBuiltin.Fn(allArgs, kwargs)
+				}
 			}
 		}
 		return nil, fmt.Errorf("'%s' object is not callable", vm.typeName(callable))

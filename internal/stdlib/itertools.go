@@ -656,8 +656,14 @@ func itertoolsIslice(vm *runtime.VM) int {
 		return 0
 	}
 
+	if start < 0 {
+		start = 0
+	}
 	if stop > int64(len(items)) {
 		stop = int64(len(items))
+	}
+	if start > int64(len(items)) {
+		start = int64(len(items))
 	}
 
 	var result []runtime.Value

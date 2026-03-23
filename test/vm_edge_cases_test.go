@@ -1615,3 +1615,66 @@ result = f()
 `)
 	assert.Equal(t, int64(5), vm.GetGlobal("result").(*runtime.PyInt).Value)
 }
+
+// =============================================================================
+// list.index() / tuple.index() Negative Index Normalization
+// =============================================================================
+
+func TestListIndexNegativeStart(t *testing.T) {
+	vm := runCode(t, `
+lst = [1, 2, 3, 2, 1]
+result = lst.index(2, -3)
+`)
+	// -3 normalizes to index 2; first 2 at or after index 2 is at index 3
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestListIndexNegativeEnd(t *testing.T) {
+	vm := runCode(t, `
+lst = [1, 2, 3, 2, 1]
+result = lst.index(2, 0, -2)
+`)
+	// -2 normalizes to index 3; search [0, 3), first 2 is at index 1
+	assert.Equal(t, int64(1), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestListIndexNegativeStartAndEnd(t *testing.T) {
+	vm := runCode(t, `
+lst = [1, 2, 3, 2, 1]
+result = lst.index(3, -4, -1)
+`)
+	// start=-4 → 1, end=-1 → 4; search [1, 4), 3 is at index 2
+	assert.Equal(t, int64(2), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestListIndexNegativeStartNotFound(t *testing.T) {
+	// -3 normalizes to index 2; search [2, 5) → [3, 2, 1]; 5 is not present
+	runCodeExpectError(t, `
+lst = [1, 2, 3, 2, 1]
+lst.index(5, -3)
+`, "is not in list")
+}
+
+func TestTupleIndexNegativeStart(t *testing.T) {
+	vm := runCode(t, `
+tpl = (1, 2, 3, 2, 1)
+result = tpl.index(2, -3)
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestTupleIndexNegativeEnd(t *testing.T) {
+	vm := runCode(t, `
+tpl = (1, 2, 3, 2, 1)
+result = tpl.index(2, 0, -2)
+`)
+	assert.Equal(t, int64(1), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestTupleIndexNegativeStartNotFound(t *testing.T) {
+	// -3 normalizes to index 2; search [2, 5) → (3, 2, 1); 5 is not present
+	runCodeExpectError(t, `
+tpl = (1, 2, 3, 2, 1)
+tpl.index(5, -3)
+`, "x not in tuple")
+}

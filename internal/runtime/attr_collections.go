@@ -100,15 +100,28 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 			if len(args) < 1 {
 				return nil, fmt.Errorf("index() takes at least 1 argument")
 			}
+			n := len(lst.Items)
 			start := 0
-			end := len(lst.Items)
+			end := n
 			if len(args) > 1 {
 				start = int(vm.toInt(args[1]))
+				if start < 0 {
+					start += n
+				}
+				if start < 0 {
+					start = 0
+				}
 			}
 			if len(args) > 2 {
 				end = int(vm.toInt(args[2]))
+				if end < 0 {
+					end += n
+				}
+				if end < 0 {
+					end = 0
+				}
 			}
-			for i := start; i < end && i < len(lst.Items); i++ {
+			for i := start; i < end && i < n; i++ {
 				if vm.equal(lst.Items[i], args[0]) {
 					return MakeInt(int64(i)), nil
 				}
@@ -931,15 +944,28 @@ func (vm *VM) getAttrTuple(tpl *PyTuple, name string) (Value, error) {
 			if len(args) < 1 {
 				return nil, fmt.Errorf("index() takes at least 1 argument")
 			}
+			n := len(tpl.Items)
 			start := 0
-			end := len(tpl.Items)
+			end := n
 			if len(args) > 1 {
 				start = int(vm.toInt(args[1]))
+				if start < 0 {
+					start += n
+				}
+				if start < 0 {
+					start = 0
+				}
 			}
 			if len(args) > 2 {
 				end = int(vm.toInt(args[2]))
+				if end < 0 {
+					end += n
+				}
+				if end < 0 {
+					end = 0
+				}
 			}
-			for i := start; i < end; i++ {
+			for i := start; i < end && i < n; i++ {
 				if vm.equal(tpl.Items[i], args[0]) {
 					return MakeInt(int64(i)), nil
 				}

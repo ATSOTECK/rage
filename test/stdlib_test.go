@@ -561,3 +561,129 @@ c = Counter([1, 1, 2])
 d = deque([1, 2, 3])
 `)
 }
+
+// =============================================================================
+// deque.index() Negative Index Normalization
+// =============================================================================
+
+func TestDequeIndexNegativeStart(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+result = d.index(2, -3)
+`)
+	// -3 normalizes to index 2; first 2 at or after index 2 is at index 3
+	assert.Equal(t, int64(3), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestDequeIndexNegativeStop(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+result = d.index(2, 0, -2)
+`)
+	// -2 normalizes to index 3; search [0, 3), first 2 is at index 1
+	assert.Equal(t, int64(1), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestDequeIndexNegativeStartNotFound(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import deque
+d = deque([1, 2, 3, 2, 1])
+d.index(5, -3)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "x not in deque")
+}
+
+// =============================================================================
+// deque.insert() Negative Index
+// =============================================================================
+
+func TestDequeInsertNegativeIndex(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3])
+d.insert(-1, 99)
+# insert(-1, 99) should insert before the last element: [1, 2, 99, 3]
+pos = d.index(99)
+`)
+	assert.Equal(t, int64(2), vm.GetGlobal("pos").(*runtime.PyInt).Value)
+}
+
+func TestDequeInsertNegativeIndexZero(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3])
+d.insert(-100, 99)
+# Very negative index clamps to 0: insert at front
+pos = d.index(99)
+`)
+	assert.Equal(t, int64(0), vm.GetGlobal("pos").(*runtime.PyInt).Value)
+}
+
+// =============================================================================
+// namedtuple() Field Name Validation
+// =============================================================================
+
+func TestNamedtupleNonStringFieldRaises(t *testing.T) {
+	vm := newStdlibVM(t)
+	code, errs := compiler.CompileSource(`
+from collections import namedtuple
+P = namedtuple('P', [1, 'x'])
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TypeError")
+	assert.Contains(t, err.Error(), "Field names must be strings")
+}
+
+func TestNamedtupleValidFieldsStillWork(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import namedtuple
+Point = namedtuple('Point', ['x', 'y'])
+p = Point(3, 4)
+result = p['x'] + p['y']
+`)
+	assert.Equal(t, int64(7), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+// =============================================================================
+// itertools.islice() Bounds Clamping
+// =============================================================================
+
+func TestIsliceStartBeyondLength(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([1, 2, 3], 10, 20))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 0, len(lst.Items))
+}
+
+func TestIsliceStopBeyondLength(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([1, 2, 3], 1, 100))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 2, len(lst.Items))
+	assert.Equal(t, int64(2), lst.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(3), lst.Items[1].(*runtime.PyInt).Value)
+}
+
+func TestIsliceNormalRange(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from itertools import islice
+result = list(islice([10, 20, 30, 40, 50], 1, 4))
+`)
+	lst := vm.GetGlobal("result").(*runtime.PyList)
+	assert.Equal(t, 3, len(lst.Items))
+	assert.Equal(t, int64(20), lst.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(30), lst.Items[1].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(40), lst.Items[2].(*runtime.PyInt).Value)
+}
