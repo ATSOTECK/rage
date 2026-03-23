@@ -533,3 +533,34 @@ r3 = math.isfinite(float("nan"))
 	assert.False(t, vm.GetGlobal("r2").(*runtime.PyBool).Value)
 	assert.False(t, vm.GetGlobal("r3").(*runtime.PyBool).Value)
 }
+
+// =============================================================================
+// LRU cache
+// =============================================================================
+
+func TestLruCacheBasic(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+result = fib(10)
+`)
+	assert.Equal(t, int64(55), vm.GetGlobal("result").(*runtime.PyInt).Value)
+}
+
+func TestLruCacheUnhashableTypeError(t *testing.T) {
+	runCodeExpectError(t, `
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def f(x):
+    return x
+
+f([1, 2, 3])
+`, "unhashable type")
+}

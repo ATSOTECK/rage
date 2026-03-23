@@ -645,7 +645,7 @@ func dequeInsert(vm *runtime.VM) int {
 	x := vm.Get(3)
 
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) >= deque.Maxlen {
-		vm.RaiseError("deque already at its maximum size")
+		vm.RaiseError("IndexError: deque already at its maximum size")
 		return 0
 	}
 

@@ -297,6 +297,11 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 					if err != nil {
 						return nil, err
 					}
+				case *PyStaticMethod:
+					_, err := vm.call(initFn.Func, allArgs, kwargs)
+					if err != nil {
+						return nil, err
+					}
 				}
 				break
 			}

@@ -3,8 +3,11 @@ package test
 import (
 	"testing"
 
+	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
+	"github.com/ATSOTECK/rage/internal/stdlib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // =====================================
@@ -495,6 +498,22 @@ od = collections.OrderedDict()
 	od := vm.GetGlobal("od")
 	_, ok := od.(*runtime.PyDict)
 	assert.True(t, ok, "OrderedDict should be a dict")
+}
+
+func TestCollectionsDequeInsertMaxlen(t *testing.T) {
+	// deque.insert() should raise IndexError when at maxlen
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+from collections import deque
+d = deque([1, 2, 3], 3)
+d.insert(1, 99)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "IndexError")
 }
 
 func TestFromCollectionsImport(t *testing.T) {
