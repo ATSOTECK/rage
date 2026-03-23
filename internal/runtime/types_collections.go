@@ -127,7 +127,9 @@ func (d *PyDict) removeOrderedKey(key Value, vm *VM) {
 // Keys returns keys in insertion order
 func (d *PyDict) Keys(vm *VM) []Value {
 	if len(d.orderedKeys) > 0 {
-		return d.orderedKeys
+		keys := make([]Value, len(d.orderedKeys))
+		copy(keys, d.orderedKeys)
+		return keys
 	}
 	// Fallback for dicts created without ordered tracking
 	var keys []Value
@@ -254,8 +256,19 @@ func (s *PySet) SetContains(value Value, vm *VM) bool {
 // SetRemove removes a value from the set
 func (s *PySet) SetRemove(value Value, vm *VM) bool {
 	if s.buckets == nil {
-		delete(s.Items, value)
-		return true
+		// Try direct identity match first
+		if _, ok := s.Items[value]; ok {
+			delete(s.Items, value)
+			return true
+		}
+		// Fall back to value equality (matching SetContains behavior)
+		for k := range s.Items {
+			if vm.equal(k, value) {
+				delete(s.Items, k)
+				return true
+			}
+		}
+		return false
 	}
 	h := vm.hashValueVM(value)
 	entries := s.buckets[h]
@@ -263,7 +276,9 @@ func (s *PySet) SetRemove(value Value, vm *VM) bool {
 		if vm.equal(e.value, value) {
 			s.buckets[h] = append(entries[:i], entries[i+1:]...)
 			s.size--
-			delete(s.Items, value)
+			// Use the original key from the bucket (not the argument) for Items cleanup,
+			// since Go map delete uses identity equality for pointer types
+			delete(s.Items, e.value)
 			return true
 		}
 	}

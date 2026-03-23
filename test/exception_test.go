@@ -363,3 +363,136 @@ finally:
 	assert.Equal(t, runtime.True, elseRan)
 	assert.Equal(t, runtime.True, finallyRan)
 }
+
+// =============================================================================
+// Exceptions from optimized paths must be catchable by try/except
+// =============================================================================
+
+func TestTryExceptCatchesOptimizedAddError(t *testing.T) {
+	vm := runCode(t, `
+class Nope:
+    x = 0
+caught = False
+try:
+    x = Nope() + Nope()
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestTryExceptCatchesOptimizedSubtractError(t *testing.T) {
+	vm := runCode(t, `
+class Nope:
+    x = 0
+caught = False
+try:
+    x = Nope() - Nope()
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestTryExceptCatchesOptimizedMultiplyError(t *testing.T) {
+	vm := runCode(t, `
+class Nope:
+    x = 0
+caught = False
+try:
+    x = Nope() * Nope()
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestTryExceptCatchesGetIterError(t *testing.T) {
+	vm := runCode(t, `
+caught = False
+try:
+    for x in 42:
+        pass
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestTryExceptCatchesLenError(t *testing.T) {
+	vm := runCode(t, `
+caught = False
+try:
+    x = len(42)
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestTryExceptCatchesIncrementError(t *testing.T) {
+	vm := runCode(t, `
+class Nope:
+    x = 0
+caught = False
+try:
+    x = Nope()
+    x += 1
+except:
+    caught = True
+`)
+	result := vm.GetGlobal("caught").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+// =============================================================================
+// Verify finally blocks still execute correctly
+// =============================================================================
+
+func TestFinallyBlockExecutesNormally(t *testing.T) {
+	vm := runCode(t, `
+finally_ran = False
+try:
+    x = 1
+finally:
+    finally_ran = True
+`)
+	result := vm.GetGlobal("finally_ran").(*runtime.PyBool)
+	assert.True(t, result.Value)
+}
+
+func TestFinallyBlockWithExceptionHandled(t *testing.T) {
+	vm := runCode(t, `
+finally_ran = False
+caught = False
+try:
+    raise ValueError("test")
+except ValueError:
+    caught = True
+finally:
+    finally_ran = True
+`)
+	assert.True(t, vm.GetGlobal("finally_ran").(*runtime.PyBool).Value)
+	assert.True(t, vm.GetGlobal("caught").(*runtime.PyBool).Value)
+}
+
+func TestNestedFinallyBlocks(t *testing.T) {
+	vm := runCode(t, `
+outer_finally = False
+inner_finally = False
+try:
+    try:
+        x = 1
+    finally:
+        inner_finally = True
+finally:
+    outer_finally = True
+`)
+	assert.True(t, vm.GetGlobal("outer_finally").(*runtime.PyBool).Value)
+	assert.True(t, vm.GetGlobal("inner_finally").(*runtime.PyBool).Value)
+}

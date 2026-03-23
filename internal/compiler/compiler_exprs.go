@@ -233,7 +233,11 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 			} else {
 				// For function-level, use cells/deref
 				sym := c.symbolTable.DefineInEnclosingScope(e.Target.Name)
-				c.emitArg(runtime.OpStoreDeref, sym.Index)
+				derefIdx := sym.Index
+				if sym.Scope == ScopeFree {
+					derefIdx = len(c.symbolTable.cellSyms) + sym.Index
+				}
+				c.emitArg(runtime.OpStoreDeref, derefIdx)
 			}
 		} else {
 			c.compileStore(e.Target)

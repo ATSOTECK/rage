@@ -654,3 +654,43 @@ if (a := (b := 10) + 5) > 10:
 	assert.Equal(t, int64(10), b.(*runtime.PyInt).Value)
 	assert.Equal(t, int64(15), result.(*runtime.PyInt).Value)
 }
+
+// =============================================================================
+// Walrus operator deref index in comprehensions
+// =============================================================================
+
+func TestWalrusInListCompDerefIndex(t *testing.T) {
+	vm := runCode(t, `
+def func():
+    _ = [y := x for x in range(5)]
+    return y
+val = func()
+`)
+	result := vm.GetGlobal("val").(*runtime.PyInt)
+	assert.Equal(t, int64(4), result.Value)
+}
+
+func TestWalrusInListCompDerefBothAccessible(t *testing.T) {
+	vm := runCode(t, `
+def func():
+    vals = [y := x * 2 for x in range(3)]
+    return (vals, y)
+result = func()
+`)
+	result := vm.GetGlobal("result").(*runtime.PyTuple)
+	list := result.Items[0].(*runtime.PyList)
+	assert.Equal(t, 3, len(list.Items))
+	assert.Equal(t, int64(0), list.Items[0].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(2), list.Items[1].(*runtime.PyInt).Value)
+	assert.Equal(t, int64(4), list.Items[2].(*runtime.PyInt).Value)
+	y := result.Items[1].(*runtime.PyInt)
+	assert.Equal(t, int64(4), y.Value)
+}
+
+func TestWalrusModuleLevelDerefIndex(t *testing.T) {
+	vm := runCode(t, `
+result = [z := x for x in range(4)]
+`)
+	z := vm.GetGlobal("z").(*runtime.PyInt)
+	assert.Equal(t, int64(3), z.Value)
+}

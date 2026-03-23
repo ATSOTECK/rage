@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,7 @@ func TestTryToInt(t *testing.T) {
 		{"string invalid", &PyString{Value: "abc"}, 0, true},
 		{"string float", &PyString{Value: "3.14"}, 0, true},
 		{"none error", None, 0, true},
+		{"big int overflow", &PyInt{BigValue: new(big.Int).Exp(big.NewInt(10), big.NewInt(30), nil)}, 0, true},
 	}
 
 	for _, tt := range tests {
@@ -83,6 +85,7 @@ func TestTryToFloat(t *testing.T) {
 		{"string empty", &PyString{Value: ""}, 0, true, false, 0},
 		{"string invalid", &PyString{Value: "abc"}, 0, true, false, 0},
 		{"none error", None, 0, true, false, 0},
+		{"big int to float", &PyInt{BigValue: big.NewInt(1000000)}, 1e6, false, false, 0},
 	}
 
 	for _, tt := range tests {

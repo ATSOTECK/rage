@@ -307,6 +307,11 @@ func (vm *VM) run() (Value, error) {
 				// Fallback for non-int
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -322,6 +327,11 @@ func (vm *VM) run() (Value, error) {
 			} else {
 				result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -337,6 +347,11 @@ func (vm *VM) run() (Value, error) {
 				// Fallback
 				result, err := vm.unaryOp(OpUnaryNegative, frame.Locals[arg])
 				if err != nil {
+					if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
 					return nil, err
 				}
 				frame.Locals[arg] = result
@@ -358,6 +373,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, localVal, constVal)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Locals[localIdx] = result
@@ -392,6 +412,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, localVal, addend)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Locals[arg] = result
@@ -457,6 +482,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -476,6 +506,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(OpBinarySubtract, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -495,6 +530,11 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.binaryOp(OpBinaryMultiply, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -603,6 +643,11 @@ func (vm *VM) run() (Value, error) {
 			// Fallback
 			result, err := vm.binaryOp(OpBinaryAdd, a, b)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			frame.Stack[frame.SP] = result
@@ -795,7 +840,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(list.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenString:
@@ -805,7 +856,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(str.Value)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenTuple:
@@ -815,7 +872,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(tup.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenDict:
@@ -825,7 +888,13 @@ func (vm *VM) run() (Value, error) {
 				frame.Stack[frame.SP] = MakeInt(int64(len(dict.Items)))
 				frame.SP++
 			} else {
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 
 		case OpLenGeneric:
@@ -851,18 +920,41 @@ func (vm *VM) run() (Value, error) {
 				// Check for __len__ method
 				if result, found, err := vm.callDunder(v, "__len__"); found {
 					if err != nil {
+						if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
 						return nil, err
 					}
 					if i, ok := result.(*PyInt); ok {
 						length = i.Value
 					} else {
-						return nil, fmt.Errorf("__len__() should return an integer")
+						lenErr := fmt.Errorf("__len__() should return an integer")
+						if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+							return nil, handleErr
+						} else if handled {
+							continue
+						}
+						return nil, lenErr
 					}
 				} else {
-					return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+					lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+					if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+						return nil, handleErr
+					} else if handled {
+						continue
+					}
+					return nil, lenErr
 				}
 			default:
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
+				return nil, lenErr
 			}
 			frame.Stack[frame.SP] = MakeInt(length)
 			frame.SP++
@@ -1395,6 +1487,11 @@ func (vm *VM) run() (Value, error) {
 			obj := vm.pop()
 			iter, err := vm.getIter(obj)
 			if err != nil {
+				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
+					return nil, handleErr
+				} else if handled {
+					continue
+				}
 				return nil, err
 			}
 			vm.push(iter)
@@ -2505,8 +2602,9 @@ func (vm *VM) run() (Value, error) {
 		case OpEndFinally:
 			// End finally block - re-raise exception if one was active
 			// Pop the handler stack entry that was pushed when entering finally
-			if len(vm.excHandlerStack) > 0 {
-				vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+			if n := len(vm.excHandlerStack); n > 0 {
+				vm.excHandlerStack[n-1] = nil // Clear reference for GC
+				vm.excHandlerStack = vm.excHandlerStack[:n-1]
 			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err
