@@ -390,7 +390,7 @@ func initBuiltin(vm *runtime.VM, b Builtin) {
 	case BuiltinEval:
 		vm.RegisterBuiltin("eval", runtime.BuiltinEval)
 	case BuiltinOpen:
-		vm.RegisterBuiltin("open", stdlib.BuiltinOpen)
+		vm.SetBuiltin("open", stdlib.BuiltinOpen)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // initBuiltinsFunctions registers builtin functions: print, range, enumerate, zip,
@@ -34,19 +35,51 @@ func (vm *VM) initBuiltinsFunctions() {
 					return nil, fmt.Errorf("end must be None or a string, not %s", vm.typeName(v))
 				}
 			}
+			flush := false
 			if v, ok := kwargs["flush"]; ok {
-				_ = v // accepted but no-op (stdout is unbuffered)
-			}
-			if v, ok := kwargs["file"]; ok {
-				_ = v // accepted but ignored (no file I/O yet)
-			}
-			for i, arg := range args {
-				if i > 0 {
-					fmt.Print(sep)
+				if b, ok := v.(*PyBool); ok && b.Value {
+					flush = true
 				}
-				fmt.Print(vm.str(arg))
 			}
-			fmt.Print(end)
+
+			var fileObj Value
+			if v, ok := kwargs["file"]; ok && !IsNone(v) {
+				fileObj = v
+			}
+
+			if fileObj != nil {
+				// Write to file object via its write() method
+				writeMethod, err := vm.GetAttr(fileObj, "write")
+				if err != nil {
+					return nil, fmt.Errorf("TypeError: argument 'file' must have a 'write' attribute")
+				}
+				var buf strings.Builder
+				for i, arg := range args {
+					if i > 0 {
+						buf.WriteString(sep)
+					}
+					buf.WriteString(vm.str(arg))
+				}
+				buf.WriteString(end)
+				_, err = vm.Call(writeMethod, []Value{NewString(buf.String())}, nil)
+				if err != nil {
+					return nil, err
+				}
+				if flush {
+					if flushMethod, err := vm.GetAttr(fileObj, "flush"); err == nil {
+						_, _ = vm.Call(flushMethod, nil, nil)
+					}
+				}
+			} else {
+				// Write to stdout (default)
+				for i, arg := range args {
+					if i > 0 {
+						fmt.Print(sep)
+					}
+					fmt.Print(vm.str(arg))
+				}
+				fmt.Print(end)
+			}
 			return None, nil
 		},
 	}
