@@ -766,7 +766,7 @@ func fileTruncate(vm *runtime.VM) int {
 	// Seek underlying file to logical position and reset reader
 	// so tell() returns the correct position after truncate
 	if f.reader != nil {
-		f.file.Seek(logicalPos, io.SeekStart)
+		_, _ = f.file.Seek(logicalPos, io.SeekStart)
 		f.reader.Reset(f.file)
 	}
 
