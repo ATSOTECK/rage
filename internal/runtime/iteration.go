@@ -93,7 +93,9 @@ func (vm *VM) iterNext(iter Value) (Value, bool, error) {
 				return nil, true, nil
 			}
 			// Also check for StopIteration from Go function calls (plain error strings)
-			if strings.HasPrefix(err.Error(), "StopIteration:") {
+			errStr := err.Error()
+			if strings.HasPrefix(errStr, "StopIteration:") || errStr == "StopIteration" ||
+				strings.HasPrefix(errStr, "RuntimeError: StopIteration") {
 				vm.currentException = nil // Clear so it doesn't propagate
 				return nil, true, nil
 			}

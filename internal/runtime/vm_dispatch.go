@@ -2609,7 +2609,16 @@ func (vm *VM) run() (Value, error) {
 			case *PyFunction:
 				result, err = vm.callFunction(fn, []Value{cm, excType, excVal, excTb}, nil)
 			case *PyBuiltinFunc:
-				result, err = fn.Fn([]Value{cm, excType, excVal, excTb}, nil)
+				if fn.Bound {
+					// Already bound — don't pass cm again
+					result, err = fn.Fn([]Value{excType, excVal, excTb}, nil)
+				} else {
+					result, err = fn.Fn([]Value{cm, excType, excVal, excTb}, nil)
+				}
+			case *PyGoFunc:
+				// Bound Go function (e.g., from UserData metatable)
+				// Already bound — pass exc args only
+				result, err = vm.callGoFunction(fn, []Value{excType, excVal, excTb})
 			default:
 				return nil, fmt.Errorf("TypeError: __exit__ is not callable")
 			}

@@ -25,4 +25,7 @@ func InitAllModules() {
 	InitCopyModule()
 	InitOperatorModule()
 	InitEnumModule()
+	InitHeapqModule()
+	InitBisectModule()
+	InitContextlibModule()
 }

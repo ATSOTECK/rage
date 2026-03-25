@@ -2,6 +2,7 @@ package stdlib
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -82,6 +83,8 @@ func InitIOModule() {
 			"close":    fileClose,
 			"flush":    fileFlush,
 			"fileno":   fileFileno,
+			"truncate": fileTruncate,
+			"isatty":   fileIsatty,
 			"readable": fileReadable,
 			"writable": fileWritable,
 			"seekable": fileSeekable,
@@ -104,16 +107,78 @@ func InitIOModule() {
 	}
 	runtime.RegisterTypeMetatable("file", fileMT)
 
-	// Register open() as a pending builtin
-	runtime.RegisterPendingBuiltin("open", builtinOpen)
+	// Register StringIO type metatable
+	stringIOMT := &runtime.TypeMetatable{
+		Name: "StringIO",
+		Methods: map[string]runtime.GoFunction{
+			"read":      stringIORead,
+			"readline":  stringIOReadline,
+			"readlines": stringIOReadlines,
+			"write":     stringIOWrite,
+			"writelines": stringIOWritelines,
+			"seek":      stringIOSeek,
+			"tell":      stringIOTell,
+			"getvalue":  stringIOGetvalue,
+			"truncate":  stringIOTruncate,
+			"close":     stringIOClose,
+			"flush":     stringIOFlush,
+			"isatty":    stringIOIsatty,
+			"readable":  stringIOReadable,
+			"writable":  stringIOWritable,
+			"seekable":  stringIOSeekable,
+			"__enter__": stringIOEnter,
+			"__exit__":  stringIOExit,
+			"__iter__":  stringIOIter,
+			"__next__":  stringIONext,
+		},
+		Properties: map[string]runtime.GoFunction{
+			"closed": stringIOClosed,
+		},
+	}
+	runtime.RegisterTypeMetatable("StringIO", stringIOMT)
 
-	// Also register an io module with constants
+	// Register BytesIO type metatable
+	bytesIOMT := &runtime.TypeMetatable{
+		Name: "BytesIO",
+		Methods: map[string]runtime.GoFunction{
+			"read":      bytesIORead,
+			"readline":  bytesIOReadline,
+			"readlines": bytesIOReadlines,
+			"write":     bytesIOWrite,
+			"writelines": bytesIOWritelines,
+			"seek":      bytesIOSeek,
+			"tell":      bytesIOTell,
+			"getvalue":  bytesIOGetvalue,
+			"truncate":  bytesIOTruncate,
+			"close":     bytesIOClose,
+			"flush":     bytesIOFlush,
+			"isatty":    bytesIOIsatty,
+			"readable":  bytesIOReadable,
+			"writable":  bytesIOWritable,
+			"seekable":  bytesIOSeekable,
+			"__enter__": bytesIOEnter,
+			"__exit__":  bytesIOExit,
+			"__iter__":  bytesIOIter,
+			"__next__":  bytesIONext,
+		},
+		Properties: map[string]runtime.GoFunction{
+			"closed": bytesIOClosed,
+		},
+	}
+	runtime.RegisterTypeMetatable("BytesIO", bytesIOMT)
+
+	// Note: open() is NOT registered here — neither as a pending builtin nor in
+	// the io module dict. It must be explicitly enabled via rage.WithFileIO() or
+	// rage.WithBuiltin(rage.BuiltinOpen) for security.
+
+	// Register the io module with constants and StringIO/BytesIO constructors
 	runtime.NewModuleBuilder("io").
 		Doc("Core tools for working with streams.").
 		Const("SEEK_SET", runtime.NewInt(0)).
 		Const("SEEK_CUR", runtime.NewInt(1)).
 		Const("SEEK_END", runtime.NewInt(2)).
-		Func("open", builtinOpen).
+		Const("StringIO", stringIOConstructor).
+		Const("BytesIO", bytesIOConstructor).
 		Register()
 }
 
@@ -165,47 +230,76 @@ func parseMode(mode string) (readable, writable, binary, append bool, flag int, 
 	return
 }
 
-// builtinOpen implements the open() builtin function
+// BuiltinOpen is the open() builtin function as a *PyBuiltinFunc so it supports kwargs.
 // open(file, mode='r', encoding='utf-8') -> file object
-func builtinOpen(vm *runtime.VM) int {
-	nargs := vm.GetTop()
-	if nargs < 1 {
-		vm.RaiseError("open() missing required argument: 'file'")
-		return 0
-	}
+var BuiltinOpen = &runtime.PyBuiltinFunc{
+	Name: "open",
+	Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+		if len(args) < 1 {
+			return nil, fmt.Errorf("TypeError: open() missing required argument: 'file'")
+		}
 
-	filename := vm.CheckString(1)
+		fileArg, ok := args[0].(*runtime.PyString)
+		if !ok {
+			return nil, fmt.Errorf("TypeError: expected str for file, got %T", args[0])
+		}
+		filename := fileArg.Value
 
-	mode := "r"
-	if nargs >= 2 && !runtime.IsNone(vm.Get(2)) {
-		mode = vm.CheckString(2)
-	}
+		mode := "r"
+		if len(args) >= 2 && !runtime.IsNone(args[1]) {
+			if s, ok := args[1].(*runtime.PyString); ok {
+				mode = s.Value
+			} else {
+				return nil, fmt.Errorf("TypeError: expected str for mode, got %T", args[1])
+			}
+		}
+		if v, ok := kwargs["mode"]; ok && !runtime.IsNone(v) {
+			if s, ok := v.(*runtime.PyString); ok {
+				mode = s.Value
+			} else {
+				return nil, fmt.Errorf("TypeError: expected str for mode, got %T", v)
+			}
+		}
 
-	encoding := "utf-8"
-	if nargs >= 3 && !runtime.IsNone(vm.Get(3)) {
-		encoding = vm.CheckString(3)
-	}
+		encoding := "utf-8"
+		if len(args) >= 3 && !runtime.IsNone(args[2]) {
+			if s, ok := args[2].(*runtime.PyString); ok {
+				encoding = s.Value
+			} else {
+				return nil, fmt.Errorf("TypeError: expected str for encoding, got %T", args[2])
+			}
+		}
+		if v, ok := kwargs["encoding"]; ok && !runtime.IsNone(v) {
+			if s, ok := v.(*runtime.PyString); ok {
+				encoding = s.Value
+			} else {
+				return nil, fmt.Errorf("TypeError: expected str for encoding, got %T", v)
+			}
+		}
 
+		return openFile(filename, mode, encoding)
+	},
+}
+
+// openFile is the shared implementation for open().
+func openFile(filename, mode, encoding string) (runtime.Value, error) {
 	// Parse mode
 	readable, writable, binary, _, flag, err := parseMode(mode)
 	if err != nil {
-		vm.RaiseError("ValueError: %v", err)
-		return 0
+		return nil, fmt.Errorf("ValueError: %v", err)
 	}
 
 	// Open the file
 	file, err := os.OpenFile(filename, flag, 0644)
 	if err != nil {
 		if os.IsNotExist(err) {
-			vm.RaiseError("FileNotFoundError: [Errno 2] No such file or directory: '%s'", filename)
+			return nil, fmt.Errorf("FileNotFoundError: [Errno 2] No such file or directory: '%s'", filename)
 		} else if os.IsPermission(err) {
-			vm.RaiseError("PermissionError: [Errno 13] Permission denied: '%s'", filename)
+			return nil, fmt.Errorf("PermissionError: [Errno 13] Permission denied: '%s'", filename)
 		} else if os.IsExist(err) {
-			vm.RaiseError("FileExistsError: [Errno 17] File exists: '%s'", filename)
-		} else {
-			vm.RaiseError("OSError: %v", err)
+			return nil, fmt.Errorf("FileExistsError: [Errno 17] File exists: '%s'", filename)
 		}
-		return 0
+		return nil, fmt.Errorf("OSError: %v", err)
 	}
 
 	pyFile := &PyFile{
@@ -231,8 +325,7 @@ func builtinOpen(vm *runtime.VM) int {
 	ud := runtime.NewUserData(pyFile)
 	ud.Metatable = runtime.NewDict()
 	ud.Metatable.Items[runtime.NewString("__type__")] = runtime.NewString("file")
-	vm.Push(ud)
-	return 1
+	return ud, nil
 }
 
 // Helper to extract PyFile from userdata
@@ -623,6 +716,88 @@ func fileFlush(vm *runtime.VM) int {
 	return 0
 }
 
+// file.truncate([size]) -> int (new file size)
+func fileTruncate(vm *runtime.VM) int {
+	f, ok := getFile(vm, 1)
+	if !ok {
+		return 0
+	}
+
+	if f.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	if !f.writable {
+		vm.RaiseError("io.UnsupportedOperation: File not open for writing")
+		return 0
+	}
+
+	// Flush any buffered writes first
+	if f.writer != nil {
+		if err := f.writer.Flush(); err != nil {
+			vm.RaiseError("OSError: %v", err)
+			return 0
+		}
+	}
+
+	// Compute the current logical position (before truncate)
+	logicalPos, err := f.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		vm.RaiseError("OSError: %v", err)
+		return 0
+	}
+	if f.reader != nil {
+		logicalPos -= int64(f.reader.Buffered())
+	}
+
+	var size int64
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		size = vm.CheckInt(2)
+	} else {
+		// Default: truncate at current position
+		size = logicalPos
+	}
+
+	if err := f.file.Truncate(size); err != nil {
+		vm.RaiseError("OSError: %v", err)
+		return 0
+	}
+
+	// Seek underlying file to logical position and reset reader
+	// so tell() returns the correct position after truncate
+	if f.reader != nil {
+		_, _ = f.file.Seek(logicalPos, io.SeekStart)
+		f.reader.Reset(f.file)
+	}
+
+	vm.Push(runtime.NewInt(size))
+	return 1
+}
+
+// file.isatty() -> bool
+func fileIsatty(vm *runtime.VM) int {
+	f, ok := getFile(vm, 1)
+	if !ok {
+		return 0
+	}
+
+	if f.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+
+	// Check if the file descriptor refers to a terminal
+	stat, err := f.file.Stat()
+	if err != nil {
+		vm.Push(runtime.False)
+		return 1
+	}
+	// Regular files and most non-device files are not ttys
+	isTerminal := (stat.Mode() & os.ModeCharDevice) != 0
+	vm.Push(runtime.NewBool(isTerminal))
+	return 1
+}
+
 // file.fileno() -> int
 func fileFileno(vm *runtime.VM) int {
 	f, ok := getFile(vm, 1)
@@ -783,5 +958,881 @@ func fileClosed(vm *runtime.VM) int {
 		return 0
 	}
 	vm.Push(runtime.NewBool(f.closed))
+	return 1
+}
+
+// =====================================
+// StringIO — in-memory text stream
+// =====================================
+
+// PyStringIO is an in-memory text stream.
+type PyStringIO struct {
+	buf    []byte
+	pos    int
+	closed bool
+}
+
+func (s *PyStringIO) Type() string   { return "StringIO" }
+func (s *PyStringIO) String() string { return "<_io.StringIO>" }
+
+func getStringIO(vm *runtime.VM, argNum int) (*PyStringIO, bool) {
+	ud := vm.ToUserData(argNum)
+	if ud == nil {
+		vm.RaiseError("expected StringIO object")
+		return nil, false
+	}
+	s, ok := ud.Value.(*PyStringIO)
+	if !ok {
+		vm.RaiseError("expected StringIO object")
+		return nil, false
+	}
+	return s, true
+}
+
+func newStringIOUserData(s *PyStringIO) *runtime.PyUserData {
+	ud := runtime.NewUserData(s)
+	ud.Metatable = runtime.NewDict()
+	ud.Metatable.Items[runtime.NewString("__type__")] = runtime.NewString("StringIO")
+	return ud
+}
+
+var stringIOConstructor = &runtime.PyBuiltinFunc{
+	Name: "StringIO",
+	Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+		s := &PyStringIO{}
+		if len(args) >= 1 && !runtime.IsNone(args[0]) {
+			str, ok := args[0].(*runtime.PyString)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: initial_value must be str, not %T", args[0])
+			}
+			s.buf = []byte(str.Value)
+		}
+		return newStringIOUserData(s), nil
+	},
+}
+
+func stringIORead(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	size := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		size = vm.CheckInt(2)
+	}
+	// Clamp read position to buffer length (may be past end after seek)
+	readPos := s.pos
+	if readPos > len(s.buf) {
+		readPos = len(s.buf)
+	}
+	if size < 0 {
+		// Read all remaining
+		data := s.buf[readPos:]
+		if readPos < len(s.buf) {
+			s.pos = len(s.buf)
+		}
+		// else: keep pos as-is (past end) — CPython preserves overseek position
+		vm.Push(runtime.NewString(string(data)))
+	} else {
+		end := readPos + int(size)
+		if end > len(s.buf) {
+			end = len(s.buf)
+		}
+		if end > readPos {
+			s.pos = end
+		}
+		// else: pos unchanged if nothing read
+		data := s.buf[readPos:end]
+		vm.Push(runtime.NewString(string(data)))
+	}
+	return 1
+}
+
+func stringIOReadline(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	limit := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		limit = vm.CheckInt(2)
+	}
+	if s.pos >= len(s.buf) {
+		vm.Push(runtime.NewString(""))
+		return 1
+	}
+	// Find next newline
+	rest := s.buf[s.pos:]
+	idx := bytes.IndexByte(rest, '\n')
+	var line []byte
+	if idx >= 0 {
+		line = rest[:idx+1]
+	} else {
+		line = rest
+	}
+	if limit >= 0 && int64(len(line)) > limit {
+		line = line[:limit]
+	}
+	s.pos += len(line)
+	vm.Push(runtime.NewString(string(line)))
+	return 1
+}
+
+func stringIOReadlines(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	hint := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		hint = vm.CheckInt(2)
+	}
+	var lines []runtime.Value
+	var bytesRead int64
+	for s.pos < len(s.buf) {
+		rest := s.buf[s.pos:]
+		idx := bytes.IndexByte(rest, '\n')
+		var line []byte
+		if idx >= 0 {
+			line = rest[:idx+1]
+		} else {
+			line = rest
+		}
+		s.pos += len(line)
+		lines = append(lines, runtime.NewString(string(line)))
+		bytesRead += int64(len(line))
+		if hint >= 0 && bytesRead >= hint {
+			break
+		}
+	}
+	vm.Push(runtime.NewList(lines))
+	return 1
+}
+
+func stringIOWrite(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	arg := vm.Get(2)
+	str, ok2 := arg.(*runtime.PyString)
+	if !ok2 {
+		vm.RaiseError("TypeError: string argument expected, got '%s'", getTypeName(arg))
+		return 0
+	}
+	data := []byte(str.Value)
+	n := len(data)
+
+	// If writing at current position, may need to expand buffer
+	if s.pos == len(s.buf) {
+		s.buf = append(s.buf, data...)
+	} else {
+		// Overwrite from current position, extending if necessary
+		end := s.pos + n
+		if end > len(s.buf) {
+			s.buf = append(s.buf[:s.pos], data...)
+		} else {
+			copy(s.buf[s.pos:end], data)
+		}
+	}
+	s.pos += n
+	vm.Push(runtime.NewInt(int64(n)))
+	return 1
+}
+
+func stringIOWritelines(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	arg := vm.Get(2)
+	list, ok2 := arg.(*runtime.PyList)
+	if !ok2 {
+		vm.RaiseError("TypeError: writelines() argument must be an iterable of strings")
+		return 0
+	}
+	for _, item := range list.Items {
+		str, ok3 := item.(*runtime.PyString)
+		if !ok3 {
+			vm.RaiseError("TypeError: writelines() argument must be an iterable of strings")
+			return 0
+		}
+		data := []byte(str.Value)
+		if s.pos == len(s.buf) {
+			s.buf = append(s.buf, data...)
+		} else {
+			end := s.pos + len(data)
+			if end > len(s.buf) {
+				s.buf = append(s.buf[:s.pos], data...)
+			} else {
+				copy(s.buf[s.pos:end], data)
+			}
+		}
+		s.pos += len(data)
+	}
+	return 0
+}
+
+func stringIOSeek(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	offset := int(vm.CheckInt(2))
+	whence := 0
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		whence = int(vm.CheckInt(3))
+	}
+	var newPos int
+	switch whence {
+	case 0: // SEEK_SET
+		newPos = offset
+	case 1: // SEEK_CUR
+		newPos = s.pos + offset
+	case 2: // SEEK_END
+		newPos = len(s.buf) + offset
+	default:
+		vm.RaiseError("ValueError: invalid whence (%d, should be 0, 1 or 2)", whence)
+		return 0
+	}
+	if newPos < 0 {
+		vm.RaiseError("ValueError: Negative seek position %d", newPos)
+		return 0
+	}
+	s.pos = newPos
+	vm.Push(runtime.NewInt(int64(newPos)))
+	return 1
+}
+
+func stringIOTell(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	vm.Push(runtime.NewInt(int64(s.pos)))
+	return 1
+}
+
+func stringIOGetvalue(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	vm.Push(runtime.NewString(string(s.buf)))
+	return 1
+}
+
+func stringIOTruncate(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	size := int64(s.pos)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		size = vm.CheckInt(2)
+	}
+	if size < 0 {
+		vm.RaiseError("ValueError: Negative size value %d", size)
+		return 0
+	}
+	if int(size) < len(s.buf) {
+		s.buf = s.buf[:size]
+	} else {
+		// Pad with zero bytes if size exceeds current length
+		for len(s.buf) < int(size) {
+			s.buf = append(s.buf, 0)
+		}
+	}
+	vm.Push(runtime.NewInt(size))
+	return 1
+}
+
+func stringIOClose(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	s.closed = true
+	return 0
+}
+
+func stringIOFlush(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	return 0 // No-op for in-memory streams
+}
+
+func stringIOIsatty(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	vm.Push(runtime.False)
+	return 1
+}
+
+func stringIOReadable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func stringIOWritable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func stringIOSeekable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func stringIOClosed(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	vm.Push(runtime.NewBool(s.closed))
+	return 1
+}
+
+func stringIOEnter(vm *runtime.VM) int {
+	ud := vm.Get(1)
+	vm.Push(ud)
+	return 1
+}
+
+func stringIOExit(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	s.closed = true
+	vm.Push(runtime.False)
+	return 1
+}
+
+func stringIOIter(vm *runtime.VM) int {
+	ud := vm.Get(1)
+	vm.Push(ud)
+	return 1
+}
+
+func stringIONext(vm *runtime.VM) int {
+	s, ok := getStringIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if s.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	if s.pos >= len(s.buf) {
+		vm.RaiseError("StopIteration")
+		return 0
+	}
+	rest := s.buf[s.pos:]
+	idx := bytes.IndexByte(rest, '\n')
+	var line []byte
+	if idx >= 0 {
+		line = rest[:idx+1]
+	} else {
+		line = rest
+	}
+	s.pos += len(line)
+	vm.Push(runtime.NewString(string(line)))
+	return 1
+}
+
+// =====================================
+// BytesIO — in-memory binary stream
+// =====================================
+
+// PyBytesIO is an in-memory binary stream.
+type PyBytesIO struct {
+	buf    []byte
+	pos    int
+	closed bool
+}
+
+func (b *PyBytesIO) Type() string   { return "BytesIO" }
+func (b *PyBytesIO) String() string { return "<_io.BytesIO>" }
+
+func getBytesIO(vm *runtime.VM, argNum int) (*PyBytesIO, bool) {
+	ud := vm.ToUserData(argNum)
+	if ud == nil {
+		vm.RaiseError("expected BytesIO object")
+		return nil, false
+	}
+	b, ok := ud.Value.(*PyBytesIO)
+	if !ok {
+		vm.RaiseError("expected BytesIO object")
+		return nil, false
+	}
+	return b, true
+}
+
+func newBytesIOUserData(b *PyBytesIO) *runtime.PyUserData {
+	ud := runtime.NewUserData(b)
+	ud.Metatable = runtime.NewDict()
+	ud.Metatable.Items[runtime.NewString("__type__")] = runtime.NewString("BytesIO")
+	return ud
+}
+
+var bytesIOConstructor = &runtime.PyBuiltinFunc{
+	Name: "BytesIO",
+	Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+		b := &PyBytesIO{}
+		if len(args) >= 1 && !runtime.IsNone(args[0]) {
+			switch v := args[0].(type) {
+			case *runtime.PyBytes:
+				b.buf = make([]byte, len(v.Value))
+				copy(b.buf, v.Value)
+			case *runtime.PyString:
+				b.buf = []byte(v.Value)
+			default:
+				return nil, fmt.Errorf("TypeError: a bytes-like object is required, not '%s'", getTypeName(args[0]))
+			}
+		}
+		return newBytesIOUserData(b), nil
+	},
+}
+
+func bytesIORead(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	size := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		size = vm.CheckInt(2)
+	}
+	// Clamp read position to buffer length (may be past end after seek)
+	readPos := b.pos
+	if readPos > len(b.buf) {
+		readPos = len(b.buf)
+	}
+	if size < 0 {
+		data := make([]byte, len(b.buf)-readPos)
+		copy(data, b.buf[readPos:])
+		if readPos < len(b.buf) {
+			b.pos = len(b.buf)
+		}
+		vm.Push(runtime.NewBytes(data))
+	} else {
+		end := readPos + int(size)
+		if end > len(b.buf) {
+			end = len(b.buf)
+		}
+		data := make([]byte, end-readPos)
+		copy(data, b.buf[readPos:end])
+		if end > readPos {
+			b.pos = end
+		}
+		vm.Push(runtime.NewBytes(data))
+	}
+	return 1
+}
+
+func bytesIOReadline(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	limit := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		limit = vm.CheckInt(2)
+	}
+	if b.pos >= len(b.buf) {
+		vm.Push(runtime.NewBytes(nil))
+		return 1
+	}
+	rest := b.buf[b.pos:]
+	idx := bytes.IndexByte(rest, '\n')
+	var line []byte
+	if idx >= 0 {
+		line = rest[:idx+1]
+	} else {
+		line = rest
+	}
+	if limit >= 0 && int64(len(line)) > limit {
+		line = line[:limit]
+	}
+	result := make([]byte, len(line))
+	copy(result, line)
+	b.pos += len(line)
+	vm.Push(runtime.NewBytes(result))
+	return 1
+}
+
+func bytesIOReadlines(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	hint := int64(-1)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		hint = vm.CheckInt(2)
+	}
+	var lines []runtime.Value
+	var bytesRead int64
+	for b.pos < len(b.buf) {
+		rest := b.buf[b.pos:]
+		idx := bytes.IndexByte(rest, '\n')
+		var line []byte
+		if idx >= 0 {
+			line = rest[:idx+1]
+		} else {
+			line = rest
+		}
+		result := make([]byte, len(line))
+		copy(result, line)
+		b.pos += len(line)
+		lines = append(lines, runtime.NewBytes(result))
+		bytesRead += int64(len(line))
+		if hint >= 0 && bytesRead >= hint {
+			break
+		}
+	}
+	vm.Push(runtime.NewList(lines))
+	return 1
+}
+
+func bytesIOWrite(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	arg := vm.Get(2)
+	var data []byte
+	switch v := arg.(type) {
+	case *runtime.PyBytes:
+		data = v.Value
+	case *runtime.PyString:
+		data = []byte(v.Value)
+	default:
+		vm.RaiseError("TypeError: a bytes-like object is required, not '%s'", getTypeName(arg))
+		return 0
+	}
+	n := len(data)
+	if b.pos == len(b.buf) {
+		b.buf = append(b.buf, data...)
+	} else {
+		end := b.pos + n
+		if end > len(b.buf) {
+			b.buf = append(b.buf[:b.pos], data...)
+		} else {
+			copy(b.buf[b.pos:end], data)
+		}
+	}
+	b.pos += n
+	vm.Push(runtime.NewInt(int64(n)))
+	return 1
+}
+
+func bytesIOWritelines(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	arg := vm.Get(2)
+	list, ok2 := arg.(*runtime.PyList)
+	if !ok2 {
+		vm.RaiseError("TypeError: writelines() argument must be an iterable of bytes")
+		return 0
+	}
+	for _, item := range list.Items {
+		var data []byte
+		switch v := item.(type) {
+		case *runtime.PyBytes:
+			data = v.Value
+		case *runtime.PyString:
+			data = []byte(v.Value)
+		default:
+			vm.RaiseError("TypeError: a bytes-like object is required, not '%s'", getTypeName(item))
+			return 0
+		}
+		if b.pos == len(b.buf) {
+			b.buf = append(b.buf, data...)
+		} else {
+			end := b.pos + len(data)
+			if end > len(b.buf) {
+				b.buf = append(b.buf[:b.pos], data...)
+			} else {
+				copy(b.buf[b.pos:end], data)
+			}
+		}
+		b.pos += len(data)
+	}
+	return 0
+}
+
+func bytesIOSeek(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	offset := int(vm.CheckInt(2))
+	whence := 0
+	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
+		whence = int(vm.CheckInt(3))
+	}
+	var newPos int
+	switch whence {
+	case 0:
+		newPos = offset
+		if newPos < 0 {
+			vm.RaiseError("ValueError: Negative seek position %d", newPos)
+			return 0
+		}
+	case 1:
+		newPos = b.pos + offset
+		if newPos < 0 {
+			newPos = 0
+		}
+	case 2:
+		newPos = len(b.buf) + offset
+		if newPos < 0 {
+			newPos = 0
+		}
+	default:
+		vm.RaiseError("ValueError: invalid whence (%d, should be 0, 1 or 2)", whence)
+		return 0
+	}
+	b.pos = newPos
+	vm.Push(runtime.NewInt(int64(newPos)))
+	return 1
+}
+
+func bytesIOTell(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	vm.Push(runtime.NewInt(int64(b.pos)))
+	return 1
+}
+
+func bytesIOGetvalue(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	result := make([]byte, len(b.buf))
+	copy(result, b.buf)
+	vm.Push(runtime.NewBytes(result))
+	return 1
+}
+
+func bytesIOTruncate(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	size := int64(b.pos)
+	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
+		size = vm.CheckInt(2)
+	}
+	if size < 0 {
+		vm.RaiseError("ValueError: Negative size value %d", size)
+		return 0
+	}
+	if int(size) < len(b.buf) {
+		b.buf = b.buf[:size]
+	} else {
+		for len(b.buf) < int(size) {
+			b.buf = append(b.buf, 0)
+		}
+	}
+	vm.Push(runtime.NewInt(size))
+	return 1
+}
+
+func bytesIOClose(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	b.closed = true
+	return 0
+}
+
+func bytesIOFlush(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	return 0
+}
+
+func bytesIOIsatty(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	vm.Push(runtime.False)
+	return 1
+}
+
+func bytesIOReadable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func bytesIOWritable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func bytesIOSeekable(vm *runtime.VM) int {
+	vm.Push(runtime.True)
+	return 1
+}
+
+func bytesIOClosed(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	vm.Push(runtime.NewBool(b.closed))
+	return 1
+}
+
+func bytesIOEnter(vm *runtime.VM) int {
+	ud := vm.Get(1)
+	vm.Push(ud)
+	return 1
+}
+
+func bytesIOExit(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	b.closed = true
+	vm.Push(runtime.False)
+	return 1
+}
+
+func bytesIOIter(vm *runtime.VM) int {
+	ud := vm.Get(1)
+	vm.Push(ud)
+	return 1
+}
+
+func bytesIONext(vm *runtime.VM) int {
+	b, ok := getBytesIO(vm, 1)
+	if !ok {
+		return 0
+	}
+	if b.closed {
+		vm.RaiseError("ValueError: I/O operation on closed file")
+		return 0
+	}
+	if b.pos >= len(b.buf) {
+		vm.RaiseError("StopIteration")
+		return 0
+	}
+	rest := b.buf[b.pos:]
+	idx := bytes.IndexByte(rest, '\n')
+	var line []byte
+	if idx >= 0 {
+		line = rest[:idx+1]
+	} else {
+		line = rest
+	}
+	result := make([]byte, len(line))
+	copy(result, line)
+	b.pos += len(line)
+	vm.Push(runtime.NewBytes(result))
 	return 1
 }
