@@ -12,8 +12,9 @@ Test files in test/integration/scripts/lang/ prefixed with "cpython_" are
 adapted from CPython's test suite (https://github.com/python/cpython).
 
 Location: test/integration/scripts/lang/
+         test/integration/scripts/modules/
 
-Files adapted from CPython (50 test files):
+Files adapted from CPython (50 test files in lang/):
   016_cpython_closures.py, 019_cpython_scopes.py, 022_cpython_comprehensions.py,
   023_cpython_generators.py, 024_cpython_generators_advanced.py,
   025_cpython_iterators.py, 027_cpython_classes.py, 028_cpython_class_advanced.py,
@@ -33,6 +34,15 @@ Files adapted from CPython (50 test files):
   110_cpython_generators_extra.py, 111_cpython_iterators_extra.py,
   112_cpython_class_extra.py, 113_cpython_exception_chaining.py,
   114_cpython_grammar_edge.py, 115_cpython_super.py
+
+Files in modules/ with tests adapted from CPython:
+  007_file_io.py — tests prefixed "CPython:" adapted from:
+    Lib/test/test_memoryio.py (StringIO/BytesIO: read, write, seek, tell,
+      truncate, readline, readlines, iteration, getvalue, overseek, closed-state
+      operations, flags)
+    Lib/test/test_file.py (file attributes, error handling, mode validation,
+      truncate-after-read, exclusive mode, context manager exception path,
+      readline after iteration)
 
 Summary of changes:
   - Test cases were extracted and rewritten to use RAGE's test_framework

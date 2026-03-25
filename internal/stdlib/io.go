@@ -740,21 +740,22 @@ func fileTruncate(vm *runtime.VM) int {
 		}
 	}
 
+	// Compute the current logical position (before truncate)
+	logicalPos, err := f.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		vm.RaiseError("OSError: %v", err)
+		return 0
+	}
+	if f.reader != nil {
+		logicalPos -= int64(f.reader.Buffered())
+	}
+
 	var size int64
 	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
 		size = vm.CheckInt(2)
 	} else {
 		// Default: truncate at current position
-		pos, err := f.file.Seek(0, io.SeekCurrent)
-		if err != nil {
-			vm.RaiseError("OSError: %v", err)
-			return 0
-		}
-		// Adjust for buffered reader data
-		if f.reader != nil {
-			pos -= int64(f.reader.Buffered())
-		}
-		size = pos
+		size = logicalPos
 	}
 
 	if err := f.file.Truncate(size); err != nil {
@@ -762,8 +763,10 @@ func fileTruncate(vm *runtime.VM) int {
 		return 0
 	}
 
-	// Reset reader buffer since file contents changed
+	// Seek underlying file to logical position and reset reader
+	// so tell() returns the correct position after truncate
 	if f.reader != nil {
+		f.file.Seek(logicalPos, io.SeekStart)
 		f.reader.Reset(f.file)
 	}
 
@@ -1021,18 +1024,29 @@ func stringIORead(vm *runtime.VM) int {
 	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
 		size = vm.CheckInt(2)
 	}
+	// Clamp read position to buffer length (may be past end after seek)
+	readPos := s.pos
+	if readPos > len(s.buf) {
+		readPos = len(s.buf)
+	}
 	if size < 0 {
 		// Read all remaining
-		data := s.buf[s.pos:]
-		s.pos = len(s.buf)
+		data := s.buf[readPos:]
+		if readPos < len(s.buf) {
+			s.pos = len(s.buf)
+		}
+		// else: keep pos as-is (past end) — CPython preserves overseek position
 		vm.Push(runtime.NewString(string(data)))
 	} else {
-		end := s.pos + int(size)
+		end := readPos + int(size)
 		if end > len(s.buf) {
 			end = len(s.buf)
 		}
-		data := s.buf[s.pos:end]
-		s.pos = end
+		if end > readPos {
+			s.pos = end
+		}
+		// else: pos unchanged if nothing read
+		data := s.buf[readPos:end]
 		vm.Push(runtime.NewString(string(data)))
 	}
 	return 1
@@ -1442,19 +1456,28 @@ func bytesIORead(vm *runtime.VM) int {
 	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
 		size = vm.CheckInt(2)
 	}
+	// Clamp read position to buffer length (may be past end after seek)
+	readPos := b.pos
+	if readPos > len(b.buf) {
+		readPos = len(b.buf)
+	}
 	if size < 0 {
-		data := make([]byte, len(b.buf)-b.pos)
-		copy(data, b.buf[b.pos:])
-		b.pos = len(b.buf)
+		data := make([]byte, len(b.buf)-readPos)
+		copy(data, b.buf[readPos:])
+		if readPos < len(b.buf) {
+			b.pos = len(b.buf)
+		}
 		vm.Push(runtime.NewBytes(data))
 	} else {
-		end := b.pos + int(size)
+		end := readPos + int(size)
 		if end > len(b.buf) {
 			end = len(b.buf)
 		}
-		data := make([]byte, end-b.pos)
-		copy(data, b.buf[b.pos:end])
-		b.pos = end
+		data := make([]byte, end-readPos)
+		copy(data, b.buf[readPos:end])
+		if end > readPos {
+			b.pos = end
+		}
 		vm.Push(runtime.NewBytes(data))
 	}
 	return 1
@@ -1627,16 +1650,22 @@ func bytesIOSeek(vm *runtime.VM) int {
 	switch whence {
 	case 0:
 		newPos = offset
+		if newPos < 0 {
+			vm.RaiseError("ValueError: Negative seek position %d", newPos)
+			return 0
+		}
 	case 1:
 		newPos = b.pos + offset
+		if newPos < 0 {
+			newPos = 0
+		}
 	case 2:
 		newPos = len(b.buf) + offset
+		if newPos < 0 {
+			newPos = 0
+		}
 	default:
 		vm.RaiseError("ValueError: invalid whence (%d, should be 0, 1 or 2)", whence)
-		return 0
-	}
-	if newPos < 0 {
-		vm.RaiseError("ValueError: Negative seek position %d", newPos)
 		return 0
 	}
 	b.pos = newPos

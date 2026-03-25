@@ -2615,6 +2615,10 @@ func (vm *VM) run() (Value, error) {
 				} else {
 					result, err = fn.Fn([]Value{cm, excType, excVal, excTb}, nil)
 				}
+			case *PyGoFunc:
+				// Bound Go function (e.g., from UserData metatable)
+				// Already bound — pass exc args only
+				result, err = vm.callGoFunction(fn, []Value{excType, excVal, excTb})
 			default:
 				return nil, fmt.Errorf("TypeError: __exit__ is not callable")
 			}
