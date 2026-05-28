@@ -168,9 +168,49 @@ func collectAssignedNames(stmt model.Stmt, names map[string]bool) {
 		}
 	case *model.Match:
 		for _, mc := range s.Cases {
+			collectPatternNames(mc.Pattern, names)
 			for _, bodyStmt := range mc.Body {
 				collectAssignedNames(bodyStmt, names)
 			}
+		}
+	}
+}
+
+// collectPatternNames extracts capture names bound by a match pattern.
+func collectPatternNames(p model.Pattern, names map[string]bool) {
+	switch pat := p.(type) {
+	case *model.MatchAs:
+		if pat.Name != nil {
+			names[pat.Name.Name] = true
+		}
+		if pat.Pattern != nil {
+			collectPatternNames(pat.Pattern, names)
+		}
+	case *model.MatchStar:
+		if pat.Name != nil {
+			names[pat.Name.Name] = true
+		}
+	case *model.MatchSequence:
+		for _, sub := range pat.Patterns {
+			collectPatternNames(sub, names)
+		}
+	case *model.MatchMapping:
+		for _, sub := range pat.Patterns {
+			collectPatternNames(sub, names)
+		}
+		if pat.Rest != nil {
+			names[pat.Rest.Name] = true
+		}
+	case *model.MatchClass:
+		for _, sub := range pat.Patterns {
+			collectPatternNames(sub, names)
+		}
+		for _, sub := range pat.KwdPatterns {
+			collectPatternNames(sub, names)
+		}
+	case *model.MatchOr:
+		for _, sub := range pat.Patterns {
+			collectPatternNames(sub, names)
 		}
 	}
 }

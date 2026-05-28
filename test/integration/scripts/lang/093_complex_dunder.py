@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: Basic __complex__ conversion
-def test_basic_complex(t):
+def test_basic_complex():
     class Impedance:
         def __init__(self, r, x):
             self.r = r
@@ -16,7 +16,7 @@ def test_basic_complex(t):
 test("basic __complex__ conversion", test_basic_complex)
 
 # Test 2: __complex__ with pure real
-def test_complex_pure_real(t):
+def test_complex_pure_real():
     class RealOnly:
         def __init__(self, val):
             self.val = val
@@ -30,7 +30,7 @@ def test_complex_pure_real(t):
 test("__complex__ with pure real", test_complex_pure_real)
 
 # Test 3: __complex__ with pure imaginary
-def test_complex_pure_imag(t):
+def test_complex_pure_imag():
     class ImagOnly:
         def __init__(self, val):
             self.val = val
@@ -44,7 +44,7 @@ def test_complex_pure_imag(t):
 test("__complex__ with pure imaginary", test_complex_pure_imag)
 
 # Test 4: __complex__ with negative values
-def test_complex_negative(t):
+def test_complex_negative():
     class Num:
         def __complex__(self):
             return complex(-1, -2)
@@ -56,7 +56,7 @@ def test_complex_negative(t):
 test("__complex__ with negative values", test_complex_negative)
 
 # Test 5: __complex__ inherited from base class
-def test_complex_inherited(t):
+def test_complex_inherited():
     class Base:
         def __init__(self, r, i):
             self.r = r
@@ -74,7 +74,7 @@ def test_complex_inherited(t):
 test("__complex__ inherited from base class", test_complex_inherited)
 
 # Test 6: complex() without __complex__ raises TypeError
-def test_complex_no_dunder(t):
+def test_complex_no_dunder():
     class NoComplex:
         pass
 
@@ -88,7 +88,7 @@ def test_complex_no_dunder(t):
 test("complex() without __complex__ raises TypeError", test_complex_no_dunder)
 
 # Test 7: __complex__ returning non-complex raises TypeError
-def test_complex_returns_non_complex(t):
+def test_complex_returns_non_complex():
     class Bad:
         def __complex__(self):
             return 42
@@ -103,7 +103,7 @@ def test_complex_returns_non_complex(t):
 test("__complex__ returning non-complex raises TypeError", test_complex_returns_non_complex)
 
 # Test 8: complex() two-arg with __float__ on first arg
-def test_complex_two_arg_float_real(t):
+def test_complex_two_arg_float_real():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -117,7 +117,7 @@ def test_complex_two_arg_float_real(t):
 test("complex() two-arg with __float__ on real part", test_complex_two_arg_float_real)
 
 # Test 9: complex() two-arg with __float__ on second arg
-def test_complex_two_arg_float_imag(t):
+def test_complex_two_arg_float_imag():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -131,7 +131,7 @@ def test_complex_two_arg_float_imag(t):
 test("complex() two-arg with __float__ on imag part", test_complex_two_arg_float_imag)
 
 # Test 10: complex() two-arg with __float__ on both args
-def test_complex_two_arg_float_both(t):
+def test_complex_two_arg_float_both():
     class Num:
         def __init__(self, val):
             self.val = val

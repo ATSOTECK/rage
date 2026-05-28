@@ -296,4 +296,29 @@ def test_cause_has_attributes():
 
 test("cause_has_attributes", test_cause_has_attributes)
 
+
+# === __context__ survives a try/finally inside an except handler ===
+# Regression: OpEndFinally used to unconditionally pop excHandlerStack,
+# which lost the outer handler's tracked exception so a freshly raised
+# exception inside the except block had no __context__ set.
+def test_context_preserved_through_inner_finally():
+    def run():
+        try:
+            raise ValueError("first")
+        except ValueError:
+            try:
+                pass
+            finally:
+                pass
+            try:
+                raise TypeError("second")
+            except TypeError as e:
+                return e
+
+    e = run()
+    expect(e.__context__ is None).to_be(False)
+    expect(str(e.__context__)).to_be("first")
+
+test("context_preserved_through_inner_finally", test_context_preserved_through_inner_finally)
+
 print("CPython exception chaining tests completed")

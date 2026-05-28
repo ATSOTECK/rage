@@ -1008,6 +1008,38 @@ func TestPeepholeOptimizationEmptyDict(t *testing.T) {
 	assert.Len(t, result.Items, 0)
 }
 
+func TestPeepholeOptimizeJumpsShortCircuitTarget(t *testing.T) {
+	// Regression: `optimizeJumps` must skip rewriting `LOAD_CONST True/False;
+	// POP_JUMP_IF_FALSE` when the POP_JUMP_IF_FALSE is itself a jump target.
+	// `JUMP_IF_FALSE_OR_POP`/`JUMP_IF_TRUE_OR_POP` (from `and`/`or`
+	// short-circuit) lands on that POP_JUMP_IF_FALSE expecting it to pop the
+	// short-circuit value — fusing/removing it would leak the value.
+	source := `
+def check(x):
+    # 'x or True' followed by an if exercises the pattern:
+    # LOAD x; JUMP_IF_TRUE_OR_POP target; LOAD_TRUE; target: POP_JUMP_IF_FALSE end
+    if x or True:
+        return "body"
+    return "else"
+
+results = [check(False), check(True), check(0), check(1)]
+`
+	code, errs := CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	vm := runtime.NewVM()
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+
+	results := vm.GetGlobal("results").(*runtime.PyList)
+	require.Len(t, results.Items, 4)
+	for _, item := range results.Items {
+		s, ok := item.(*runtime.PyString)
+		require.True(t, ok)
+		assert.Equal(t, "body", s.Value)
+	}
+}
+
 // =============================================================================
 // Loop Invariant Code Motion Tests
 // =============================================================================

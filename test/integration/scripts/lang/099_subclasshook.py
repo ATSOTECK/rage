@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from test_framework import test, expect
 
 # Test 1: __subclasshook__ returning True
-def test_subclasshook_true(t):
+def test_subclasshook_true():
     class Drawable(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -24,7 +24,7 @@ def test_subclasshook_true(t):
 test("__subclasshook__ returning True", test_subclasshook_true)
 
 # Test 2: __subclasshook__ returning NotImplemented falls through
-def test_subclasshook_notimplemented(t):
+def test_subclasshook_notimplemented():
     class MyABC(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -38,7 +38,7 @@ def test_subclasshook_notimplemented(t):
 test("__subclasshook__ returning NotImplemented falls through", test_subclasshook_notimplemented)
 
 # Test 3: __subclasshook__ returning False
-def test_subclasshook_false(t):
+def test_subclasshook_false():
     class Exclusive(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -53,7 +53,7 @@ def test_subclasshook_false(t):
 test("__subclasshook__ returning False", test_subclasshook_false)
 
 # Test 4: isinstance with __subclasshook__
-def test_isinstance_with_hook(t):
+def test_isinstance_with_hook():
     class Iterable(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -78,7 +78,7 @@ def test_isinstance_with_hook(t):
 test("isinstance uses __subclasshook__", test_isinstance_with_hook)
 
 # Test 5: __subclasshook__ without ABC metaclass has no effect
-def test_hook_without_abcmeta(t):
+def test_hook_without_abcmeta():
     class RegularClass:
         @classmethod
         def __subclasshook__(cls, C):
@@ -93,13 +93,13 @@ def test_hook_without_abcmeta(t):
 test("__subclasshook__ without ABCMeta has no effect", test_hook_without_abcmeta)
 
 # Test 6: NotImplemented builtin exists and has correct str
-def test_notimplemented_builtin(t):
+def test_notimplemented_builtin():
     expect(str(NotImplemented)).to_be("NotImplemented")
 
 test("NotImplemented builtin", test_notimplemented_builtin)
 
 # Test 7: ABC.register still works alongside __subclasshook__
-def test_register_with_hook(t):
+def test_register_with_hook():
     class Serializable(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -115,7 +115,7 @@ def test_register_with_hook(t):
 test("ABC.register works alongside __subclasshook__", test_register_with_hook)
 
 # Test 8: __subclasshook__ checking for multiple methods
-def test_hook_multiple_methods(t):
+def test_hook_multiple_methods():
     class Mapping(ABC):
         @classmethod
         def __subclasshook__(cls, C):
@@ -139,7 +139,7 @@ def test_hook_multiple_methods(t):
 test("__subclasshook__ checking for multiple methods", test_hook_multiple_methods)
 
 # Test 9: Actual ABC subclass still works
-def test_actual_subclass(t):
+def test_actual_subclass():
     class Base(ABC):
         @classmethod
         def __subclasshook__(cls, C):

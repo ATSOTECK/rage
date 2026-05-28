@@ -681,9 +681,31 @@ func pushCallbackWithArgs(self *runtime.PyInstance, callback runtime.Value, args
 }
 
 // exitStackExit processes the ExitStack's __exit__, calling callbacks in LIFO order.
+// Mirrors CPython contextlib.ExitStack: tracks pending_raise so that a new exception
+// from a callback propagates out rather than being silently dropped when the original
+// call returns False.
 func exitStackExit(vm *runtime.VM, self *runtime.PyInstance, excType, excVal, excTb runtime.Value) (runtime.Value, error) {
 	callbacks := self.Dict["_callbacks"].(*runtime.PyList)
 	suppressed := false
+	pendingRaise := false
+	var pendingExc *runtime.PyException
+
+	captureExc := func(err error) {
+		excType = runtime.None
+		excTb = runtime.None
+		if pyExc, ok := err.(*runtime.PyException); ok {
+			if pyExc.ExcType != nil {
+				excType = pyExc.ExcType
+			} else {
+				excType = runtime.NewString(pyExc.Type())
+			}
+			excVal = pyExc
+			pendingExc = pyExc
+		} else {
+			excVal = runtime.NewString(err.Error())
+			pendingExc = nil
+		}
+	}
 
 	// Process callbacks in reverse order (LIFO)
 	for i := len(callbacks.Items) - 1; i >= 0; i-- {
@@ -693,62 +715,42 @@ func exitStackExit(vm *runtime.VM, self *runtime.PyInstance, excType, excVal, ex
 		}
 
 		if cb.isPlain {
-			// Plain callback — call with stored args
 			args := cb.cbArgs
 			if args == nil {
 				args = []runtime.Value{}
 			}
-			_, err := vm.Call(cb.callback, args, cb.cbKwargs)
-			if err != nil {
-				// New exception from callback replaces existing
-				excType = runtime.None
-				excVal = runtime.None
-				excTb = runtime.None
-				if pyExc, ok := err.(*runtime.PyException); ok {
-					if pyExc.ExcType != nil {
-						excType = pyExc.ExcType
-					} else {
-						excType = runtime.NewString(pyExc.Type())
-					}
-					excVal = pyExc
-				}
+			if _, err := vm.Call(cb.callback, args, cb.cbKwargs); err != nil {
+				captureExc(err)
+				pendingRaise = true
 				suppressed = false
 			}
-		} else {
-			// Context manager __exit__
-			var result runtime.Value
-			var err error
+			continue
+		}
 
-			result, err = vm.Call(cb.exitMethod, []runtime.Value{excType, excVal, excTb}, nil)
-			if err != nil {
-				// New exception from __exit__ replaces existing
-				excType = runtime.None
-				excVal = runtime.None
-				excTb = runtime.None
-				if pyExc, ok := err.(*runtime.PyException); ok {
-					if pyExc.ExcType != nil {
-						excType = pyExc.ExcType
-					} else {
-						excType = runtime.NewString(pyExc.Type())
-					}
-					excVal = pyExc
-				}
-				suppressed = false
-				continue
-			}
+		result, err := vm.Call(cb.exitMethod, []runtime.Value{excType, excVal, excTb}, nil)
+		if err != nil {
+			captureExc(err)
+			pendingRaise = true
+			suppressed = false
+			continue
+		}
 
-			if vm.Truthy(result) {
-				suppressed = true
-				excType = runtime.None
-				excVal = runtime.None
-				excTb = runtime.None
-			}
+		if vm.Truthy(result) {
+			suppressed = true
+			pendingRaise = false
+			pendingExc = nil
+			excType = runtime.None
+			excVal = runtime.None
+			excTb = runtime.None
 		}
 	}
 
 	// Clear the callback stack
 	callbacks.Items = nil
 
+	if pendingRaise && pendingExc != nil {
+		return nil, pendingExc
+	}
 	if suppressed {
 		return runtime.True, nil
 	}

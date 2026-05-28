@@ -2034,6 +2034,13 @@ func (vm *VM) run() (Value, error) {
 			// Inline pop for return
 			frame.SP--
 			result := frame.Stack[frame.SP]
+			// Call __exit__(None, None, None) for any active `with` block so
+			// returning out of `with` runs the context manager's cleanup.
+			// BlockFinally on return is a separate known limitation (TODO.md).
+			if err := vm.unwindWithBlocksOnReturn(frame); err != nil {
+				return nil, err
+			}
+			frame.BlockStack = nil
 			if len(vm.frames) > 0 {
 				// Nil out the frame reference before truncating to allow GC to collect it.
 				// Without this, the underlying slice array retains a pointer to the popped
@@ -2461,7 +2468,11 @@ func (vm *VM) run() (Value, error) {
 			frame.BlockStack = append(frame.BlockStack, block)
 
 		case OpSetupFinally:
-			// Push finally handler block onto block stack
+			// Push finally handler block onto block stack.
+			// Record excHandlerStack level so OpEndFinally can restore it,
+			// regardless of whether finally was entered via normal flow or
+			// exception flow (which pushes onto excHandlerStack).
+			vm.finallyExcLevels = append(vm.finallyExcLevels, len(vm.excHandlerStack))
 			block := Block{
 				Type:    BlockFinally,
 				Handler: arg,
@@ -2632,11 +2643,19 @@ func (vm *VM) run() (Value, error) {
 			}
 
 		case OpEndFinally:
-			// End finally block - re-raise exception if one was active
-			// Pop the handler stack entry that was pushed when entering finally
-			if n := len(vm.excHandlerStack); n > 0 {
-				vm.excHandlerStack[n-1] = nil // Clear reference for GC
-				vm.excHandlerStack = vm.excHandlerStack[:n-1]
+			// End finally block — restore excHandlerStack to the level recorded
+			// at OpSetupFinally. Symmetric across normal and exception flow: in
+			// exception flow handleException pushed one entry; in normal flow
+			// nothing was pushed. The restore handles both correctly.
+			if n := len(vm.finallyExcLevels); n > 0 {
+				savedLevel := vm.finallyExcLevels[n-1]
+				vm.finallyExcLevels = vm.finallyExcLevels[:n-1]
+				for i := savedLevel; i < len(vm.excHandlerStack); i++ {
+					vm.excHandlerStack[i] = nil
+				}
+				if savedLevel < len(vm.excHandlerStack) {
+					vm.excHandlerStack = vm.excHandlerStack[:savedLevel]
+				}
 			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err

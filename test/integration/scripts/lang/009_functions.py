@@ -103,4 +103,54 @@ test("global_access", test_global_access)
 test("early_return", test_early_return)
 test("func_as_arg", test_func_as_arg)
 
+
+# === Call-shape diagnostics: duplicate kwarg and missing arg raise TypeError ===
+# Regression: createFunctionFrame silently overwrote a positional arg with a
+# same-named kwarg (instead of raising), and missing required args surfaced
+# as UnboundLocalError later instead of a clean TypeError at call time.
+def test_duplicate_kwarg_raises_typeerror():
+    def f(a, b):
+        return (a, b)
+
+    try:
+        f(1, 2, a=10)
+        raise AssertionError("expected TypeError")
+    except TypeError as e:
+        msg = str(e)
+        expect("multiple values" in msg).to_be(True)
+        expect("'a'" in msg).to_be(True)
+
+
+def test_missing_required_positional_raises_typeerror():
+    def f(a, b, c):
+        return (a, b, c)
+
+    try:
+        f(1)
+        raise AssertionError("expected TypeError")
+    except TypeError as e:
+        msg = str(e)
+        expect("missing" in msg).to_be(True)
+        expect("2 required" in msg).to_be(True)
+        expect("'b'" in msg).to_be(True)
+        expect("'c'" in msg).to_be(True)
+
+
+def test_missing_keyword_only_raises_typeerror():
+    def f(*, k):
+        return k
+
+    try:
+        f()
+        raise AssertionError("expected TypeError")
+    except TypeError as e:
+        msg = str(e)
+        expect("keyword-only" in msg).to_be(True)
+        expect("'k'" in msg).to_be(True)
+
+
+test("duplicate_kwarg_raises_typeerror", test_duplicate_kwarg_raises_typeerror)
+test("missing_required_positional_raises_typeerror", test_missing_required_positional_raises_typeerror)
+test("missing_keyword_only_raises_typeerror", test_missing_keyword_only_raises_typeerror)
+
 print("Functions tests completed")

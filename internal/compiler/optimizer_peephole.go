@@ -90,6 +90,12 @@ func (o *Optimizer) optimizeJumps(instrs []*instruction, code *runtime.CodeObjec
 		if jumpTargets[i] {
 			continue
 		}
+		// Skip if the POP_JUMP_IF_FALSE is itself a jump target. JUMP_IF_FALSE_OR_POP
+		// (from `and`/`or`) lands on POP_JUMP_IF_FALSE expecting it to pop the
+		// short-circuit value — removing or rewriting it would leak that value.
+		if i+1 < len(instrs) && jumpTargets[i+1] {
+			continue
+		}
 
 		// LOAD_CONST True; POP_JUMP_IF_FALSE -> remove both (never jumps)
 		if instrs[i].op == runtime.OpLoadTrue || instrs[i].op == runtime.OpLoadConst {

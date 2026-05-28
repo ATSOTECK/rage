@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: Basic __round__ without ndigits
-def test_basic_round(t):
+def test_basic_round():
     class Measurement:
         def __init__(self, val):
             self.val = val
@@ -14,7 +14,7 @@ def test_basic_round(t):
 test("basic __round__ without ndigits", test_basic_round)
 
 # Test 2: __round__ with ndigits
-def test_round_ndigits(t):
+def test_round_ndigits():
     class Measurement:
         def __init__(self, val):
             self.val = val
@@ -27,7 +27,7 @@ def test_round_ndigits(t):
 test("__round__ with ndigits", test_round_ndigits)
 
 # Test 3: __round__ returning int
-def test_round_returns_int(t):
+def test_round_returns_int():
     class Score:
         def __init__(self, val):
             self.val = val
@@ -42,7 +42,7 @@ def test_round_returns_int(t):
 test("__round__ returning int", test_round_returns_int)
 
 # Test 4: __round__ with negative value
-def test_round_negative(t):
+def test_round_negative():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -55,7 +55,7 @@ def test_round_negative(t):
 test("__round__ with negative value", test_round_negative)
 
 # Test 5: __round__ inherited from base class
-def test_round_inherited(t):
+def test_round_inherited():
     class Base:
         def __init__(self, val):
             self.val = val
@@ -71,7 +71,7 @@ def test_round_inherited(t):
 test("__round__ inherited from base class", test_round_inherited)
 
 # Test 6: round() on regular float still works
-def test_round_float(t):
+def test_round_float():
     expect(round(3.7)).to_be(4)
     expect(round(3.14159, 2)).to_be(3.14)
     expect(round(2.5)).to_be(2)  # banker's rounding
@@ -79,13 +79,13 @@ def test_round_float(t):
 test("round() on regular float still works", test_round_float)
 
 # Test 7: round() on regular int still works
-def test_round_int(t):
+def test_round_int():
     expect(round(5)).to_be(5)
 
 test("round() on regular int still works", test_round_int)
 
 # Test 8: __round__ without method raises TypeError
-def test_round_no_dunder(t):
+def test_round_no_dunder():
     class NoRound:
         pass
 
@@ -99,7 +99,7 @@ def test_round_no_dunder(t):
 test("round() without __round__ raises TypeError", test_round_no_dunder)
 
 # Test 9: __round__ with ndigits=0
-def test_round_ndigits_zero(t):
+def test_round_ndigits_zero():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -112,7 +112,7 @@ def test_round_ndigits_zero(t):
 test("__round__ with ndigits=0", test_round_ndigits_zero)
 
 # Test 10: __round__ with negative ndigits
-def test_round_negative_ndigits(t):
+def test_round_negative_ndigits():
     class Num:
         def __init__(self, val):
             self.val = val

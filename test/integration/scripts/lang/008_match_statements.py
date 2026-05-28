@@ -299,4 +299,35 @@ test("nested_patterns", test_nested_patterns)
 test("class_patterns", test_class_patterns)
 test("class_keyword_patterns", test_class_keyword_patterns)
 
+
+# === Names bound in match patterns must be predefined as locals ===
+# Regression: the prescan pass for assigned names walked case bodies but
+# skipped patterns, so reassigning a pattern-captured name inside the
+# body could resurrect the closure-rebinding bug class.
+def test_pattern_capture_reassigned():
+    def f(seq):
+        match seq:
+            case [x, *rest]:
+                x = x + 1
+                return (x, rest)
+            case _:
+                return None
+
+    expect(f([10, 20, 30])).to_be((11, [20, 30]))
+
+def test_pattern_mapping_rest_captured():
+    def f(m):
+        match m:
+            case {"a": a, **rest}:
+                rest = dict(rest)
+                rest["a"] = a
+                return rest
+            case _:
+                return None
+
+    expect(f({"a": 1, "b": 2})).to_be({"b": 2, "a": 1})
+
+test("pattern_capture_reassigned", test_pattern_capture_reassigned)
+test("pattern_mapping_rest_captured", test_pattern_mapping_rest_captured)
+
 print("Match statement tests completed")

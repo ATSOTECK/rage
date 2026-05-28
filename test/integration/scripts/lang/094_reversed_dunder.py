@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: Basic __reversed__ returning an iterator
-def test_basic_reversed(t):
+def test_basic_reversed():
     class MySeq:
         def __init__(self, items):
             self.items = items
@@ -15,7 +15,7 @@ def test_basic_reversed(t):
 test("basic __reversed__ returning iterator", test_basic_reversed)
 
 # Test 2: __reversed__ returning a list (iterable)
-def test_reversed_returns_list(t):
+def test_reversed_returns_list():
     class MySeq:
         def __init__(self, items):
             self.items = items
@@ -29,14 +29,14 @@ def test_reversed_returns_list(t):
 test("__reversed__ returning a list", test_reversed_returns_list)
 
 # Test 3: Falls back to sequence protocol when __reversed__ not defined
-def test_fallback_no_reversed(t):
+def test_fallback_no_reversed():
     result = list(reversed([1, 2, 3]))
     expect(result).to_be([3, 2, 1])
 
 test("falls back to sequence protocol without __reversed__", test_fallback_no_reversed)
 
 # Test 4: __reversed__ inherited from base class
-def test_reversed_inherited(t):
+def test_reversed_inherited():
     class Base:
         def __init__(self, items):
             self.items = items
@@ -53,7 +53,7 @@ def test_reversed_inherited(t):
 test("__reversed__ inherited from base class", test_reversed_inherited)
 
 # Test 5: __reversed__ with empty sequence
-def test_reversed_empty(t):
+def test_reversed_empty():
     class MySeq:
         def __init__(self, items):
             self.items = items
@@ -67,7 +67,7 @@ def test_reversed_empty(t):
 test("__reversed__ with empty sequence", test_reversed_empty)
 
 # Test 6: __reversed__ with single element
-def test_reversed_single(t):
+def test_reversed_single():
     class MySeq:
         def __init__(self, items):
             self.items = items
@@ -81,7 +81,7 @@ def test_reversed_single(t):
 test("__reversed__ with single element", test_reversed_single)
 
 # Test 7: __reversed__ with strings
-def test_reversed_strings(t):
+def test_reversed_strings():
     class Words:
         def __init__(self, words):
             self.words = words
@@ -95,7 +95,7 @@ def test_reversed_strings(t):
 test("__reversed__ with string elements", test_reversed_strings)
 
 # Test 8: __reversed__ used in for loop
-def test_reversed_in_for(t):
+def test_reversed_in_for():
     class MyRange:
         def __init__(self, n):
             self.n = n
@@ -110,14 +110,14 @@ def test_reversed_in_for(t):
 test("__reversed__ used in for loop", test_reversed_in_for)
 
 # Test 9: reversed() on tuple (builtin, no __reversed__)
-def test_reversed_tuple(t):
+def test_reversed_tuple():
     result = list(reversed((1, 2, 3)))
     expect(result).to_be([3, 2, 1])
 
 test("reversed() on tuple", test_reversed_tuple)
 
 # Test 10: reversed() on string
-def test_reversed_string(t):
+def test_reversed_string():
     result = list(reversed("abc"))
     expect(result).to_be(["c", "b", "a"])
 

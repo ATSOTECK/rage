@@ -187,7 +187,10 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 	}
 
 	// Create new frame for regular function call
-	frame := vm.createFunctionFrame(fn, args, kwargs)
+	frame, err := vm.createFunctionFrame(fn, args, kwargs)
+	if err != nil {
+		return nil, err
+	}
 
 	// Track frame memory: ~16 bytes per stack slot, ~16 bytes per local, ~24 bytes per cell
 	if vm.maxMemoryBytes > 0 {
@@ -314,8 +317,9 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 	return instance, nil
 }
 
-// createFunctionFrame creates a new frame for a function call without executing it
-func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[string]Value) *Frame {
+// createFunctionFrame creates a new frame for a function call without executing it.
+// Returns an error for invalid call shapes (duplicate args, missing required args).
+func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[string]Value) (*Frame, error) {
 	code := fn.Code
 
 	// Create new frame
@@ -393,6 +397,9 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 			// Find the parameter index by name in positional and kw-only params
 			for i, varName := range code.VarNames {
 				if varName == name && i < code.ArgCount+code.KwOnlyArgCount {
+					if i < numPositional {
+						return nil, fmt.Errorf("TypeError: %s() got multiple values for argument '%s'", fn.Name, name)
+					}
 					frame.Locals[i] = val
 					break
 				}
@@ -464,12 +471,66 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 		}
 	}
 
-	return frame
+	// Required positional and kw-only parameters must be bound.
+	numDefaults := 0
+	if fn.Defaults != nil {
+		numDefaults = len(fn.Defaults.Items)
+	}
+	requiredPosEnd := code.ArgCount - numDefaults
+	var missing []string
+	for i := 0; i < requiredPosEnd && i < len(code.VarNames); i++ {
+		if frame.Locals[i] == nil {
+			missing = append(missing, "'"+code.VarNames[i]+"'")
+		}
+	}
+	if len(missing) > 0 {
+		noun := "argument"
+		if len(missing) > 1 {
+			noun = "arguments"
+		}
+		return nil, fmt.Errorf("TypeError: %s() missing %d required positional %s: %s",
+			fn.Name, len(missing), noun, joinMissing(missing))
+	}
+	for i := code.ArgCount; i < code.ArgCount+code.KwOnlyArgCount && i < len(code.VarNames); i++ {
+		if frame.Locals[i] == nil {
+			if fn.KwDefaults == nil || fn.KwDefaults[code.VarNames[i]] == nil {
+				return nil, fmt.Errorf("TypeError: %s() missing required keyword-only argument: '%s'",
+					fn.Name, code.VarNames[i])
+			}
+		}
+	}
+
+	return frame, nil
+}
+
+// joinMissing joins a list of quoted parameter names into a CPython-style
+// "and"-list, e.g. "'a' and 'b'" or "'a', 'b', and 'c'".
+func joinMissing(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	s := ""
+	for i, n := range names {
+		if i == len(names)-1 {
+			s += "and " + n
+		} else {
+			s += n + ", "
+		}
+	}
+	return s
 }
 
 // createGenerator creates a new generator object from a generator function
 func (vm *VM) createGenerator(fn *PyFunction, args []Value, kwargs map[string]Value) (*PyGenerator, error) {
-	frame := vm.createFunctionFrame(fn, args, kwargs)
+	frame, err := vm.createFunctionFrame(fn, args, kwargs)
+	if err != nil {
+		return nil, err
+	}
 	return &PyGenerator{
 		Frame: frame,
 		Code:  fn.Code,
@@ -480,7 +541,10 @@ func (vm *VM) createGenerator(fn *PyFunction, args []Value, kwargs map[string]Va
 
 // createCoroutine creates a new coroutine object from an async function
 func (vm *VM) createCoroutine(fn *PyFunction, args []Value, kwargs map[string]Value) (*PyCoroutine, error) {
-	frame := vm.createFunctionFrame(fn, args, kwargs)
+	frame, err := vm.createFunctionFrame(fn, args, kwargs)
+	if err != nil {
+		return nil, err
+	}
 	return &PyCoroutine{
 		Frame: frame,
 		Code:  fn.Code,

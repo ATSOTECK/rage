@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: __instancecheck__ on metaclass
-def test_basic_instancecheck(t):
+def test_basic_instancecheck():
     class MyMeta(type):
         def __instancecheck__(cls, instance):
             # Accept anything with a 'quack' attribute
@@ -28,7 +28,7 @@ def test_basic_instancecheck(t):
 test("__instancecheck__ on metaclass", test_basic_instancecheck)
 
 # Test 2: __subclasscheck__ on metaclass
-def test_basic_subclasscheck(t):
+def test_basic_subclasscheck():
     class ProtocolMeta(type):
         def __subclasscheck__(cls, subclass):
             # Accept any class that has a 'serialize' method
@@ -51,7 +51,7 @@ def test_basic_subclasscheck(t):
 test("__subclasscheck__ on metaclass", test_basic_subclasscheck)
 
 # Test 3: isinstance without metaclass still works
-def test_isinstance_normal(t):
+def test_isinstance_normal():
     class Animal:
         pass
 
@@ -66,7 +66,7 @@ def test_isinstance_normal(t):
 test("isinstance without metaclass works normally", test_isinstance_normal)
 
 # Test 4: issubclass without metaclass still works
-def test_issubclass_normal(t):
+def test_issubclass_normal():
     class Base:
         pass
 
@@ -80,7 +80,7 @@ def test_issubclass_normal(t):
 test("issubclass without metaclass works normally", test_issubclass_normal)
 
 # Test 5: __instancecheck__ returning False overrides normal check
-def test_instancecheck_override(t):
+def test_instancecheck_override():
     class StrictMeta(type):
         def __instancecheck__(cls, instance):
             # Only exact class matches, no subclass instances
@@ -100,7 +100,7 @@ def test_instancecheck_override(t):
 test("__instancecheck__ can override normal behavior", test_instancecheck_override)
 
 # Test 6: __instancecheck__ with built-in types
-def test_instancecheck_builtins(t):
+def test_instancecheck_builtins():
     class AcceptAllMeta(type):
         def __instancecheck__(cls, instance):
             return True
@@ -115,7 +115,7 @@ def test_instancecheck_builtins(t):
 test("__instancecheck__ works with built-in type instances", test_instancecheck_builtins)
 
 # Test 7: __subclasscheck__ with actual subclass
-def test_subclasscheck_override(t):
+def test_subclasscheck_override():
     class NoSubclassMeta(type):
         def __subclasscheck__(cls, subclass):
             return False
@@ -131,7 +131,7 @@ def test_subclasscheck_override(t):
 test("__subclasscheck__ can override normal behavior", test_subclasscheck_override)
 
 # Test 8: isinstance with tuple still works
-def test_isinstance_tuple(t):
+def test_isinstance_tuple():
     expect(isinstance(42, (str, int))).to_be(True)
     expect(isinstance("hi", (str, int))).to_be(True)
     expect(isinstance([], (str, int))).to_be(False)
@@ -139,7 +139,7 @@ def test_isinstance_tuple(t):
 test("isinstance with tuple of types", test_isinstance_tuple)
 
 # Test 9: issubclass with built-in types still works
-def test_issubclass_builtins(t):
+def test_issubclass_builtins():
     expect(issubclass(bool, int)).to_be(True)
     expect(issubclass(int, object)).to_be(True)
     expect(issubclass(str, int)).to_be(False)
@@ -147,7 +147,7 @@ def test_issubclass_builtins(t):
 test("issubclass with built-in types", test_issubclass_builtins)
 
 # Test 10: Inherited __instancecheck__ from meta base
-def test_inherited_meta(t):
+def test_inherited_meta():
     class BaseMeta(type):
         def __instancecheck__(cls, instance):
             return hasattr(instance, "valid") and instance.valid
@@ -177,7 +177,7 @@ test("inherited __instancecheck__ from meta base", test_inherited_meta)
 
 # --- isinstance with tuple of types ---
 
-def test_isinstance_tuple_of_types(t):
+def test_isinstance_tuple_of_types():
     """isinstance with a tuple as the second argument"""
     expect(isinstance(42, (str, int))).to_be(True)
     expect(isinstance("hi", (str, int))).to_be(True)
@@ -187,7 +187,7 @@ def test_isinstance_tuple_of_types(t):
 
 test("isinstance with tuple of types", test_isinstance_tuple_of_types)
 
-def test_isinstance_nested_tuple(t):
+def test_isinstance_nested_tuple():
     """isinstance with nested tuples as the second argument"""
     expect(isinstance(42, (str, (float, int)))).to_be(True)
     expect(isinstance("hi", (str, (float, int)))).to_be(True)
@@ -196,7 +196,7 @@ def test_isinstance_nested_tuple(t):
 
 test("isinstance with nested tuple of types", test_isinstance_nested_tuple)
 
-def test_isinstance_empty_tuple(t):
+def test_isinstance_empty_tuple():
     """isinstance with empty tuple always returns False"""
     expect(isinstance(42, ())).to_be(False)
     expect(isinstance("hi", ())).to_be(False)
@@ -206,7 +206,7 @@ test("isinstance with empty tuple", test_isinstance_empty_tuple)
 
 # --- issubclass basic behavior ---
 
-def test_issubclass_basic(t):
+def test_issubclass_basic():
     """issubclass basic checks"""
     class Super:
         pass
@@ -220,7 +220,7 @@ def test_issubclass_basic(t):
 
 test("issubclass basic behavior", test_issubclass_basic)
 
-def test_issubclass_tuple(t):
+def test_issubclass_tuple():
     """issubclass with tuple as second argument"""
     class Super:
         pass
@@ -235,7 +235,7 @@ def test_issubclass_tuple(t):
 
 test("issubclass with tuple", test_issubclass_tuple)
 
-def test_issubclass_nested_tuple(t):
+def test_issubclass_nested_tuple():
     """issubclass with nested tuples"""
     expect(issubclass(int, (int, (float, int)))).to_be(True)
     expect(issubclass(str, (str, (int, str)))).to_be(True)
@@ -250,7 +250,7 @@ def test_issubclass_nested_tuple(t):
 
 test("issubclass with nested tuple", test_issubclass_nested_tuple)
 
-def test_issubclass_builtin_hierarchy(t):
+def test_issubclass_builtin_hierarchy():
     """issubclass with built-in type hierarchy"""
     expect(issubclass(bool, int)).to_be(True)
     expect(issubclass(int, object)).to_be(True)
@@ -263,7 +263,7 @@ test("issubclass builtin hierarchy", test_issubclass_builtin_hierarchy)
 
 # --- isinstance/issubclass with custom __instancecheck__/__subclasscheck__ ---
 
-def test_custom_instancecheck_accepts_all(t):
+def test_custom_instancecheck_accepts_all():
     """Custom __instancecheck__ that accepts everything"""
     class AcceptAllMeta(type):
         def __instancecheck__(cls, instance):
@@ -279,7 +279,7 @@ def test_custom_instancecheck_accepts_all(t):
 
 test("custom __instancecheck__ accepts all", test_custom_instancecheck_accepts_all)
 
-def test_custom_instancecheck_rejects_all(t):
+def test_custom_instancecheck_rejects_all():
     """Custom __instancecheck__ that rejects everything"""
     class RejectAllMeta(type):
         def __instancecheck__(cls, instance):
@@ -294,7 +294,7 @@ def test_custom_instancecheck_rejects_all(t):
 
 test("custom __instancecheck__ rejects all", test_custom_instancecheck_rejects_all)
 
-def test_custom_subclasscheck_accepts_all(t):
+def test_custom_subclasscheck_accepts_all():
     """Custom __subclasscheck__ that accepts everything"""
     class AcceptAllMeta(type):
         def __subclasscheck__(cls, subclass):
@@ -308,7 +308,7 @@ def test_custom_subclasscheck_accepts_all(t):
 
 test("custom __subclasscheck__ accepts all", test_custom_subclasscheck_accepts_all)
 
-def test_custom_subclasscheck_rejects_all(t):
+def test_custom_subclasscheck_rejects_all():
     """Custom __subclasscheck__ that rejects everything"""
     class RejectAllMeta(type):
         def __subclasscheck__(cls, subclass):
@@ -324,7 +324,7 @@ def test_custom_subclasscheck_rejects_all(t):
 
 test("custom __subclasscheck__ rejects all", test_custom_subclasscheck_rejects_all)
 
-def test_instancecheck_with_attribute_check(t):
+def test_instancecheck_with_attribute_check():
     """Custom __instancecheck__ that checks for a specific attribute"""
     class HasLenMeta(type):
         def __instancecheck__(cls, instance):
@@ -340,7 +340,7 @@ def test_instancecheck_with_attribute_check(t):
 
 test("__instancecheck__ with attribute check", test_instancecheck_with_attribute_check)
 
-def test_subclasscheck_with_method_check(t):
+def test_subclasscheck_with_method_check():
     """Custom __subclasscheck__ that checks for a method"""
     class HasIterMeta(type):
         def __subclasscheck__(cls, subclass):
@@ -358,7 +358,7 @@ test("__subclasscheck__ with method check", test_subclasscheck_with_method_check
 
 # --- TypeError for invalid arguments ---
 
-def test_isinstance_non_class_raises_typeerror(t):
+def test_isinstance_non_class_raises_typeerror():
     """isinstance raises TypeError for non-class second arg"""
     raised = False
     try:
@@ -369,7 +369,7 @@ def test_isinstance_non_class_raises_typeerror(t):
 
 test("isinstance raises TypeError for non-class", test_isinstance_non_class_raises_typeerror)
 
-def test_issubclass_non_class_first_arg_raises(t):
+def test_issubclass_non_class_first_arg_raises():
     """issubclass raises TypeError when first arg is not a class"""
     raised = False
     try:
@@ -380,7 +380,7 @@ def test_issubclass_non_class_first_arg_raises(t):
 
 test("issubclass raises TypeError for non-class first arg", test_issubclass_non_class_first_arg_raises)
 
-def test_issubclass_non_class_second_arg_raises(t):
+def test_issubclass_non_class_second_arg_raises():
     """issubclass raises TypeError when second arg is not a class"""
     raised = False
     try:
@@ -393,7 +393,7 @@ test("issubclass raises TypeError for non-class second arg", test_issubclass_non
 
 # --- isinstance normal with inheritance ---
 
-def test_isinstance_normal_inheritance(t):
+def test_isinstance_normal_inheritance():
     """isinstance with normal class hierarchy (from CPython test)"""
     class Super:
         pass
@@ -407,7 +407,7 @@ def test_isinstance_normal_inheritance(t):
 
 test("isinstance normal inheritance", test_isinstance_normal_inheritance)
 
-def test_isinstance_with_multiple_inheritance(t):
+def test_isinstance_with_multiple_inheritance():
     """isinstance with multiple inheritance"""
     class A:
         pass
@@ -424,7 +424,7 @@ def test_isinstance_with_multiple_inheritance(t):
 
 test("isinstance with multiple inheritance", test_isinstance_with_multiple_inheritance)
 
-def test_issubclass_with_multiple_inheritance(t):
+def test_issubclass_with_multiple_inheritance():
     """issubclass with multiple inheritance"""
     class A:
         pass
@@ -443,7 +443,7 @@ test("issubclass with multiple inheritance", test_issubclass_with_multiple_inher
 
 # --- Abstract base classes with isinstance ---
 
-def test_isinstance_with_abc(t):
+def test_isinstance_with_abc():
     """isinstance with abstract base classes"""
     from abc import ABC, abstractmethod
 
@@ -463,7 +463,7 @@ def test_isinstance_with_abc(t):
 
 test("isinstance with ABC", test_isinstance_with_abc)
 
-def test_isinstance_abc_with_register(t):
+def test_isinstance_abc_with_register():
     """isinstance with ABC.register"""
     from abc import ABC
 
@@ -479,7 +479,7 @@ def test_isinstance_abc_with_register(t):
 
 test("isinstance with ABC.register", test_isinstance_abc_with_register)
 
-def test_isinstance_abc_subclasshook(t):
+def test_isinstance_abc_subclasshook():
     """isinstance uses __subclasshook__ for ABCs"""
     from abc import ABC
 
@@ -499,7 +499,7 @@ test("isinstance with ABC __subclasshook__", test_isinstance_abc_subclasshook)
 
 # --- isinstance/issubclass with builtin types ---
 
-def test_isinstance_builtin_types(t):
+def test_isinstance_builtin_types():
     """isinstance with all common builtin types"""
     expect(isinstance(42, int)).to_be(True)
     expect(isinstance(3.14, float)).to_be(True)
@@ -514,7 +514,7 @@ def test_isinstance_builtin_types(t):
 
 test("isinstance with builtin types", test_isinstance_builtin_types)
 
-def test_issubclass_builtin_types(t):
+def test_issubclass_builtin_types():
     """issubclass with all common builtin types"""
     expect(issubclass(bool, int)).to_be(True)
     expect(issubclass(int, float)).to_be(False)
@@ -528,7 +528,7 @@ test("issubclass with builtin types", test_issubclass_builtin_types)
 
 # --- isinstance with __instancecheck__ that raises ---
 
-def test_instancecheck_exception_propagates(t):
+def test_instancecheck_exception_propagates():
     """Exceptions from __instancecheck__ should propagate"""
     class ErrorMeta(type):
         def __instancecheck__(cls, instance):
@@ -549,7 +549,7 @@ def test_instancecheck_exception_propagates(t):
 
 test("__instancecheck__ exception propagates", test_instancecheck_exception_propagates)
 
-def test_subclasscheck_exception_propagates(t):
+def test_subclasscheck_exception_propagates():
     """Exceptions from __subclasscheck__ should propagate"""
     class ErrorMeta(type):
         def __subclasscheck__(cls, subclass):

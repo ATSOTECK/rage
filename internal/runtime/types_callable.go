@@ -362,6 +362,7 @@ type PyGenerator struct {
 	SavedCurrentException    *PyException
 	SavedLastException       *PyException
 	SavedExcHandlerStack     []*PyException
+	SavedFinallyExcLevels    []int
 	SavedPendingReturn       Value
 	SavedHasPendingReturn    bool
 	SavedPendingJump         int
@@ -383,6 +384,7 @@ type PyCoroutine struct {
 	SavedCurrentException *PyException
 	SavedLastException    *PyException
 	SavedExcHandlerStack  []*PyException
+	SavedFinallyExcLevels []int
 	SavedPendingReturn    Value
 	SavedHasPendingReturn bool
 	SavedPendingJump      int

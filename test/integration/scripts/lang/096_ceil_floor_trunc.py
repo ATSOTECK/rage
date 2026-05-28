@@ -2,7 +2,7 @@ import math
 from test_framework import test, expect
 
 # Test 1: Basic __ceil__
-def test_ceil_dunder(t):
+def test_ceil_dunder():
     class Measurement:
         def __init__(self, val):
             self.val = val
@@ -15,7 +15,7 @@ def test_ceil_dunder(t):
 test("__ceil__ on custom class", test_ceil_dunder)
 
 # Test 2: Basic __floor__
-def test_floor_dunder(t):
+def test_floor_dunder():
     class Measurement:
         def __init__(self, val):
             self.val = val
@@ -28,7 +28,7 @@ def test_floor_dunder(t):
 test("__floor__ on custom class", test_floor_dunder)
 
 # Test 3: Basic __trunc__
-def test_trunc_dunder(t):
+def test_trunc_dunder():
     class Measurement:
         def __init__(self, val):
             self.val = val
@@ -41,7 +41,7 @@ def test_trunc_dunder(t):
 test("__trunc__ on custom class", test_trunc_dunder)
 
 # Test 4: __ceil__ with negative value
-def test_ceil_negative(t):
+def test_ceil_negative():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -54,7 +54,7 @@ def test_ceil_negative(t):
 test("__ceil__ with negative value", test_ceil_negative)
 
 # Test 5: __floor__ with negative value
-def test_floor_negative(t):
+def test_floor_negative():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -67,7 +67,7 @@ def test_floor_negative(t):
 test("__floor__ with negative value", test_floor_negative)
 
 # Test 6: __trunc__ with negative value
-def test_trunc_negative(t):
+def test_trunc_negative():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -80,7 +80,7 @@ def test_trunc_negative(t):
 test("__trunc__ with negative value", test_trunc_negative)
 
 # Test 7: Inherited __ceil__
-def test_ceil_inherited(t):
+def test_ceil_inherited():
     class Base:
         def __init__(self, val):
             self.val = val
@@ -96,7 +96,7 @@ def test_ceil_inherited(t):
 test("__ceil__ inherited from base class", test_ceil_inherited)
 
 # Test 8: math.ceil on regular float still works
-def test_ceil_float(t):
+def test_ceil_float():
     expect(math.ceil(3.2)).to_be(4)
     expect(math.ceil(3.0)).to_be(3)
     expect(math.ceil(-1.5)).to_be(-1)
@@ -104,7 +104,7 @@ def test_ceil_float(t):
 test("math.ceil on regular float", test_ceil_float)
 
 # Test 9: math.floor on regular float still works
-def test_floor_float(t):
+def test_floor_float():
     expect(math.floor(3.7)).to_be(3)
     expect(math.floor(3.0)).to_be(3)
     expect(math.floor(-1.5)).to_be(-2)
@@ -112,20 +112,20 @@ def test_floor_float(t):
 test("math.floor on regular float", test_floor_float)
 
 # Test 10: math.trunc on regular float still works
-def test_trunc_float(t):
+def test_trunc_float():
     expect(math.trunc(3.7)).to_be(3)
     expect(math.trunc(-3.7)).to_be(-3)
 
 test("math.trunc on regular float", test_trunc_float)
 
 # Test 11: math.ceil on int still works
-def test_ceil_int(t):
+def test_ceil_int():
     expect(math.ceil(5)).to_be(5)
 
 test("math.ceil on int", test_ceil_int)
 
 # Test 12: __ceil__/__floor__/__trunc__ without dunder raises TypeError
-def test_no_dunder_raises(t):
+def test_no_dunder_raises():
     class NoMath:
         pass
 
@@ -152,7 +152,7 @@ def test_no_dunder_raises(t):
 test("no dunder raises TypeError", test_no_dunder_raises)
 
 # Test 13: Custom rounding logic
-def test_custom_rounding(t):
+def test_custom_rounding():
     class AlwaysUp:
         def __init__(self, val):
             self.val = val

@@ -353,6 +353,53 @@ def test_exitstack_suppress():
 
 test("ExitStack with suppressing context manager", test_exitstack_suppress)
 
+def test_exitstack_callback_exception_propagates():
+    # Regression: exceptions raised by callbacks must propagate, not be silently
+    # dropped when ExitStack.__exit__ returns. (CPython ExitStack tracks
+    # pending_raise; the new exception replaces normal exit.)
+    def boom():
+        raise RuntimeError("bang")
+
+    raised = None
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.callback(boom)
+    except RuntimeError as e:
+        raised = str(e)
+    expect(raised).to_be("bang")
+
+test("ExitStack propagates callback exceptions", test_exitstack_callback_exception_propagates)
+
+
+def test_exitstack_callback_exception_suppressed_by_outer():
+    # If a later (outer) callback suppresses the new exception, no exception
+    # leaves the stack.
+    log = []
+
+    class Suppressor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("outer exit")
+            return True  # suppress
+
+    def boom():
+        log.append("inner boom")
+        raise RuntimeError("bang")
+
+    raised = False
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(Suppressor())   # outer cleanup
+            stack.callback(boom)                # inner cleanup (LIFO: runs first)
+    except RuntimeError:
+        raised = True
+
+    expect(raised).to_be(False)
+    expect(log).to_be(["inner boom", "outer exit"])
+
+test("ExitStack callback exception suppressed by outer __exit__", test_exitstack_callback_exception_suppressed_by_outer)
+
 # =====================================================
 # AbstractContextManager
 # =====================================================

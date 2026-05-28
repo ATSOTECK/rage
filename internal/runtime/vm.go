@@ -22,6 +22,7 @@ type VM struct {
 	currentException *PyException   // Currently active exception being handled
 	lastException    *PyException   // Last raised exception (for bare raise)
 	excHandlerStack  []*PyException // Stack of exceptions being handled (for __context__)
+	finallyExcLevels []int          // excHandlerStack level recorded at each OpSetupFinally
 
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
@@ -298,6 +299,52 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 		return false, errExceptionHandledInOuterFrame
 	}
 	return true, nil
+}
+
+// unwindWithBlocksOnReturn walks the frame's block stack and invokes
+// __exit__(None, None, None) on every active `with` block so that returning
+// out of a `with` runs the context manager's cleanup. Blocks of other types
+// are simply dropped — they don't have cleanup obligations on return.
+// If a __exit__ itself raises, the error is returned and remaining with blocks
+// are skipped (matching CPython behavior when __exit__ raises during cleanup).
+func (vm *VM) unwindWithBlocksOnReturn(frame *Frame) error {
+	for i := len(frame.BlockStack) - 1; i >= 0; i-- {
+		block := frame.BlockStack[i]
+		if block.Type != BlockWith || block.Level <= 0 {
+			continue
+		}
+		cm := frame.Stack[block.Level-1]
+		if err := vm.callExitNoExc(cm); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// callExitNoExc invokes cm.__exit__(None, None, None) for normal-flow cleanup.
+func (vm *VM) callExitNoExc(cm Value) error {
+	exitMethod, err := vm.getAttr(cm, "__exit__")
+	if err != nil {
+		return fmt.Errorf("AttributeError: __exit__: %w", err)
+	}
+	args := []Value{None, None, None}
+	switch fn := exitMethod.(type) {
+	case *PyMethod:
+		_, err = vm.callFunction(fn.Func, append([]Value{fn.Instance}, args...), nil)
+	case *PyFunction:
+		_, err = vm.callFunction(fn, append([]Value{cm}, args...), nil)
+	case *PyBuiltinFunc:
+		if fn.Bound {
+			_, err = fn.Fn(args, nil)
+		} else {
+			_, err = fn.Fn(append([]Value{cm}, args...), nil)
+		}
+	case *PyGoFunc:
+		_, err = vm.callGoFunction(fn, args)
+	default:
+		return fmt.Errorf("TypeError: __exit__ is not callable")
+	}
+	return err
 }
 
 // Stack operations - using stack pointer with pre-allocated slice

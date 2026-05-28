@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: __iadd__ is called when defined
-def test_iadd_called(t):
+def test_iadd_called():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -18,7 +18,7 @@ def test_iadd_called(t):
 test("__iadd__ is called and mutates in place", test_iadd_called)
 
 # Test 2: Falls back to __add__ when __iadd__ not defined
-def test_fallback_to_add(t):
+def test_fallback_to_add():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -34,7 +34,7 @@ def test_fallback_to_add(t):
 test("falls back to __add__ when __iadd__ not defined", test_fallback_to_add)
 
 # Test 3: __isub__
-def test_isub(t):
+def test_isub():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -49,7 +49,7 @@ def test_isub(t):
 test("__isub__", test_isub)
 
 # Test 4: __imul__
-def test_imul(t):
+def test_imul():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -64,7 +64,7 @@ def test_imul(t):
 test("__imul__", test_imul)
 
 # Test 5: __itruediv__
-def test_itruediv(t):
+def test_itruediv():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -79,7 +79,7 @@ def test_itruediv(t):
 test("__itruediv__", test_itruediv)
 
 # Test 6: __ifloordiv__
-def test_ifloordiv(t):
+def test_ifloordiv():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -94,7 +94,7 @@ def test_ifloordiv(t):
 test("__ifloordiv__", test_ifloordiv)
 
 # Test 7: __imod__
-def test_imod(t):
+def test_imod():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -109,7 +109,7 @@ def test_imod(t):
 test("__imod__", test_imod)
 
 # Test 8: __ipow__
-def test_ipow(t):
+def test_ipow():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -124,7 +124,7 @@ def test_ipow(t):
 test("__ipow__", test_ipow)
 
 # Test 9: __imatmul__
-def test_imatmul(t):
+def test_imatmul():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -139,7 +139,7 @@ def test_imatmul(t):
 test("__imatmul__", test_imatmul)
 
 # Test 10: __iand__
-def test_iand(t):
+def test_iand():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -154,7 +154,7 @@ def test_iand(t):
 test("__iand__", test_iand)
 
 # Test 11: __ior__
-def test_ior(t):
+def test_ior():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -169,7 +169,7 @@ def test_ior(t):
 test("__ior__", test_ior)
 
 # Test 12: __ixor__
-def test_ixor(t):
+def test_ixor():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -184,7 +184,7 @@ def test_ixor(t):
 test("__ixor__", test_ixor)
 
 # Test 13: __ilshift__
-def test_ilshift(t):
+def test_ilshift():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -199,7 +199,7 @@ def test_ilshift(t):
 test("__ilshift__", test_ilshift)
 
 # Test 14: __irshift__
-def test_irshift(t):
+def test_irshift():
     class Acc:
         def __init__(self, val):
             self.val = val
@@ -214,7 +214,7 @@ def test_irshift(t):
 test("__irshift__", test_irshift)
 
 # Test 15: List-like mutation pattern with __iadd__
-def test_list_like_iadd(t):
+def test_list_like_iadd():
     class MyList:
         def __init__(self):
             self.items = []
@@ -231,7 +231,7 @@ def test_list_like_iadd(t):
 test("list-like __iadd__ mutation pattern", test_list_like_iadd)
 
 # Test 16: Inherited inplace dunder
-def test_inherited_iadd(t):
+def test_inherited_iadd():
     class Base:
         def __init__(self, val):
             self.val = val
@@ -249,7 +249,7 @@ def test_inherited_iadd(t):
 test("inherited __iadd__ from base class", test_inherited_iadd)
 
 # Test 17: __iadd__ returning None makes variable None (no fallback)
-def test_iadd_returns_none(t):
+def test_iadd_returns_none():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -884,3 +884,37 @@ def test_cpython_tuple_imul():
     expect(t is orig).to_be(False)
 
 test("cpython: tuple *= repetition creates new tuple", test_cpython_tuple_imul)
+
+
+# === aug-assign on attribute: LHS object must evaluate exactly once ===
+def test_augassign_attr_single_eval():
+    calls = []
+
+    class C:
+        def __init__(self):
+            self.x = 10
+
+    obj = C()
+
+    def get_obj():
+        calls.append("get")
+        return obj
+
+    get_obj().x += 5
+    expect(obj.x).to_be(15)
+    expect(calls).to_be(["get"])
+
+test("aug-assign on attribute evaluates target once", test_augassign_attr_single_eval)
+
+
+# === aug-assign on attribute repeated: must not leak stack slots ===
+def test_augassign_attr_no_stack_leak():
+    class C:
+        x = 0
+
+    c = C()
+    for _ in range(100):
+        c.x += 1
+    expect(c.x).to_be(100)
+
+test("aug-assign on attribute does not leak stack", test_augassign_attr_no_stack_leak)

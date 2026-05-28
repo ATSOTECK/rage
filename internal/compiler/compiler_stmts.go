@@ -220,44 +220,42 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 }
 
 func (c *Compiler) compileAugAssign(s *model.AugAssign) {
-	// Track if this is a subscript (needs special handling to avoid double evaluation)
-	_, isSubscript := s.Target.(*model.Subscript)
-
-	// Load target
 	switch t := s.Target.(type) {
 	case *model.Identifier:
 		c.compileLoad(t.Name)
+		c.compileExpr(s.Value)
+		c.emitInplaceOp(s.Op)
+		c.compileStore(s.Target)
+
 	case *model.Attribute:
+		// Evaluate t.Value once: [obj]
 		c.compileExpr(t.Value)
-		c.emit(runtime.OpDup)
+		c.emit(runtime.OpDup) // [obj, obj]
 		idx := c.addName(t.Attr.Name)
-		c.emitArg(runtime.OpLoadAttr, idx)
+		c.emitArg(runtime.OpLoadAttr, idx) // [obj, val]
+		c.compileExpr(s.Value)             // [obj, val, rhs]
+		c.emitInplaceOp(s.Op)              // [obj, result]
+		c.emit(runtime.OpRot2)             // [result, obj]
+		c.emitArg(runtime.OpStoreAttr, idx) // pops obj then result
+
 	case *model.Subscript:
-		// For subscript: push object and index, duplicate both, then get value
-		// Stack sequence: [obj, idx] -> [obj, idx, obj, idx] -> [obj, idx, value]
+		// Evaluate obj+idx once: [obj, idx]
 		c.compileExpr(t.Value)
 		c.compileExpr(t.Slice)
-		c.emit(runtime.OpDup2) // Duplicate top two: [obj, idx, obj, idx]
-		c.emit(runtime.OpBinarySubscr) // Get value: [obj, idx, value]
+		c.emit(runtime.OpDup2)         // [obj, idx, obj, idx]
+		c.emit(runtime.OpBinarySubscr) // [obj, idx, val]
+		c.compileExpr(s.Value)         // [obj, idx, val, rhs]
+		c.emitInplaceOp(s.Op)          // [obj, idx, result]
+		c.emit(runtime.OpRot3)         // [result, obj, idx]
+		c.emit(runtime.OpStoreSubscr)
 	}
+}
 
-	// Compile the value
-	c.compileExpr(s.Value)
-
-	// Emit inplace operation
-	if binOp, ok := augAssignToOp[s.Op]; ok {
+func (c *Compiler) emitInplaceOp(op model.TokenKind) {
+	if binOp, ok := augAssignToOp[op]; ok {
 		if entry, ok := opMapping[binOp]; ok {
 			c.emit(entry.inplace)
 		}
-	}
-
-	// Store result
-	if isSubscript {
-		// For subscript: stack is [obj, idx, result], need [result, obj, idx] for StoreSubscr
-		c.emit(runtime.OpRot3)       // [obj, idx, result] -> [result, obj, idx]
-		c.emit(runtime.OpStoreSubscr) // Store and pop all three
-	} else {
-		c.compileStore(s.Target)
 	}
 }
 

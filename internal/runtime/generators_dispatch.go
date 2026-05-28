@@ -969,6 +969,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		frame.BlockStack = append(frame.BlockStack, block)
 
 	case OpSetupFinally:
+		vm.finallyExcLevels = append(vm.finallyExcLevels, len(vm.excHandlerStack))
 		block := Block{
 			Type:    BlockFinally,
 			Handler: arg,
@@ -1052,9 +1053,16 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 
 	case OpEndFinally:
-		// Pop the handler stack entry that was pushed when entering finally
-		if len(vm.excHandlerStack) > 0 {
-			vm.excHandlerStack = vm.excHandlerStack[:len(vm.excHandlerStack)-1]
+		// Restore excHandlerStack to the level recorded at OpSetupFinally.
+		if n := len(vm.finallyExcLevels); n > 0 {
+			savedLevel := vm.finallyExcLevels[n-1]
+			vm.finallyExcLevels = vm.finallyExcLevels[:n-1]
+			for i := savedLevel; i < len(vm.excHandlerStack); i++ {
+				vm.excHandlerStack[i] = nil
+			}
+			if savedLevel < len(vm.excHandlerStack) {
+				vm.excHandlerStack = vm.excHandlerStack[:savedLevel]
+			}
 		}
 		if vm.currentException != nil {
 			exc := vm.currentException
