@@ -1203,4 +1203,45 @@ test("CPython: file binary encoding", test_cpython_file_binary_encoding)
 test("CPython: file context exception", test_cpython_file_context_exception)
 test("CPython: file readline after iteration", test_cpython_file_readline_after_iteration)
 
+
+# === readline(size) must preserve bytes past `size` for the next read ===
+# Regression: ReadString('\n') over-reads the full line, then size-limit
+# slicing silently discards the remainder. The next readline() should still
+# see the rest of the first line followed by subsequent lines.
+def test_readline_with_size_preserves_remainder():
+    path = tmp_dir + "/readline_limit.txt"
+    f = open(path, "w")
+    f.write("hello world\nsecond line\n")
+    f.close()
+
+    f = open(path, "r")
+    a = f.readline(5)   # first 5 bytes
+    b = f.readline()    # rest of first line
+    c = f.readline()    # second line
+    f.close()
+    expect(a).to_be("hello")
+    expect(b).to_be(" world\n")
+    expect(c).to_be("second line\n")
+
+
+def test_readline_size_stops_at_newline():
+    # readline(size) returns the line including '\n' if encountered before size.
+    path = tmp_dir + "/readline_stop.txt"
+    f = open(path, "w")
+    f.write("ab\nlong line here\n")
+    f.close()
+
+    f = open(path, "r")
+    a = f.readline(100)  # short line fits well under 100; returns "ab\n"
+    b = f.readline(4)    # next 4 bytes of long line
+    c = f.readline()     # remainder
+    f.close()
+    expect(a).to_be("ab\n")
+    expect(b).to_be("long")
+    expect(c).to_be(" line here\n")
+
+
+test("readline(size) preserves remainder", test_readline_with_size_preserves_remainder)
+test("readline(size) stops at newline", test_readline_size_stops_at_newline)
+
 print("File I/O tests completed")

@@ -1072,11 +1072,19 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 				return nil, err
 			}
 		}
-		// Check for pending return from OpReturn through finally block
+		// Resume a return that was suspended to run this finally body.
+		// If outer with/finally blocks remain, continue unwinding into them.
 		if vm.generatorHasPendingReturn {
 			vm.generatorHasPendingReturn = false
 			result := vm.generatorPendingReturn
 			vm.generatorPendingReturn = nil
+			transferred, err := vm.unwindForReturn(frame, result)
+			if err != nil {
+				return nil, err
+			}
+			if transferred {
+				return nil, nil
+			}
 			return result, nil
 		}
 		// Check for pending jump from OpContinueLoop through finally block

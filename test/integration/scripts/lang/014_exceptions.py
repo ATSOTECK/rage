@@ -454,4 +454,85 @@ test("negate_unbound_raises", test_negate_unbound_raises)
 test("negate_normal", test_negate_normal)
 test("negate_float", test_negate_float)
 
+
+# === return inside try/finally must run the finally body ===
+# Regression: OpReturn in the main dispatch used to drop the block stack
+# and pop the frame without routing through BlockFinally, so the finally
+# clause was silently skipped on a `return` from inside the `try`.
+def test_return_runs_finally():
+    log = []
+    def f():
+        try:
+            return 1
+        finally:
+            log.append("f")
+    expect(f()).to_be(1)
+    expect(log).to_be(["f"])
+
+
+def test_return_runs_nested_finally_in_order():
+    log = []
+    def f():
+        try:
+            try:
+                return "inner"
+            finally:
+                log.append("f1")
+        finally:
+            log.append("f2")
+    expect(f()).to_be("inner")
+    expect(log).to_be(["f1", "f2"])
+
+
+def test_finally_return_overrides_try_return():
+    def f():
+        try:
+            return 1
+        finally:
+            return 2
+    expect(f()).to_be(2)
+
+
+def test_finally_exception_replaces_return():
+    def f():
+        try:
+            return 1
+        finally:
+            raise ValueError("boom")
+    caught = None
+    try:
+        f()
+    except ValueError as e:
+        caught = str(e)
+    expect(caught).to_be("boom")
+
+
+def test_return_through_with_inside_try_finally():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("exit")
+            return False
+
+    def f():
+        try:
+            with CM():
+                return "done"
+        finally:
+            log.append("f")
+
+    expect(f()).to_be("done")
+    # __exit__ first (innermost), then finally
+    expect(log).to_be(["exit", "f"])
+
+
+test("return_runs_finally", test_return_runs_finally)
+test("return_runs_nested_finally_in_order", test_return_runs_nested_finally_in_order)
+test("finally_return_overrides_try_return", test_finally_return_overrides_try_return)
+test("finally_exception_replaces_return", test_finally_exception_replaces_return)
+test("return_through_with_inside_try_finally", test_return_through_with_inside_try_finally)
+
 print("Exceptions tests completed")

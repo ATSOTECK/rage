@@ -301,24 +301,54 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 	return true, nil
 }
 
-// unwindWithBlocksOnReturn walks the frame's block stack and invokes
-// __exit__(None, None, None) on every active `with` block so that returning
-// out of a `with` runs the context manager's cleanup. Blocks of other types
-// are simply dropped — they don't have cleanup obligations on return.
-// If a __exit__ itself raises, the error is returned and remaining with blocks
-// are skipped (matching CPython behavior when __exit__ raises during cleanup).
-func (vm *VM) unwindWithBlocksOnReturn(frame *Frame) error {
-	for i := len(frame.BlockStack) - 1; i >= 0; i-- {
-		block := frame.BlockStack[i]
-		if block.Type != BlockWith || block.Level <= 0 {
-			continue
-		}
-		cm := frame.Stack[block.Level-1]
-		if err := vm.callExitNoExc(cm); err != nil {
-			return err
+// unwindForReturn walks the frame's block stack while a return is in flight.
+//   - BlockFinally: stores `result` as a pending return, transfers control to
+//     the finally body, and returns (true, nil). The caller should continue
+//     dispatching opcodes; OpEndFinally will resume the unwind when the
+//     finally body completes.
+//   - BlockWith: calls __exit__(None, None, None) on the context manager. If
+//     it raises, hands the exception to handleException — which walks the
+//     remaining block stack for a handler. Returns (true, nil) on caught,
+//     (false, err) on uncaught.
+//   - Other blocks: dropped silently — no cleanup obligation on return.
+// Returns (false, nil) when the block stack is exhausted; the caller pops
+// the frame and returns `result`.
+func (vm *VM) unwindForReturn(frame *Frame, result Value) (bool, error) {
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		switch block.Type {
+		case BlockFinally:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.generatorPendingReturn = result
+			vm.generatorHasPendingReturn = true
+			vm.push(None)
+			return true, nil
+		case BlockWith:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			if block.Level <= 0 {
+				continue
+			}
+			cm := frame.Stack[block.Level-1]
+			if err := vm.callExitNoExc(cm); err != nil {
+				// __exit__ raised — let remaining handlers in this frame catch it.
+				var pyExc *PyException
+				if pe, ok := err.(*PyException); ok {
+					pyExc = pe
+				} else {
+					pyExc = vm.wrapGoError(err)
+				}
+				if _, herr := vm.handleException(pyExc); herr != nil {
+					return false, herr
+				}
+				return true, nil
+			}
+		default:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // callExitNoExc invokes cm.__exit__(None, None, None) for normal-flow cleanup.

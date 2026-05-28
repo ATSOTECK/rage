@@ -764,34 +764,12 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 		case OpReturn:
 			frame.SP--
 			result := frame.Stack[frame.SP]
-			// Walk the block stack: BlockFinally suspends the return to run the
-			// finally body; BlockWith calls __exit__(None, None, None) and keeps
-			// unwinding; other blocks are simply dropped.
-			foundFinally := false
-			for len(frame.BlockStack) > 0 {
-				block := frame.BlockStack[len(frame.BlockStack)-1]
-				if block.Type == BlockFinally {
-					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-					frame.SP = block.Level
-					frame.IP = block.Handler
-					vm.generatorPendingReturn = result
-					vm.generatorHasPendingReturn = true
-					vm.push(None)
-					foundFinally = true
-					break
-				}
-				if block.Type == BlockWith && block.Level > 0 {
-					cm := frame.Stack[block.Level-1]
-					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-					if err := vm.callExitNoExc(cm); err != nil {
-						return nil, false, err
-					}
-					continue
-				}
-				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			transferred, err := vm.unwindForReturn(frame, result)
+			if err != nil {
+				return nil, false, err
 			}
-			if foundFinally {
-				continue // Continue the outer opcode execution loop to run the finally block
+			if transferred {
+				continue
 			}
 			return result, false, nil
 

@@ -176,7 +176,9 @@ func InitHeapqModule() {
 				for _, d := range deco {
 					if len(heap) < n {
 						heap = append(heap, d)
-						decoSiftDown(vm, heap, 0, len(heap)-1)
+						if err := decoSiftDown(vm, heap, 0, len(heap)-1); err != nil {
+							return nil, err
+						}
 					} else {
 						lt, err := heapLt(vm, d.key, heap[0].key)
 						if err != nil {
@@ -184,7 +186,9 @@ func InitHeapqModule() {
 						}
 						if !lt {
 							heap[0] = d
-							decoSiftUp(vm, heap, 0)
+							if err := decoSiftUp(vm, heap, 0); err != nil {
+								return nil, err
+							}
 						}
 					}
 				}
@@ -197,7 +201,9 @@ func InitHeapqModule() {
 					heap[0] = heap[last]
 					heap = heap[:last]
 					if len(heap) > 0 {
-						decoSiftUp(vm, heap, 0)
+						if err := decoSiftUp(vm, heap, 0); err != nil {
+							return nil, err
+						}
 					}
 				}
 
@@ -255,7 +261,9 @@ func InitHeapqModule() {
 				for _, d := range deco {
 					if len(heap) < n {
 						heap = append(heap, d)
-						decoMaxSiftDown(vm, heap, 0, len(heap)-1)
+						if err := decoMaxSiftDown(vm, heap, 0, len(heap)-1); err != nil {
+							return nil, err
+						}
 					} else {
 						lt, err := heapLt(vm, d.key, heap[0].key)
 						if err != nil {
@@ -263,7 +271,9 @@ func InitHeapqModule() {
 						}
 						if lt {
 							heap[0] = d
-							decoMaxSiftUp(vm, heap, 0)
+							if err := decoMaxSiftUp(vm, heap, 0); err != nil {
+								return nil, err
+							}
 						}
 					}
 				}
@@ -276,7 +286,9 @@ func InitHeapqModule() {
 					heap[0] = heap[last]
 					heap = heap[:last]
 					if len(heap) > 0 {
-						decoMaxSiftUp(vm, heap, 0)
+						if err := decoMaxSiftUp(vm, heap, 0); err != nil {
+							return nil, err
+						}
 					}
 				}
 
@@ -430,13 +442,18 @@ type heapDecorated struct {
 	val runtime.Value
 }
 
-// decoSiftDown for min-heap of decorated values (used by nlargest)
-func decoSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) {
+// decoSiftDown for min-heap of decorated values (used by nlargest).
+// Returns any error from comparing keys so uncomparable elements raise
+// rather than silently producing wrong order.
+func decoSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) error {
 	newItem := heap[pos]
 	for pos > startPos {
 		parentPos := (pos - 1) >> 1
 		parent := heap[parentPos]
-		lt, _ := heapLt(vm, newItem.key, parent.key)
+		lt, err := heapLt(vm, newItem.key, parent.key)
+		if err != nil {
+			return err
+		}
 		if lt {
 			heap[pos] = parent
 			pos = parentPos
@@ -445,10 +462,11 @@ func decoSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) {
 		}
 	}
 	heap[pos] = newItem
+	return nil
 }
 
 // decoSiftUp for min-heap of decorated values (used by nlargest)
-func decoSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
+func decoSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) error {
 	endPos := len(heap)
 	startPos := pos
 	newItem := heap[pos]
@@ -456,7 +474,10 @@ func decoSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
 	for childPos < endPos {
 		rightPos := childPos + 1
 		if rightPos < endPos {
-			lt, _ := heapLt(vm, heap[childPos].key, heap[rightPos].key)
+			lt, err := heapLt(vm, heap[childPos].key, heap[rightPos].key)
+			if err != nil {
+				return err
+			}
 			if !lt {
 				childPos = rightPos
 			}
@@ -466,16 +487,19 @@ func decoSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
 		childPos = 2*pos + 1
 	}
 	heap[pos] = newItem
-	decoSiftDown(vm, heap, startPos, pos)
+	return decoSiftDown(vm, heap, startPos, pos)
 }
 
 // decoMaxSiftDown for max-heap of decorated values (used by nsmallest)
-func decoMaxSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) {
+func decoMaxSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) error {
 	newItem := heap[pos]
 	for pos > startPos {
 		parentPos := (pos - 1) >> 1
 		parent := heap[parentPos]
-		lt, _ := heapLt(vm, parent.key, newItem.key)
+		lt, err := heapLt(vm, parent.key, newItem.key)
+		if err != nil {
+			return err
+		}
 		if lt {
 			heap[pos] = parent
 			pos = parentPos
@@ -484,10 +508,11 @@ func decoMaxSiftDown(vm *runtime.VM, heap []heapDecorated, startPos, pos int) {
 		}
 	}
 	heap[pos] = newItem
+	return nil
 }
 
 // decoMaxSiftUp for max-heap of decorated values (used by nsmallest)
-func decoMaxSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
+func decoMaxSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) error {
 	endPos := len(heap)
 	startPos := pos
 	newItem := heap[pos]
@@ -495,7 +520,10 @@ func decoMaxSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
 	for childPos < endPos {
 		rightPos := childPos + 1
 		if rightPos < endPos {
-			lt, _ := heapLt(vm, heap[childPos].key, heap[rightPos].key)
+			lt, err := heapLt(vm, heap[childPos].key, heap[rightPos].key)
+			if err != nil {
+				return err
+			}
 			if lt {
 				childPos = rightPos
 			}
@@ -505,5 +533,5 @@ func decoMaxSiftUp(vm *runtime.VM, heap []heapDecorated, pos int) {
 		childPos = 2*pos + 1
 	}
 	heap[pos] = newItem
-	decoMaxSiftDown(vm, heap, startPos, pos)
+	return decoMaxSiftDown(vm, heap, startPos, pos)
 }

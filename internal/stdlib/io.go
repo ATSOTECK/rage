@@ -415,15 +415,35 @@ func fileReadline(vm *runtime.VM) int {
 		limit = vm.CheckInt(2)
 	}
 
-	line, err := f.reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		vm.RaiseError("IOError: %v", err)
-		return 0
-	}
-
-	// Apply size limit
-	if limit >= 0 && int64(len(line)) > limit {
-		line = line[:limit]
+	var line string
+	if limit < 0 {
+		// Read whole line (or until EOF).
+		s, err := f.reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			vm.RaiseError("IOError: %v", err)
+			return 0
+		}
+		line = s
+	} else {
+		// Read at most `limit` bytes, stopping at the first newline. Bytes
+		// past the limit stay buffered for the next read — slicing
+		// ReadString's result would silently discard them.
+		buf := make([]byte, 0, limit)
+		for int64(len(buf)) < limit {
+			b, err := f.reader.ReadByte()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				vm.RaiseError("IOError: %v", err)
+				return 0
+			}
+			buf = append(buf, b)
+			if b == '\n' {
+				break
+			}
+		}
+		line = string(buf)
 	}
 
 	if f.binary {

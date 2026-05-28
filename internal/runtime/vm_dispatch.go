@@ -2034,13 +2034,17 @@ func (vm *VM) run() (Value, error) {
 			// Inline pop for return
 			frame.SP--
 			result := frame.Stack[frame.SP]
-			// Call __exit__(None, None, None) for any active `with` block so
-			// returning out of `with` runs the context manager's cleanup.
-			// BlockFinally on return is a separate known limitation (TODO.md).
-			if err := vm.unwindWithBlocksOnReturn(frame); err != nil {
+			// Walk the block stack: __exit__ on any active `with`, defer into
+			// `try/finally` via the pending-return mechanism. If control was
+			// transferred (to a finally body or exception handler), continue
+			// dispatching; OpEndFinally will resume the return.
+			transferred, err := vm.unwindForReturn(frame, result)
+			if err != nil {
 				return nil, err
 			}
-			frame.BlockStack = nil
+			if transferred {
+				continue
+			}
 			if len(vm.frames) > 0 {
 				// Nil out the frame reference before truncating to allow GC to collect it.
 				// Without this, the underlying slice array retains a pointer to the popped
@@ -2659,6 +2663,27 @@ func (vm *VM) run() (Value, error) {
 			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err
+			}
+			// Resume a return that was suspended to run this finally body.
+			if vm.generatorHasPendingReturn {
+				vm.generatorHasPendingReturn = false
+				result := vm.generatorPendingReturn
+				vm.generatorPendingReturn = nil
+				transferred, err := vm.unwindForReturn(frame, result)
+				if err != nil {
+					return nil, err
+				}
+				if transferred {
+					continue
+				}
+				if len(vm.frames) > 0 {
+					vm.frames[len(vm.frames)-1] = nil
+					vm.frames = vm.frames[:len(vm.frames)-1]
+					if len(vm.frames) > 0 {
+						vm.frame = vm.frames[len(vm.frames)-1]
+					}
+				}
+				return result, nil
 			}
 
 		case OpExceptionMatch:
