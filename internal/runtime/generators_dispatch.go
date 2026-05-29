@@ -369,12 +369,24 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	// Closure operations
 	case OpLoadDeref:
-		idx := arg
-		if idx < len(frame.Cells) && frame.Cells[idx] != nil {
-			vm.push(frame.Cells[idx].Value)
-		} else {
-			vm.push(None)
+		if arg >= len(frame.Cells) {
+			return nil, fmt.Errorf("cell index %d out of range (have %d cells)", arg, len(frame.Cells))
 		}
+		cell := frame.Cells[arg]
+		if cell == nil {
+			return nil, fmt.Errorf("cell is nil at index %d", arg)
+		}
+		if cell.Value == nil {
+			// Match main dispatch: a cell with no value is an unbound variable.
+			// Returning None silently masked closure-rebinding bugs in
+			// generator bodies; raise the proper error instead.
+			varName := frame.Code.CellOrFreeName(arg)
+			if arg < len(frame.Code.CellVars) {
+				return nil, fmt.Errorf("UnboundLocalError: cannot access local variable '%s' referenced before assignment", varName)
+			}
+			return nil, fmt.Errorf("NameError: free variable '%s' referenced before assignment in enclosing scope", varName)
+		}
+		vm.push(cell.Value)
 	case OpStoreDeref:
 		idx := arg
 		val := vm.pop()
@@ -806,73 +818,105 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		vm.push(localVal)
 
 	case OpBinaryAddInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		vm.push(MakeInt(a.Value + b.Value))
+		b := vm.pop()
+		a := vm.pop()
+		if ai, ok := a.(*PyInt); ok {
+			if bi, ok := b.(*PyInt); ok {
+				vm.push(MakeInt(ai.Value + bi.Value))
+				break
+			}
+		}
+		result, err := vm.binaryOp(OpBinaryAdd, a, b)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
 
 	case OpBinarySubtractInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		vm.push(MakeInt(a.Value - b.Value))
+		b := vm.pop()
+		a := vm.pop()
+		if ai, ok := a.(*PyInt); ok {
+			if bi, ok := b.(*PyInt); ok {
+				vm.push(MakeInt(ai.Value - bi.Value))
+				break
+			}
+		}
+		result, err := vm.binaryOp(OpBinarySubtract, a, b)
+		if err != nil {
+			return nil, err
+		}
+		vm.push(result)
 
 	case OpBinaryMultiplyInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		vm.push(MakeInt(a.Value * b.Value))
-
-	case OpCompareLtInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value < b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		b := vm.pop()
+		a := vm.pop()
+		if ai, ok := a.(*PyInt); ok {
+			if bi, ok := b.(*PyInt); ok {
+				vm.push(MakeInt(ai.Value * bi.Value))
+				break
+			}
 		}
-
-	case OpCompareLeInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value <= b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		result, err := vm.binaryOp(OpBinaryMultiply, a, b)
+		if err != nil {
+			return nil, err
 		}
+		vm.push(result)
 
-	case OpCompareGtInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value > b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+	case OpCompareLtInt, OpCompareLeInt, OpCompareGtInt, OpCompareGeInt, OpCompareEqInt, OpCompareNeInt:
+		b := vm.pop()
+		a := vm.pop()
+		if ai, ok := a.(*PyInt); ok {
+			if bi, ok := b.(*PyInt); ok {
+				var truth bool
+				switch op {
+				case OpCompareLtInt:
+					truth = ai.Value < bi.Value
+				case OpCompareLeInt:
+					truth = ai.Value <= bi.Value
+				case OpCompareGtInt:
+					truth = ai.Value > bi.Value
+				case OpCompareGeInt:
+					truth = ai.Value >= bi.Value
+				case OpCompareEqInt:
+					truth = ai.Value == bi.Value
+				case OpCompareNeInt:
+					truth = ai.Value != bi.Value
+				}
+				if truth {
+					vm.push(True)
+				} else {
+					vm.push(False)
+				}
+				break
+			}
 		}
-
-	case OpCompareGeInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value >= b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		// Fallback to generic compareOp for non-int operands.
+		var genericOp Opcode
+		switch op {
+		case OpCompareLtInt:
+			genericOp = OpCompareLt
+		case OpCompareLeInt:
+			genericOp = OpCompareLe
+		case OpCompareGtInt:
+			genericOp = OpCompareGt
+		case OpCompareGeInt:
+			genericOp = OpCompareGe
+		case OpCompareEqInt:
+			genericOp = OpCompareEq
+		case OpCompareNeInt:
+			genericOp = OpCompareNe
 		}
-
-	case OpCompareEqInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value == b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		result := vm.CompareOp(genericOp, a, b)
+		// compareOp signals errors via vm.currentException — propagate it.
+		if vm.currentException != nil {
+			exc := vm.currentException
+			vm.currentException = nil
+			return nil, exc
 		}
-
-	case OpCompareNeInt:
-		b := vm.pop().(*PyInt)
-		a := vm.pop().(*PyInt)
-		if a.Value != b.Value {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		if result == nil {
+			return nil, fmt.Errorf("TypeError: comparison failed")
 		}
+		vm.push(result)
 
 	// Compare and jump opcodes
 	case OpCompareLtJump:

@@ -787,13 +787,21 @@ func (vm *VM) initBuiltinsClasses() {
 					return v.Class, nil
 				case *PyClass:
 					return typeClass, nil
-				default:
-					// Return a class with the type name
-					typeName := vm.typeName(args[1])
-					cls := &PyClass{Name: typeName}
-					cls.Mro = []*PyClass{cls}
-					return cls, nil
+				case *PyException:
+					// Return the real exception class so identity checks
+					// like `type(e) is ValueError` work.
+					if v.ExcType != nil {
+						return v.ExcType, nil
+					}
+					// Fall through to the synthetic-class branch.
 				}
+				// Return a synthetic class with the right name. This handles
+				// built-in singletons (Ellipsis, NotImplemented, …) and any
+				// type without a backing *PyClass.
+				typeName := vm.typeName(args[1])
+				cls := &PyClass{Name: typeName}
+				cls.Mro = []*PyClass{cls}
+				return cls, nil
 			}
 			// 4-arg form: type.__new__(mcs, name, bases, namespace)
 			if len(args) == 4 {

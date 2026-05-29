@@ -382,4 +382,29 @@ def test_raise_from_does_not_mutate_existing_exception():
 test("bare_reraise_preserves_traceback", test_bare_reraise_preserves_traceback)
 test("raise_from_does_not_mutate_existing_exception", test_raise_from_does_not_mutate_existing_exception)
 
+
+# === __context__ is chained when an exception comes back from a call ===
+# Regression: OpCall*'s error path bypassed the excHandlerStack-based context
+# chaining that tryHandleError does, so exceptions raised inside a called
+# function got no __context__ when caught inside an outer except handler.
+def test_context_chained_through_function_call():
+    def inner():
+        raise TypeError("from call")
+
+    captured_ctx = None
+    try:
+        raise ValueError("outer")
+    except ValueError:
+        try:
+            inner()
+        except TypeError as t:
+            captured_ctx = t.__context__
+
+    expect(captured_ctx is None).to_be(False)
+    expect(str(captured_ctx)).to_be("outer")
+    expect(type(captured_ctx) is ValueError).to_be(True)
+
+
+test("context_chained_through_function_call", test_context_chained_through_function_call)
+
 print("CPython exception chaining tests completed")

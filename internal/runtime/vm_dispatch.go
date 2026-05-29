@@ -1870,40 +1870,19 @@ func (vm *VM) run() (Value, error) {
 			callable := vm.pop()
 			result, err := vm.call(callable, args, nil)
 			if err != nil {
-				// Check if exception was already handled in an outer frame
-				if err == errExceptionHandledInOuterFrame {
-					// Check if the handler is in THIS frame
-					if vm.frame == frame {
-						// Handler is in this frame, continue from handler
-						continue
-					}
-					// Handler is in an even outer frame, propagate
-					return nil, err
+				// tryHandleError chains __context__ from the active except
+				// handler (so exceptions raised inside a called function
+				// get the enclosing handler's exception as __context__),
+				// dispatches to a handler, and signals frame transfer via
+				// errExceptionHandledInOuterFrame.
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				// Check if it's a Python exception that can be handled
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						// No handler found, propagate exception
-						return nil, handleErr
-					}
-					// Handler found - check if it's in this frame
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
-					// Handler is in current frame, continue
+				if handled {
 					continue
 				}
-				// Convert Go error to Python exception so try/except can catch it
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 
@@ -1926,34 +1905,14 @@ func (vm *VM) run() (Value, error) {
 			callable := vm.pop()
 			result, err := vm.call(callable, args, kwargs)
 			if err != nil {
-				// Check if exception was already handled in an outer frame
-				if err == errExceptionHandledInOuterFrame {
-					if vm.frame == frame {
-						continue
-					}
-					return nil, err
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				// Check if it's a Python exception that can be handled
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						return nil, handleErr
-					}
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
+				if handled {
 					continue
 				}
-				// Convert Go error to Python exception so try/except can catch it
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 
@@ -2006,31 +1965,14 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.call(callable, args, kwargs)
 			if err != nil {
-				if err == errExceptionHandledInOuterFrame {
-					if vm.frame == frame {
-						continue
-					}
-					return nil, err
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						return nil, handleErr
-					}
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
+				if handled {
 					continue
 				}
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 

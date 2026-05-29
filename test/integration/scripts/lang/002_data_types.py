@@ -106,8 +106,31 @@ def test_ellipsis_repr_and_str():
     expect(repr(...)).to_be("Ellipsis")
     expect(str(...)).to_be("Ellipsis")
 
+
+# === type(x).__name__ returns the real class name ===
+# Regression: vm.typeName lacked cases for PyException and PyEllipsisType,
+# so they fell through to "object" instead of "ValueError"/"ellipsis".
+def test_type_name_for_ellipsis():
+    expect(type(...).__name__).to_be("ellipsis")
+
+def test_type_name_for_exception():
+    try:
+        raise ValueError("x")
+    except ValueError as e:
+        expect(type(e).__name__).to_be("ValueError")
+
+def test_type_returns_real_exception_class():
+    # type(e) must return the actual class so identity checks work.
+    try:
+        raise ValueError("x")
+    except ValueError as e:
+        expect(type(e) is ValueError).to_be(True)
+
 test("ellipsis is singleton", test_ellipsis_is_singleton)
 test("ellipsis is not the string '...'", test_ellipsis_not_string)
 test("ellipsis repr and str", test_ellipsis_repr_and_str)
+test("type(...).__name__ is 'ellipsis'", test_type_name_for_ellipsis)
+test("type(exception).__name__ is the exception class name", test_type_name_for_exception)
+test("type(exception) is the real exception class", test_type_returns_real_exception_class)
 
 print("Data types tests completed")

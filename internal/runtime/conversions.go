@@ -794,6 +794,10 @@ func (vm *VM) typeName(v Value) string {
 		return "type"
 	case *PyInstance:
 		return val.Class.Name
+	case *PyException:
+		return val.Type()
+	case *PyEllipsisType:
+		return "ellipsis"
 	case *PyRange:
 		return "range"
 	case *PyIterator:
