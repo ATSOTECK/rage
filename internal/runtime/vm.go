@@ -301,15 +301,14 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 	return true, nil
 }
 
-// cleanupWithBlock pops the BlockWith from the block stack, runs __exit__,
-// and removes the cm from the operand stack. If __exit__ raises, the
-// exception is routed to remaining handlers in the same frame; the caller
-// receives (true, nil) on caught, (false, err) on uncaught.
-// Returns (true, nil) with second value being true if cm was cleaned up
-// normally and the unwind should continue.
-func (vm *VM) cleanupWithBlock(frame *Frame, block Block) (caught bool, cleaned bool, err error) {
+// cleanupWithBlock runs __exit__ for a BlockWith being unwound and removes the
+// cm from the operand stack. If __exit__ raises, the exception is routed to
+// remaining handlers in the same frame: the caller receives (true, nil) when a
+// handler caught it, (false, err) when it went uncaught. On normal cleanup the
+// caller receives (false, nil) and should continue unwinding.
+func (vm *VM) cleanupWithBlock(frame *Frame, block Block) (caught bool, err error) {
 	if block.Level <= 0 {
-		return false, true, nil
+		return false, nil
 	}
 	cm := frame.Stack[block.Level-1]
 	if exitErr := vm.callExitNoExc(cm); exitErr != nil {
@@ -322,12 +321,12 @@ func (vm *VM) cleanupWithBlock(frame *Frame, block Block) (caught bool, cleaned 
 			pyExc = vm.wrapGoError(exitErr)
 		}
 		if _, herr := vm.handleException(pyExc); herr != nil {
-			return false, false, herr
+			return false, herr
 		}
-		return true, false, nil
+		return true, nil
 	}
 	frame.SP = block.Level - 1
-	return false, true, nil
+	return false, nil
 }
 
 // unwindForReturn walks the frame's block stack while a return is in flight.
@@ -356,7 +355,7 @@ func (vm *VM) unwindForReturn(frame *Frame, result Value) (bool, error) {
 			return true, nil
 		case BlockWith:
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-			caught, _, err := vm.cleanupWithBlock(frame, block)
+			caught, err := vm.cleanupWithBlock(frame, block)
 			if err != nil {
 				return false, err
 			}
@@ -387,7 +386,7 @@ func (vm *VM) unwindForJump(frame *Frame, target int) (bool, error) {
 			return true, nil
 		case BlockWith:
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-			caught, _, err := vm.cleanupWithBlock(frame, block)
+			caught, err := vm.cleanupWithBlock(frame, block)
 			if err != nil {
 				return false, err
 			}
