@@ -301,6 +301,35 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 	return true, nil
 }
 
+// cleanupWithBlock pops the BlockWith from the block stack, runs __exit__,
+// and removes the cm from the operand stack. If __exit__ raises, the
+// exception is routed to remaining handlers in the same frame; the caller
+// receives (true, nil) on caught, (false, err) on uncaught.
+// Returns (true, nil) with second value being true if cm was cleaned up
+// normally and the unwind should continue.
+func (vm *VM) cleanupWithBlock(frame *Frame, block Block) (caught bool, cleaned bool, err error) {
+	if block.Level <= 0 {
+		return false, true, nil
+	}
+	cm := frame.Stack[block.Level-1]
+	if exitErr := vm.callExitNoExc(cm); exitErr != nil {
+		// Remove cm from operand stack before propagating.
+		frame.SP = block.Level - 1
+		var pyExc *PyException
+		if pe, ok := exitErr.(*PyException); ok {
+			pyExc = pe
+		} else {
+			pyExc = vm.wrapGoError(exitErr)
+		}
+		if _, herr := vm.handleException(pyExc); herr != nil {
+			return false, false, herr
+		}
+		return true, false, nil
+	}
+	frame.SP = block.Level - 1
+	return false, true, nil
+}
+
 // unwindForReturn walks the frame's block stack while a return is in flight.
 //   - BlockFinally: stores `result` as a pending return, transfers control to
 //     the finally body, and returns (true, nil). The caller should continue
@@ -327,27 +356,49 @@ func (vm *VM) unwindForReturn(frame *Frame, result Value) (bool, error) {
 			return true, nil
 		case BlockWith:
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-			if block.Level <= 0 {
-				continue
+			caught, _, err := vm.cleanupWithBlock(frame, block)
+			if err != nil {
+				return false, err
 			}
-			cm := frame.Stack[block.Level-1]
-			if err := vm.callExitNoExc(cm); err != nil {
-				// __exit__ raised — let remaining handlers in this frame catch it.
-				var pyExc *PyException
-				if pe, ok := err.(*PyException); ok {
-					pyExc = pe
-				} else {
-					pyExc = vm.wrapGoError(err)
-				}
-				if _, herr := vm.handleException(pyExc); herr != nil {
-					return false, herr
-				}
+			if caught {
 				return true, nil
 			}
 		default:
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 		}
 	}
+	return false, nil
+}
+
+// unwindForJump is the break/continue analogue of unwindForReturn: walks the
+// frame's block stack running cleanup, and either transfers control to the
+// nearest finally body (with the jump target stashed for OpEndFinally to
+// resume) or sets frame.IP directly when no finally remains.
+func (vm *VM) unwindForJump(frame *Frame, target int) (bool, error) {
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		switch block.Type {
+		case BlockFinally:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			vm.generatorPendingJump = target
+			vm.generatorHasPendingJump = true
+			return true, nil
+		case BlockWith:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			caught, _, err := vm.cleanupWithBlock(frame, block)
+			if err != nil {
+				return false, err
+			}
+			if caught {
+				return true, nil
+			}
+		default:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+		}
+	}
+	frame.IP = target
 	return false, nil
 }
 

@@ -212,7 +212,9 @@ func TestCreateExceptionCauseChaining(t *testing.T) {
 	}
 }
 
-// Attaching cause to an existing *PyException
+// Attaching cause to an existing *PyException must not mutate the input —
+// the same exception may be shared (e.g. vm.lastException), and `raise X
+// from Y` should not rewrite cause history on the original.
 func TestCreateExceptionAttachCauseToPyException(t *testing.T) {
 	vm := NewVM()
 
@@ -229,14 +231,20 @@ func TestCreateExceptionAttachCauseToPyException(t *testing.T) {
 	}
 
 	result := vm.createException(original, cause)
-	if result != original {
-		t.Error("should return same exception object")
+	if result == original {
+		t.Error("should return a clone, not the same object")
 	}
 	if result.Cause != cause {
-		t.Error("Cause should be attached")
+		t.Error("Cause should be attached on the clone")
 	}
 	if !result.SuppressContext {
-		t.Error("SuppressContext should be true")
+		t.Error("SuppressContext should be true on the clone")
+	}
+	if original.Cause != nil {
+		t.Error("input must not be mutated: Cause should still be nil")
+	}
+	if original.SuppressContext {
+		t.Error("input must not be mutated: SuppressContext should still be false")
 	}
 }
 

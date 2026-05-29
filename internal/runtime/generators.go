@@ -774,30 +774,9 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 			return result, false, nil
 
 		case OpContinueLoop:
-			// Continue loop - check for finally blocks that need to run first
-			foundFinally := false
-			for len(frame.BlockStack) > 0 {
-				block := frame.BlockStack[len(frame.BlockStack)-1]
-				if block.Type == BlockFinally {
-					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-					frame.SP = block.Level
-					frame.IP = block.Handler
-					// Set pending jump so EndFinally knows to jump to the loop target
-					vm.generatorPendingJump = arg
-					vm.generatorHasPendingJump = true
-					foundFinally = true
-					break
-				}
-				if block.Type == BlockLoop {
-					break // Stop at the loop block
-				}
-				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			if _, err := vm.unwindForJump(frame, arg); err != nil {
+				return nil, false, err
 			}
-			if foundFinally {
-				continue
-			}
-			// No finally block, just jump directly
-			frame.IP = arg
 
 		case OpGenStart:
 			// No-op, just marks generator start

@@ -20,16 +20,21 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 
 	switch v := excVal.(type) {
 	case *PyException:
-		// Already an exception — attach cause if provided, then return
-		if cause != nil {
-			if cause == None {
-				v.Cause = nil
-			} else {
-				v.Cause = vm.createException(cause, nil)
-			}
-			v.SuppressContext = true
+		if cause == nil {
+			// No cause: return existing exception unchanged.
+			return v
 		}
-		return v
+		// Attach cause without mutating the input — it may be shared
+		// (e.g. vm.lastException), and `raise existing from new` should
+		// not rewrite history on the original.
+		clone := *v
+		if cause == None {
+			clone.Cause = nil
+		} else {
+			clone.Cause = vm.createException(cause, nil)
+		}
+		clone.SuppressContext = true
+		return &clone
 	case *PyClass:
 		// Exception class without arguments: raise ValueError
 		if vm.isExceptionClass(v) {

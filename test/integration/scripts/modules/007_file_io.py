@@ -1244,4 +1244,99 @@ def test_readline_size_stops_at_newline():
 test("readline(size) preserves remainder", test_readline_with_size_preserves_remainder)
 test("readline(size) stops at newline", test_readline_size_stops_at_newline)
 
+
+# === StringIO / BytesIO iteration raises catchable StopIteration ===
+# Regression: vm.RaiseError("StopIteration") (without the trailing colon)
+# fell through to RuntimeError, so user code couldn't catch the sentinel.
+from io import StringIO, BytesIO
+
+def test_stringio_next_raises_stopiteration_not_runtime_error():
+    sio = StringIO("only\n")
+    next(sio)
+    # except clause uses the exception-type matcher: StopIteration should
+    # match (whereas RuntimeError must not). Pre-fix, the missing colon
+    # in the io implementation made the exception fall through to
+    # RuntimeError, so RuntimeError would have matched.
+    caught_as_runtime = False
+    try:
+        try:
+            next(sio)
+        except RuntimeError:
+            caught_as_runtime = True
+    except StopIteration:
+        pass
+    expect(caught_as_runtime).to_be(False)
+
+
+def test_bytesio_next_raises_stopiteration_not_runtime_error():
+    bio = BytesIO(b"only\n")
+    next(bio)
+    caught_as_runtime = False
+    try:
+        try:
+            next(bio)
+        except RuntimeError:
+            caught_as_runtime = True
+    except StopIteration:
+        pass
+    expect(caught_as_runtime).to_be(False)
+
+
+# === open() accepts all CPython positional args ===
+# Regression: open(p, mode, buffering, encoding) used to mis-bind `buffering`
+# into the encoding slot because only (file, mode, encoding) was understood.
+def test_open_positional_encoding_at_index_3():
+    p = tmp_dir + "/open_pos_enc.txt"
+    f = open(p, "w", -1, "utf-8")
+    f.write("hello")
+    f.close()
+    f = open(p, "r", -1, "utf-8")
+    expect(f.read()).to_be("hello")
+    f.close()
+
+
+def test_open_positional_buffering_does_not_break_encoding():
+    p = tmp_dir + "/open_pos_buf.txt"
+    f = open(p, "w", -1, "utf-8", None, None, True)
+    f.write("ok")
+    f.close()
+    f = open(p)
+    expect(f.read()).to_be("ok")
+    f.close()
+
+
+def test_open_duplicate_arg_raises_typeerror():
+    p = tmp_dir + "/open_dup.txt"
+    raised = False
+    try:
+        # mode given positionally AND as kwarg
+        open(p, "w", mode="r")
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+# === BytesIO rejects str instead of silently UTF-8 encoding ===
+def test_bytesio_rejects_string():
+    raised = False
+    try:
+        BytesIO("hello")
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+def test_bytesio_accepts_bytes():
+    b = BytesIO(b"hi")
+    expect(b.read()).to_be(b"hi")
+
+
+test("StringIO next() raises StopIteration, not RuntimeError", test_stringio_next_raises_stopiteration_not_runtime_error)
+test("BytesIO next() raises StopIteration, not RuntimeError", test_bytesio_next_raises_stopiteration_not_runtime_error)
+test("open(): encoding at positional index 3", test_open_positional_encoding_at_index_3)
+test("open(): full positional shape preserves encoding", test_open_positional_buffering_does_not_break_encoding)
+test("open(): duplicate positional+kwarg raises", test_open_duplicate_arg_raises_typeerror)
+test("BytesIO(str) raises TypeError", test_bytesio_rejects_string)
+test("BytesIO(bytes) accepts bytes-like", test_bytesio_accepts_bytes)
+
 print("File I/O tests completed")

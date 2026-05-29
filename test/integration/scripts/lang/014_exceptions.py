@@ -535,4 +535,107 @@ test("finally_return_overrides_try_return", test_finally_return_overrides_try_re
 test("finally_exception_replaces_return", test_finally_exception_replaces_return)
 test("return_through_with_inside_try_finally", test_return_through_with_inside_try_finally)
 
+
+# === continue/break through try/finally must run the finally body ===
+# Regression: main dispatch's OpContinueLoop and `break` (OpJump) used to
+# skip the finally body and let BlockFinally entries accumulate across
+# iterations.
+def test_continue_runs_finally():
+    log = []
+    def f():
+        for i in range(3):
+            try:
+                if i == 1:
+                    continue
+                log.append(i)
+            finally:
+                log.append("f" + str(i))
+    f()
+    expect(log).to_be([0, "f0", "f1", 2, "f2"])
+
+
+def test_break_runs_finally():
+    log = []
+    def f():
+        for i in range(3):
+            try:
+                if i == 1:
+                    break
+                log.append(i)
+            finally:
+                log.append("f" + str(i))
+    f()
+    expect(log).to_be([0, "f0", "f1"])
+
+
+# === continue/break through `with` must call __exit__ ===
+def test_continue_runs_with_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(2):
+            with CM():
+                if i == 0:
+                    continue
+                log.append("body")
+    f()
+    expect(log).to_be(["exit", "body", "exit"])
+
+
+def test_break_runs_with_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(3):
+            with CM():
+                log.append(i)
+                break
+    f()
+    expect(log).to_be([0, "exit"])
+
+
+# === continue inside try/finally inside with: finally then __exit__ ===
+def test_continue_through_finally_and_with():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(2):
+            with CM():
+                try:
+                    if i == 0:
+                        continue
+                    log.append("body")
+                finally:
+                    log.append("f")
+    f()
+    expect(log).to_be(["f", "exit", "body", "f", "exit"])
+
+
+test("continue_runs_finally", test_continue_runs_finally)
+test("break_runs_finally", test_break_runs_finally)
+test("continue_runs_with_exit", test_continue_runs_with_exit)
+test("break_runs_with_exit", test_break_runs_with_exit)
+test("continue_through_finally_and_with", test_continue_through_finally_and_with)
+
 print("Exceptions tests completed")

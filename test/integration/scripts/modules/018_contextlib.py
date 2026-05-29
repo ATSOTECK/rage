@@ -482,3 +482,53 @@ def test_exitstack_dynamic():
     expect(log).to_be(["a_enter", "b_enter", "c_enter", "c_exit", "b_exit", "a_exit"])
 
 test("practical: ExitStack with dynamic context managers", test_exitstack_dynamic)
+
+
+# === redirect_stdout / redirect_stderr actually swap sys.stdout/stderr ===
+# Regression: __enter__/__exit__ used to be silent no-ops.
+import sys
+
+class _Capture:
+    def __init__(self):
+        self.data = ""
+    def write(self, s):
+        self.data += s
+    def flush(self):
+        pass
+
+def test_redirect_stdout_captures_print():
+    buf = _Capture()
+    with contextlib.redirect_stdout(buf):
+        print("hello")
+        print("world")
+    expect(buf.data).to_be("hello\nworld\n")
+
+def test_redirect_stdout_restores_sys_stdout():
+    original = sys.stdout
+    buf = _Capture()
+    with contextlib.redirect_stdout(buf):
+        expect(sys.stdout is buf).to_be(True)
+    expect(sys.stdout is original).to_be(True)
+
+def test_redirect_stderr_swaps_sys_stderr():
+    original = sys.stderr
+    buf = _Capture()
+    with contextlib.redirect_stderr(buf):
+        expect(sys.stderr is buf).to_be(True)
+    expect(sys.stderr is original).to_be(True)
+
+def test_redirect_stdout_nested_lifo():
+    outer = _Capture()
+    inner = _Capture()
+    with contextlib.redirect_stdout(outer):
+        print("outer1")
+        with contextlib.redirect_stdout(inner):
+            print("inner")
+        print("outer2")
+    expect(outer.data).to_be("outer1\nouter2\n")
+    expect(inner.data).to_be("inner\n")
+
+test("redirect_stdout captures print", test_redirect_stdout_captures_print)
+test("redirect_stdout restores sys.stdout", test_redirect_stdout_restores_sys_stdout)
+test("redirect_stderr swaps sys.stderr", test_redirect_stderr_swaps_sys_stderr)
+test("redirect_stdout nested LIFO", test_redirect_stdout_nested_lifo)

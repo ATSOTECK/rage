@@ -543,7 +543,10 @@ func (c *Compiler) compilePattern(pattern model.Pattern) {
 		c.emitLoadConst(true)
 
 	default:
-		c.emitLoadConst(true)
+		// Unknown or nil pattern (e.g. parser failed mid-pattern). Emit
+		// `false` so the case is unreachable rather than silently matching
+		// everything.
+		c.emitLoadConst(false)
 	}
 }
 

@@ -1087,10 +1087,13 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			}
 			return result, nil
 		}
-		// Check for pending jump from OpContinueLoop through finally block
+		// Resume a break/continue suspended to run this finally body.
 		if vm.generatorHasPendingJump {
 			vm.generatorHasPendingJump = false
-			frame.IP = vm.generatorPendingJump
+			target := vm.generatorPendingJump
+			if _, err := vm.unwindForJump(frame, target); err != nil {
+				return nil, err
+			}
 		}
 
 	case OpExceptionMatch:

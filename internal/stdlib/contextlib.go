@@ -369,8 +369,8 @@ func InitContextlibModule() {
 		// =========================================
 		// redirect_stdout / redirect_stderr
 		// =========================================
-		redirectStdoutClass := makeRedirectClass("redirect_stdout", "stdout")
-		redirectStderrClass := makeRedirectClass("redirect_stderr", "stderr")
+		redirectStdoutClass := makeRedirectClass(vm, "redirect_stdout", "stdout")
+		redirectStderrClass := makeRedirectClass(vm, "redirect_stderr", "stderr")
 
 		mod.Dict["redirect_stdout"] = &runtime.PyBuiltinFunc{
 			Name: "redirect_stdout",
@@ -594,15 +594,17 @@ func funcName(fn runtime.Value) string {
 	}
 }
 
-// makeRedirectClass creates a redirect_stdout/redirect_stderr class.
-func makeRedirectClass(name, streamAttr string) *runtime.PyClass {
+// makeRedirectClass creates a redirect_stdout/redirect_stderr class. Both
+// swap the named sys-module attribute on __enter__ and restore it on __exit__.
+// print() honors sys.stdout, so this redirects plain print() output.
+func makeRedirectClass(vm *runtime.VM, name, streamAttr string) *runtime.PyClass {
 	cls := &runtime.PyClass{
 		Name: name,
 		Dict: make(map[string]runtime.Value),
 	}
 	cls.Mro = []*runtime.PyClass{cls}
 
-	attr := streamAttr // capture for closures
+	attr := streamAttr
 
 	cls.Dict["__enter__"] = &runtime.PyBuiltinFunc{
 		Name: name + ".__enter__",
@@ -614,10 +616,16 @@ func makeRedirectClass(name, streamAttr string) *runtime.PyClass {
 			if !ok {
 				return nil, fmt.Errorf("TypeError: expected %s instance", name)
 			}
-			// Save is a no-op since we don't have real sys.stdout/stderr objects,
-			// but we record the intent for compatibility
-			self.Dict["old_target"] = runtime.None
-			_ = attr
+			sysMod, ok := vm.GetModule("sys")
+			if !ok {
+				return nil, fmt.Errorf("ModuleNotFoundError: sys module not available")
+			}
+			old, _ := sysMod.Dict[attr]
+			if old == nil {
+				old = runtime.None
+			}
+			self.Dict["old_target"] = old
+			sysMod.Dict[attr] = self.Dict["new_target"]
 			return self.Dict["new_target"], nil
 		},
 	}
@@ -625,7 +633,20 @@ func makeRedirectClass(name, streamAttr string) *runtime.PyClass {
 	cls.Dict["__exit__"] = &runtime.PyBuiltinFunc{
 		Name: name + ".__exit__",
 		Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
-			// Restore is a no-op — see __enter__
+			if len(args) < 1 {
+				return nil, fmt.Errorf("TypeError: __exit__() missing 'self' argument")
+			}
+			self, ok := args[0].(*runtime.PyInstance)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: expected %s instance", name)
+			}
+			sysMod, ok := vm.GetModule("sys")
+			if !ok {
+				return runtime.False, nil
+			}
+			if old, ok := self.Dict["old_target"]; ok {
+				sysMod.Dict[attr] = old
+			}
 			return runtime.False, nil
 		},
 	}

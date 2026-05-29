@@ -535,6 +535,10 @@ func (p *Parser) parseParenExpr() model.Expr {
 
 	// Generator expression or tuple/grouped expression
 	first := p.parseExpression()
+	if first == nil {
+		p.expect(model.TK_RParen)
+		return nil
+	}
 
 	// Check for generator expression
 	if p.check(model.TK_For) {
@@ -548,7 +552,13 @@ func (p *Parser) parseParenExpr() model.Expr {
 			if p.check(model.TK_RParen) {
 				break
 			}
-			elts = append(elts, p.parseExpression())
+			next := p.parseExpression()
+			if next == nil {
+				// parseExpression already reported the error; skip the nil
+				// rather than propagating it to the compiler.
+				continue
+			}
+			elts = append(elts, next)
 		}
 		endTok := p.expect(model.TK_RParen)
 		return &model.Tuple{
@@ -587,6 +597,11 @@ func (p *Parser) parseListExpr() model.Expr {
 	}
 
 	first := p.parseExpression()
+	if first == nil {
+		// Advance past whatever broke us so we don't loop forever on bad input.
+		p.expect(model.TK_RBracket)
+		return &model.List{StartPos: startPos, EndPos: startPos}
+	}
 
 	// List comprehension
 	if p.check(model.TK_For) {
@@ -606,7 +621,11 @@ func (p *Parser) parseListExpr() model.Expr {
 		if p.check(model.TK_RBracket) {
 			break
 		}
-		elts = append(elts, p.parseExpression())
+		next := p.parseExpression()
+		if next == nil {
+			continue
+		}
+		elts = append(elts, next)
 	}
 
 	endTok := p.expect(model.TK_RBracket)
@@ -636,11 +655,19 @@ func (p *Parser) parseDictOrSetExpr() model.Expr {
 	}
 
 	first := p.parseExpression()
+	if first == nil {
+		p.expect(model.TK_RBrace)
+		return &model.Dict{StartPos: startPos, EndPos: startPos}
+	}
 
 	// Dict
 	if p.check(model.TK_Colon) {
 		p.advance()
 		value := p.parseExpression()
+		if value == nil {
+			p.expect(model.TK_RBrace)
+			return &model.Dict{StartPos: startPos, EndPos: startPos}
+		}
 
 		// Dict comprehension
 		if p.check(model.TK_For) {
@@ -676,7 +703,11 @@ func (p *Parser) parseDictOrSetExpr() model.Expr {
 		if p.check(model.TK_RBrace) {
 			break
 		}
-		elts = append(elts, p.parseExpression())
+		next := p.parseExpression()
+		if next == nil {
+			continue
+		}
+		elts = append(elts, next)
 	}
 
 	endTok := p.expect(model.TK_RBrace)
@@ -697,12 +728,24 @@ func (p *Parser) parseDictExpr(startPos model.Position, firstKey, firstValue mod
 		}
 
 		if p.match(model.TK_DoubleStar) {
+			v := p.parseExpression()
+			if v == nil {
+				continue
+			}
 			keys = append(keys, nil)
-			values = append(values, p.parseExpression())
+			values = append(values, v)
 		} else {
-			keys = append(keys, p.parseExpression())
+			k := p.parseExpression()
+			if k == nil {
+				continue
+			}
 			p.expect(model.TK_Colon)
-			values = append(values, p.parseExpression())
+			v := p.parseExpression()
+			if v == nil {
+				continue
+			}
+			keys = append(keys, k)
+			values = append(values, v)
 		}
 	}
 

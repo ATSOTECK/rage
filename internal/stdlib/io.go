@@ -231,12 +231,19 @@ func parseMode(mode string) (readable, writable, binary, append bool, flag int, 
 }
 
 // BuiltinOpen is the open() builtin function as a *PyBuiltinFunc so it supports kwargs.
-// open(file, mode='r', encoding='utf-8') -> file object
+// Signature: open(file, mode='r', buffering=-1, encoding=None, errors=None,
+//                 newline=None, closefd=True, opener=None)
+// buffering/errors/newline/closefd/opener are accepted but currently no-ops;
+// they're still consumed positionally so that idiomatic positional calls like
+// open(p, 'r', -1, 'utf-8') bind 'utf-8' to encoding rather than misbinding -1.
 var BuiltinOpen = &runtime.PyBuiltinFunc{
 	Name: "open",
 	Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("TypeError: open() missing required argument: 'file'")
+		}
+		if len(args) > 8 {
+			return nil, fmt.Errorf("TypeError: open() takes at most 8 positional arguments (%d given)", len(args))
 		}
 
 		fileArg, ok := args[0].(*runtime.PyString)
@@ -245,35 +252,51 @@ var BuiltinOpen = &runtime.PyBuiltinFunc{
 		}
 		filename := fileArg.Value
 
-		mode := "r"
-		if len(args) >= 2 && !runtime.IsNone(args[1]) {
-			if s, ok := args[1].(*runtime.PyString); ok {
-				mode = s.Value
-			} else {
-				return nil, fmt.Errorf("TypeError: expected str for mode, got %T", args[1])
+		// stringArg pulls a parameter from args[idx] (if present and not None)
+		// or kwargs[name] (if present and not None), with type checking. It also
+		// errors on duplicate (positional + kwarg) bindings.
+		stringArg := func(idx int, name, def string) (string, error) {
+			val := def
+			set := false
+			if idx < len(args) && !runtime.IsNone(args[idx]) {
+				s, ok := args[idx].(*runtime.PyString)
+				if !ok {
+					return "", fmt.Errorf("TypeError: expected str for %s, got %T", name, args[idx])
+				}
+				val = s.Value
+				set = true
 			}
-		}
-		if v, ok := kwargs["mode"]; ok && !runtime.IsNone(v) {
-			if s, ok := v.(*runtime.PyString); ok {
-				mode = s.Value
-			} else {
-				return nil, fmt.Errorf("TypeError: expected str for mode, got %T", v)
+			if v, ok := kwargs[name]; ok && !runtime.IsNone(v) {
+				if set {
+					return "", fmt.Errorf("TypeError: open() got multiple values for argument '%s'", name)
+				}
+				s, ok := v.(*runtime.PyString)
+				if !ok {
+					return "", fmt.Errorf("TypeError: expected str for %s, got %T", name, v)
+				}
+				val = s.Value
 			}
+			return val, nil
 		}
 
-		encoding := "utf-8"
-		if len(args) >= 3 && !runtime.IsNone(args[2]) {
-			if s, ok := args[2].(*runtime.PyString); ok {
-				encoding = s.Value
-			} else {
-				return nil, fmt.Errorf("TypeError: expected str for encoding, got %T", args[2])
-			}
+		mode, err := stringArg(1, "mode", "r")
+		if err != nil {
+			return nil, err
 		}
-		if v, ok := kwargs["encoding"]; ok && !runtime.IsNone(v) {
-			if s, ok := v.(*runtime.PyString); ok {
-				encoding = s.Value
-			} else {
-				return nil, fmt.Errorf("TypeError: expected str for encoding, got %T", v)
+		// buffering is positional arg[2] in CPython; we accept any value as a no-op.
+		// Just verify it doesn't collide with a kwarg.
+		if _, ok := kwargs["buffering"]; ok && len(args) >= 3 && !runtime.IsNone(args[2]) {
+			return nil, fmt.Errorf("TypeError: open() got multiple values for argument 'buffering'")
+		}
+		encoding, err := stringArg(3, "encoding", "utf-8")
+		if err != nil {
+			return nil, err
+		}
+		// errors, newline, closefd, opener — accepted as no-ops; only collision-check.
+		for i, name := range []string{"errors", "newline", "closefd", "opener"} {
+			idx := 4 + i
+			if _, ok := kwargs[name]; ok && idx < len(args) && !runtime.IsNone(args[idx]) {
+				return nil, fmt.Errorf("TypeError: open() got multiple values for argument '%s'", name)
 			}
 		}
 
@@ -917,7 +940,7 @@ func fileNext(vm *runtime.VM) int {
 
 	line, err := f.reader.ReadString('\n')
 	if err == io.EOF && len(line) == 0 {
-		vm.RaiseError("StopIteration")
+		vm.RaiseError("StopIteration: ")
 		return 0
 	}
 	if err != nil && err != io.EOF {
@@ -1393,7 +1416,7 @@ func stringIONext(vm *runtime.VM) int {
 		return 0
 	}
 	if s.pos >= len(s.buf) {
-		vm.RaiseError("StopIteration")
+		vm.RaiseError("StopIteration: ")
 		return 0
 	}
 	rest := s.buf[s.pos:]
@@ -1449,15 +1472,12 @@ var bytesIOConstructor = &runtime.PyBuiltinFunc{
 	Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
 		b := &PyBytesIO{}
 		if len(args) >= 1 && !runtime.IsNone(args[0]) {
-			switch v := args[0].(type) {
-			case *runtime.PyBytes:
-				b.buf = make([]byte, len(v.Value))
-				copy(b.buf, v.Value)
-			case *runtime.PyString:
-				b.buf = []byte(v.Value)
-			default:
+			v, ok := args[0].(*runtime.PyBytes)
+			if !ok {
 				return nil, fmt.Errorf("TypeError: a bytes-like object is required, not '%s'", getTypeName(args[0]))
 			}
+			b.buf = make([]byte, len(v.Value))
+			copy(b.buf, v.Value)
 		}
 		return newBytesIOUserData(b), nil
 	},
@@ -1839,7 +1859,7 @@ func bytesIONext(vm *runtime.VM) int {
 		return 0
 	}
 	if b.pos >= len(b.buf) {
-		vm.RaiseError("StopIteration")
+		vm.RaiseError("StopIteration: ")
 		return 0
 	}
 	rest := b.buf[b.pos:]

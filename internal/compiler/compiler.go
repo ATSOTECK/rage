@@ -28,6 +28,7 @@ type Compiler struct {
 	currentLine    int // Current source line being compiled
 	lineStartOffset int // Bytecode offset where current line started
 	finallyDepth   int // Number of enclosing try/finally blocks (for continue/break through finally)
+	withDepth      int // Number of enclosing `with` blocks (for break/continue/return cleanup)
 }
 
 type loopInfo struct {

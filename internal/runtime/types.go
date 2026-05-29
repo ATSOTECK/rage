@@ -35,6 +35,15 @@ func (n *PyNotImplementedType) String() string { return "NotImplemented" }
 // NotImplemented is the singleton NotImplemented value
 var NotImplemented = &PyNotImplementedType{}
 
+// PyEllipsisType represents Python's Ellipsis singleton (the `...` literal).
+type PyEllipsisType struct{}
+
+func (e *PyEllipsisType) Type() string   { return "ellipsis" }
+func (e *PyEllipsisType) String() string { return "Ellipsis" }
+
+// Ellipsis is the singleton Ellipsis value
+var Ellipsis = &PyEllipsisType{}
+
 // PyBool represents a Python boolean
 type PyBool struct {
 	Value bool

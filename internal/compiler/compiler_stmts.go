@@ -36,8 +36,11 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.compileExpr(s.Value)
 			c.compileStore(s.Target)
 		}
-		// In class scope, store annotation in __annotations__ dict
-		if c.symbolTable.scopeType == ScopeClass {
+		// In class scope, store annotation in __annotations__ dict.
+		// Skip if the parser failed to produce an annotation expression
+		// (malformed source) — leaving the slot absent matches CPython's
+		// behavior of just not registering the bad annotation.
+		if c.symbolTable.scopeType == ScopeClass && s.Annotation != nil {
 			if ident, ok := s.Target.(*model.Identifier); ok {
 				// Stack order for STORE_SUBSCR: val, obj, index
 				c.compileExpr(s.Annotation)         // val: the annotation type
@@ -84,7 +87,13 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 		if loop.isForLoop {
 			c.emit(runtime.OpPop)
 		}
-		jump := c.emitJump(runtime.OpJump)
+		op := runtime.OpJump
+		if c.finallyDepth > 0 || c.withDepth > 0 {
+			// Cleanup needed: run enclosing finally bodies and call __exit__
+			// on enclosing with blocks before reaching the break target.
+			op = runtime.OpContinueLoop
+		}
+		jump := c.emitJump(op)
 		c.loopStack[len(c.loopStack)-1].breakJumps = append(
 			c.loopStack[len(c.loopStack)-1].breakJumps, jump)
 
@@ -93,17 +102,13 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.error(s.StartPos, "'continue' outside loop")
 			return
 		}
-		if c.finallyDepth > 0 {
-			// Inside a try/finally — use OpContinueLoop so the generator can
-			// run the finally block before jumping to the loop target
-			jump := c.emitJump(runtime.OpContinueLoop)
-			c.loopStack[len(c.loopStack)-1].continueJumps = append(
-				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
-		} else {
-			jump := c.emitJump(runtime.OpJump)
-			c.loopStack[len(c.loopStack)-1].continueJumps = append(
-				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
+		op := runtime.OpJump
+		if c.finallyDepth > 0 || c.withDepth > 0 {
+			op = runtime.OpContinueLoop
 		}
+		jump := c.emitJump(op)
+		c.loopStack[len(c.loopStack)-1].continueJumps = append(
+			c.loopStack[len(c.loopStack)-1].continueJumps, jump)
 
 	case *model.Global:
 		for _, name := range s.Names {
@@ -613,7 +618,8 @@ func (c *Compiler) compileWithItem(items []*model.WithItem, idx int, body []mode
 	// block.Level = SP here, with cm at stack[SP-1]
 	cleanupJump := c.emitJump(runtime.OpSetupWith) // stack: [..., cm]
 
-	// Compile body (or next nested with item)
+	// Track depth so break/continue inside the body know cleanup is needed.
+	c.withDepth++
 	if idx < len(items)-1 {
 		c.compileWithItem(items, idx+1, body)
 	} else {
@@ -621,6 +627,7 @@ func (c *Compiler) compileWithItem(items []*model.WithItem, idx int, body []mode
 			c.compileStmt(stmt)
 		}
 	}
+	c.withDepth--
 
 	// Normal exit: pop the BlockWith block
 	c.emit(runtime.OpPopExcept) // stack: [..., cm]

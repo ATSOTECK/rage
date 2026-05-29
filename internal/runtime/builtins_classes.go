@@ -128,6 +128,7 @@ func (vm *VM) initBuiltinsClasses() {
 	vm.builtins["True"] = True
 	vm.builtins["False"] = False
 	vm.builtins["NotImplemented"] = NotImplemented
+	vm.builtins["Ellipsis"] = Ellipsis
 
 	// __build_class__ is used to create classes
 	vm.builtins["__build_class__"] = &PyBuiltinFunc{

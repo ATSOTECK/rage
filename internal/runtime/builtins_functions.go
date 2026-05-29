@@ -46,6 +46,15 @@ func (vm *VM) initBuiltinsFunctions() {
 			if v, ok := kwargs["file"]; ok && !IsNone(v) {
 				fileObj = v
 			}
+			// Honor sys.stdout if a contextmanager (e.g. contextlib.redirect_stdout)
+			// has swapped it. Skip if the user passed an explicit file= kwarg.
+			if fileObj == nil {
+				if mod, ok := vm.GetModule("sys"); ok {
+					if v, ok := mod.Dict["stdout"]; ok && !IsNone(v) {
+						fileObj = v
+					}
+				}
+			}
 
 			if fileObj != nil {
 				// Write to file object via its write() method

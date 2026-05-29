@@ -1441,8 +1441,12 @@ func (vm *VM) run() (Value, error) {
 			frame.IP = arg
 
 		case OpContinueLoop:
-			// Continue loop - same as jump in regular VM, handled specially in generators
-			frame.IP = arg
+			// Used for break/continue when cleanup is needed (enclosing
+			// try/finally or with). Walks the block stack: __exit__ on any
+			// active `with`, route through `try/finally` via pendingJump.
+			if _, err := vm.unwindForJump(frame, arg); err != nil {
+				return nil, err
+			}
 
 		case OpJumpIfTrue:
 			if vm.truthy(vm.top()) {
@@ -2685,6 +2689,14 @@ func (vm *VM) run() (Value, error) {
 				}
 				return result, nil
 			}
+			// Resume a break/continue that was suspended to run this finally body.
+			if vm.generatorHasPendingJump {
+				vm.generatorHasPendingJump = false
+				target := vm.generatorPendingJump
+				if _, err := vm.unwindForJump(frame, target); err != nil {
+					return nil, err
+				}
+			}
 
 		case OpExceptionMatch:
 			// Check if exception matches type for except clause
@@ -2733,8 +2745,12 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
-			// Build traceback
-			exc.Traceback = vm.buildTraceback()
+			// Build traceback only on a fresh raise — bare re-raise (arg==0)
+			// must preserve the original raise site, otherwise debug info is
+			// lost every time an except handler does `raise`.
+			if arg != 0 {
+				exc.Traceback = vm.buildTraceback()
+			}
 
 			// Try to find an exception handler
 			_, err = vm.handleException(exc)

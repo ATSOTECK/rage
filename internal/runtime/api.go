@@ -878,7 +878,7 @@ func (vm *VM) RaiseError(format string, args ...any) {
 		"BytesWarning", "ResourceWarning", "EncodingWarning",
 		"PendingDeprecationWarning", "StopAsyncIteration",
 	} {
-		if len(msg) > len(prefix)+2 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
+		if len(msg) >= len(prefix)+1 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
 			excType = prefix
 			msg = msg[len(prefix)+1:]
 			// Trim leading space

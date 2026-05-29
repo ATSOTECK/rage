@@ -89,4 +89,25 @@ test("dict", test_dict)
 test("range", test_range)
 test("isinstance", test_isinstance)
 
+
+# === Ellipsis is a real singleton, not the string "..." ===
+# Regression: the compiler emitted LOAD_CONST "..." so type(...) returned str
+# and `... == "..."` was True.
+def test_ellipsis_is_singleton():
+    expect(... is Ellipsis).to_be(True)
+    expect(... is ...).to_be(True)
+    expect(... is None).to_be(False)
+
+def test_ellipsis_not_string():
+    expect(... == "...").to_be(False)
+    expect(isinstance(..., str)).to_be(False)
+
+def test_ellipsis_repr_and_str():
+    expect(repr(...)).to_be("Ellipsis")
+    expect(str(...)).to_be("Ellipsis")
+
+test("ellipsis is singleton", test_ellipsis_is_singleton)
+test("ellipsis is not the string '...'", test_ellipsis_not_string)
+test("ellipsis repr and str", test_ellipsis_repr_and_str)
+
 print("Data types tests completed")

@@ -77,7 +77,7 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		c.emitLoadConst(nil)
 
 	case *model.Ellipsis:
-		c.emitLoadConst("...") // Placeholder for Ellipsis object
+		c.emitLoadConst(runtime.Ellipsis)
 
 	case *model.Identifier:
 		c.compileLoad(e.Name)
