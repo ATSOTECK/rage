@@ -469,7 +469,9 @@ func (vm *VM) pop() Value {
 		panic("stack underflow: cannot pop from empty stack")
 	}
 	vm.frame.SP--
-	return vm.frame.Stack[vm.frame.SP]
+	v := vm.frame.Stack[vm.frame.SP]
+	vm.frame.Stack[vm.frame.SP] = nil // release popped ref for GC (matters for suspended generator frames)
+	return v
 }
 
 func (vm *VM) top() Value {

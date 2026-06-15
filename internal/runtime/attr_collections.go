@@ -35,7 +35,9 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 				return nil, fmt.Errorf("IndexError: pop index out of range")
 			}
 			val := lst.Items[idx]
-			lst.Items = append(lst.Items[:idx], lst.Items[idx+1:]...)
+			copy(lst.Items[idx:], lst.Items[idx+1:])
+			lst.Items[len(lst.Items)-1] = nil // release moved-out tail ref for GC
+			lst.Items = lst.Items[:len(lst.Items)-1]
 			return val, nil
 		}}, nil
 	case "extend":
@@ -84,7 +86,9 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 			}
 			for i, item := range lst.Items {
 				if vm.equal(item, args[0]) {
-					lst.Items = append(lst.Items[:i], lst.Items[i+1:]...)
+					copy(lst.Items[i:], lst.Items[i+1:])
+					lst.Items[len(lst.Items)-1] = nil // release moved-out tail ref for GC
+					lst.Items = lst.Items[:len(lst.Items)-1]
 					return None, nil
 				}
 			}

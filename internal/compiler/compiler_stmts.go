@@ -82,11 +82,10 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.error(s.StartPos, "'break' outside loop")
 			return
 		}
-		// Pop the iterator from stack if breaking from a for loop
-		loop := c.loopStack[len(c.loopStack)-1]
-		if loop.isForLoop {
-			c.emit(runtime.OpPop)
-		}
+		// The for-loop iterator (if any) is popped at the loop's break landing
+		// pad, AFTER any enclosing with/finally cleanup has run — see compileFor.
+		// Popping it eagerly here would mis-pop an enclosing with's context
+		// manager, which sits above the iterator on the operand stack.
 		op := runtime.OpJump
 		if c.finallyDepth > 0 || c.withDepth > 0 {
 			// Cleanup needed: run enclosing finally bodies and call __exit__
@@ -352,10 +351,21 @@ func (c *Compiler) compileFor(s *model.For) {
 		}
 	}
 
-	// Patch break and continue jumps
+	// Break landing pad. A `break` out of a for-loop leaves the iterator on the
+	// operand stack (normal exhaustion pops it in OpForIter; the cleanup
+	// unwinder for enclosing with/finally only resets SP to just above it).
+	// Breaks jump here with the iterator still live, so pop it. The normal/else
+	// path — where the iterator is already gone — jumps over the pad.
 	loop := c.loopStack[len(c.loopStack)-1]
+	breakTarget := c.currentOffset()
+	if len(loop.breakJumps) > 0 {
+		skip := c.emitJump(runtime.OpJump)
+		breakTarget = c.currentOffset()
+		c.emit(runtime.OpPop) // discard the live for-loop iterator
+		c.patchJump(skip, c.currentOffset())
+	}
 	for _, jump := range loop.breakJumps {
-		c.patchJump(jump, c.currentOffset())
+		c.patchJump(jump, breakTarget)
 	}
 	for _, jump := range loop.continueJumps {
 		c.patchJump(jump, loopStart)

@@ -632,10 +632,59 @@ def test_continue_through_finally_and_with():
     expect(log).to_be(["f", "exit", "body", "f", "exit"])
 
 
+# === break out of nested with blocks runs every __exit__ (LIFO) ===
+# Regression: break eagerly popped the for-iterator, which actually removed an
+# enclosing with's context manager and left the cleanup unwinder reading a
+# dead stack slot. Now the iterator is popped at a landing pad after cleanup.
+def test_break_runs_nested_with_exits():
+    log = []
+
+    class CM:
+        def __init__(self, name):
+            self.name = name
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit " + self.name)
+            return False
+
+    def f():
+        for i in range(5):
+            with CM("a"):
+                with CM("b"):
+                    log.append("body")
+                    break
+    f()
+    expect(log).to_be(["body", "exit b", "exit a"])
+
+
+# === break out of a for-loop skips the else clause ===
+def test_break_skips_for_else():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(3):
+            with CM():
+                break
+        else:
+            log.append("else")
+    f()
+    expect(log).to_be(["exit"])
+
+
 test("continue_runs_finally", test_continue_runs_finally)
 test("break_runs_finally", test_break_runs_finally)
 test("continue_runs_with_exit", test_continue_runs_with_exit)
 test("break_runs_with_exit", test_break_runs_with_exit)
 test("continue_through_finally_and_with", test_continue_through_finally_and_with)
+test("break_runs_nested_with_exits", test_break_runs_nested_with_exits)
+test("break_skips_for_else", test_break_skips_for_else)
 
 print("Exceptions tests completed")

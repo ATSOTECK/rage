@@ -430,6 +430,7 @@ func dequePop(vm *runtime.VM) int {
 	}
 
 	item := deque.Items[len(deque.Items)-1]
+	deque.Items[len(deque.Items)-1] = nil // release popped ref for GC
 	deque.Items = deque.Items[:len(deque.Items)-1]
 
 	vm.Push(item)
@@ -455,6 +456,7 @@ func dequePopLeft(vm *runtime.VM) int {
 	}
 
 	item := deque.Items[0]
+	deque.Items[0] = nil // release popped ref for GC (slice start advances past it)
 	deque.Items = deque.Items[1:]
 
 	vm.Push(item)
