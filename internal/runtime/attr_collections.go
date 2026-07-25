@@ -817,7 +817,9 @@ func (vm *VM) getAttrFrozenSet(fs *PyFrozenSet, name string) (Value, error) {
 								entries := result.buckets[h]
 								for i, e := range entries {
 									if vm.equal(e.value, rk) {
-										result.buckets[h] = append(entries[:i], entries[i+1:]...)
+										copy(entries[i:], entries[i+1:])
+										entries[len(entries)-1] = setEntry{} // release moved-out tail ref for GC
+										result.buckets[h] = entries[:len(entries)-1]
 										result.size--
 										break
 									}

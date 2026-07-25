@@ -679,6 +679,22 @@ def test_break_skips_for_else():
     expect(log).to_be(["exit"])
 
 
+# === unbounded recursion raises a catchable RecursionError ===
+# Regression: with no recursion limit this overflowed the Go stack and aborted
+# the whole process with an uncatchable fatal error. Now it raises a normal,
+# catchable RecursionError.
+def test_recursion_error_catchable():
+    def recurse(n):
+        return recurse(n + 1)
+
+    caught = False
+    try:
+        recurse(0)
+    except RecursionError:
+        caught = True
+    expect(caught).to_be(True)
+
+
 test("continue_runs_finally", test_continue_runs_finally)
 test("break_runs_finally", test_break_runs_finally)
 test("continue_runs_with_exit", test_continue_runs_with_exit)
@@ -686,5 +702,6 @@ test("break_runs_with_exit", test_break_runs_with_exit)
 test("continue_through_finally_and_with", test_continue_through_finally_and_with)
 test("break_runs_nested_with_exits", test_break_runs_nested_with_exits)
 test("break_skips_for_else", test_break_skips_for_else)
+test("recursion_error_catchable", test_recursion_error_catchable)
 
 print("Exceptions tests completed")

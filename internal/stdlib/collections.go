@@ -353,7 +353,9 @@ func collectionsDeque(vm *runtime.VM) int {
 
 	// Enforce maxlen
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) > deque.Maxlen {
-		deque.Items = deque.Items[len(deque.Items)-int(deque.Maxlen):]
+		drop := len(deque.Items) - int(deque.Maxlen)
+		clearItems(deque.Items, 0, drop) // release evicted head refs for GC
+		deque.Items = deque.Items[drop:]
 	}
 
 	ud := runtime.NewUserData(deque)
@@ -361,6 +363,14 @@ func collectionsDeque(vm *runtime.VM) int {
 	ud.Metatable.Items[runtime.NewString("__type__")] = runtime.NewString("deque")
 	vm.Push(ud)
 	return 1
+}
+
+// clearItems nils slots [from:to) of a deque's backing array so dropped elements
+// become eligible for GC. A reslice alone retains them: they stay within cap.
+func clearItems(items []runtime.Value, from, to int) {
+	for i := from; i < to; i++ {
+		items[i] = nil
+	}
 }
 
 // deque.append(x)
@@ -381,6 +391,7 @@ func dequeAppend(vm *runtime.VM) int {
 
 	// Enforce maxlen
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) > deque.Maxlen {
+		deque.Items[0] = nil // release evicted head ref for GC (slice start advances past it)
 		deque.Items = deque.Items[1:]
 	}
 
@@ -405,6 +416,7 @@ func dequeAppendLeft(vm *runtime.VM) int {
 
 	// Enforce maxlen
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) > deque.Maxlen {
+		clearItems(deque.Items, int(deque.Maxlen), len(deque.Items)) // release evicted tail refs for GC
 		deque.Items = deque.Items[:deque.Maxlen]
 	}
 
@@ -490,7 +502,9 @@ func dequeExtend(vm *runtime.VM) int {
 
 	// Enforce maxlen
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) > deque.Maxlen {
-		deque.Items = deque.Items[len(deque.Items)-int(deque.Maxlen):]
+		drop := len(deque.Items) - int(deque.Maxlen)
+		clearItems(deque.Items, 0, drop) // release evicted head refs for GC
+		deque.Items = deque.Items[drop:]
 	}
 
 	return 0
@@ -529,6 +543,7 @@ func dequeExtendLeft(vm *runtime.VM) int {
 
 	// Enforce maxlen
 	if deque.Maxlen >= 0 && int64(len(deque.Items)) > deque.Maxlen {
+		clearItems(deque.Items, int(deque.Maxlen), len(deque.Items)) // release evicted tail refs for GC
 		deque.Items = deque.Items[:deque.Maxlen]
 	}
 
@@ -708,7 +723,9 @@ func dequeRemove(vm *runtime.VM) int {
 	x := vm.Get(2)
 	for i, item := range deque.Items {
 		if vm.Equal(item, x) {
-			deque.Items = append(deque.Items[:i], deque.Items[i+1:]...)
+			copy(deque.Items[i:], deque.Items[i+1:])
+			deque.Items[len(deque.Items)-1] = nil // release moved-out tail ref for GC
+			deque.Items = deque.Items[:len(deque.Items)-1]
 			return 0
 		}
 	}

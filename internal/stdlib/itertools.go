@@ -770,17 +770,11 @@ func itertoolsZipLongest(vm *runtime.VM) int {
 	var iterables [][]runtime.Value
 	var fillvalue runtime.Value = runtime.None
 
+	if v, ok := vm.Kwarg("fillvalue"); ok {
+		fillvalue = v
+	}
 	for i := 1; i <= vm.GetTop(); i++ {
 		arg := vm.Get(i)
-		// Check if this is a keyword argument dict for fillvalue
-		if dict, ok := arg.(*runtime.PyDict); ok {
-			for k, v := range dict.Items {
-				if keyStr, ok := k.(*runtime.PyString); ok && keyStr.Value == "fillvalue" {
-					fillvalue = v
-				}
-			}
-			continue
-		}
 		items := getIterableItemsFromValue(vm, arg)
 		if items == nil {
 			vm.RaiseError("zip_longest argument must be an iterable")
@@ -834,19 +828,13 @@ func itertoolsProduct(vm *runtime.VM) int {
 	var pools [][]runtime.Value
 	repeat := int64(1)
 
+	if v, ok := vm.Kwarg("repeat"); ok {
+		if intVal, ok := v.(*runtime.PyInt); ok {
+			repeat = intVal.Value
+		}
+	}
 	for i := 1; i <= vm.GetTop(); i++ {
 		arg := vm.Get(i)
-		// Check if this is a keyword argument dict for repeat
-		if dict, ok := arg.(*runtime.PyDict); ok {
-			for k, v := range dict.Items {
-				if keyStr, ok := k.(*runtime.PyString); ok && keyStr.Value == "repeat" {
-					if intVal, ok := v.(*runtime.PyInt); ok {
-						repeat = intVal.Value
-					}
-				}
-			}
-			continue
-		}
 		items := getIterableItemsFromValue(vm, arg)
 		if items == nil {
 			vm.RaiseError("product argument must be an iterable")

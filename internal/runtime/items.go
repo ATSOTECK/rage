@@ -542,7 +542,9 @@ func (vm *VM) delItem(obj Value, index Value) error {
 		if idx < 0 || idx >= len(o.Items) {
 			return fmt.Errorf("IndexError: list assignment index out of range")
 		}
-		o.Items = append(o.Items[:idx], o.Items[idx+1:]...)
+		copy(o.Items[idx:], o.Items[idx+1:])
+		o.Items[len(o.Items)-1] = nil // release moved-out tail ref for GC
+		o.Items = o.Items[:len(o.Items)-1]
 		return nil
 	case *PyDict:
 		// Use hash-based deletion for O(1) average case

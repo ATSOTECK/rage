@@ -218,6 +218,37 @@ func (vm *VM) OptionalBool(pos int, def bool) bool {
 	return def
 }
 
+// Kwarg returns the keyword argument with the given name and reports whether it
+// was supplied. Stack-based Go builtins (PyGoFunc) use this to read keyword args.
+func (vm *VM) Kwarg(name string) (Value, bool) {
+	if vm.frame == nil || vm.frame.Kwargs == nil {
+		return nil, false
+	}
+	v, ok := vm.frame.Kwargs[name]
+	return v, ok
+}
+
+// OptionalArg returns the argument at 1-based positional index pos if present,
+// otherwise the keyword argument named name. The bool reports whether the
+// argument was supplied by either means. Use for positional-or-keyword params.
+func (vm *VM) OptionalArg(pos int, name string) (Value, bool) {
+	if pos > 0 && vm.GetTop() >= pos {
+		return vm.Get(pos), true
+	}
+	return vm.Kwarg(name)
+}
+
+// OptionalIntArg returns the int value of the positional-or-keyword argument,
+// or def if it was not supplied or was None.
+func (vm *VM) OptionalIntArg(pos int, name string, def int64) int64 {
+	if v, ok := vm.OptionalArg(pos, name); ok {
+		if _, isNone := v.(*PyNone); !isNone {
+			return vm.toInt(v)
+		}
+	}
+	return def
+}
+
 // =====================================
 // Type Checking Methods
 // =====================================

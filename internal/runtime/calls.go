@@ -11,7 +11,7 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 
 	case *PyGoFunc:
 		// Call Go function with gopher-lua style stack-based API
-		return vm.callGoFunction(fn, args)
+		return vm.callGoFunction(fn, args, kwargs)
 
 	case *PyFunction:
 		return vm.callFunction(fn, args, kwargs)
@@ -59,7 +59,7 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 				if callMethod, ok := mt.Methods["__call__"]; ok {
 					// Call the __call__ method with the userdata as first argument
 					allArgs := append([]Value{fn}, args...)
-					return vm.callGoFunction(&PyGoFunc{Name: "__call__", Fn: callMethod}, allArgs)
+					return vm.callGoFunction(&PyGoFunc{Name: "__call__", Fn: callMethod}, allArgs, kwargs)
 				}
 			}
 		}
@@ -99,8 +99,9 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 	return nil, fmt.Errorf("TypeError: '%s' object is not callable", vm.typeName(callable))
 }
 
-// callGoFunction calls a Go function with stack-based argument passing
-func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
+// callGoFunction calls a Go function with stack-based argument passing.
+// kwargs (may be nil) are exposed to the Go function via vm.Kwarg/vm.OptionalArg.
+func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value, kwargs map[string]Value) (Value, error) {
 	// Save current frame state
 	oldFrame := vm.frame
 
@@ -110,6 +111,7 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value) (Value, error) {
 		SP:       0,
 		Globals:  vm.Globals,
 		Builtins: vm.builtins,
+		Kwargs:   kwargs,
 	}
 
 	// Push arguments onto the temporary frame's stack

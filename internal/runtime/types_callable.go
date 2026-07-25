@@ -245,6 +245,7 @@ type Frame struct {
 	Cells            []*PyCell        // Closure cells
 	BlockStack       []Block          // Block stack for try/except/finally
 	OrderedGlobalKeys []string        // Insertion-ordered global names (for class bodies)
+	Kwargs           map[string]Value // Keyword args, for stack-based Go builtins (PyGoFunc)
 }
 
 // Block represents a control flow block

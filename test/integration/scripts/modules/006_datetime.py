@@ -140,6 +140,14 @@ def test_timedelta_class():
     expect(td4.days()).to_be(1)
     expect(td4.seconds()).to_be(3661)
 
+    # keyword arguments (the common form)
+    expect(datetime.timedelta(hours=5).total_seconds()).to_be(18000.0)
+    expect(datetime.timedelta(days=1, minutes=30).total_seconds()).to_be(88200.0)
+    expect(datetime.timedelta(weeks=2).days()).to_be(14)
+    expect(datetime.timedelta(milliseconds=1500).microseconds()).to_be(500000)
+    td5 = datetime.timedelta(milliseconds=1500)
+    expect(td5.seconds()).to_be(1)
+
 def test_datetime_now_today():
     now = datetime.now()
     expect(now.year() >= 2024).to_be(True)

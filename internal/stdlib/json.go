@@ -38,9 +38,8 @@ func jsonDumps(vm *runtime.VM) int {
 	keySep := ": "
 	sortKeys := false
 
-	// Check for indent argument (position 2)
-	if vm.GetTop() >= 2 {
-		indentVal := vm.Get(2)
+	// indent (keyword-only in CPython)
+	if indentVal, indentOk := vm.OptionalArg(2, "indent"); indentOk {
 		if !runtime.IsNone(indentVal) {
 			switch v := indentVal.(type) {
 			case *runtime.PyInt:
@@ -53,9 +52,8 @@ func jsonDumps(vm *runtime.VM) int {
 		}
 	}
 
-	// Check for separators argument (position 3)
-	if vm.GetTop() >= 3 {
-		sepVal := vm.Get(3)
+	// separators (keyword-only in CPython)
+	if sepVal, sepOk := vm.OptionalArg(3, "separators"); sepOk {
 		if !runtime.IsNone(sepVal) {
 			var items []runtime.Value
 			switch v := sepVal.(type) {
@@ -82,8 +80,10 @@ func jsonDumps(vm *runtime.VM) int {
 		}
 	}
 
-	// Check for sort_keys argument (position 4)
-	sortKeys = vm.OptionalBool(4, false)
+	// sort_keys (keyword-only in CPython)
+	if skVal, ok := vm.OptionalArg(4, "sort_keys"); ok {
+		sortKeys = vm.Truthy(skVal)
+	}
 
 	result, err := encodeJSON(obj, indent, itemSep, keySep, sortKeys, 0)
 	if err != nil {
@@ -144,9 +144,8 @@ func jsonDump(vm *runtime.VM) int {
 	keySep := ": "
 	sortKeys := false
 
-	// Check for indent argument (position 3)
-	if vm.GetTop() >= 3 {
-		indentVal := vm.Get(3)
+	// indent (keyword-only in CPython)
+	if indentVal, indentOk := vm.OptionalArg(3, "indent"); indentOk {
 		if !runtime.IsNone(indentVal) {
 			switch v := indentVal.(type) {
 			case *runtime.PyInt:
@@ -159,9 +158,8 @@ func jsonDump(vm *runtime.VM) int {
 		}
 	}
 
-	// Check for separators argument (position 4)
-	if vm.GetTop() >= 4 {
-		sepVal := vm.Get(4)
+	// separators (keyword-only in CPython)
+	if sepVal, sepOk := vm.OptionalArg(4, "separators"); sepOk {
 		if !runtime.IsNone(sepVal) {
 			var sepItems []runtime.Value
 			if tuple, ok := sepVal.(*runtime.PyTuple); ok && len(tuple.Items) == 2 {
@@ -182,8 +180,10 @@ func jsonDump(vm *runtime.VM) int {
 		}
 	}
 
-	// Check for sort_keys argument (position 5)
-	sortKeys = vm.OptionalBool(5, false)
+	// sort_keys (keyword-only in CPython)
+	if skVal, ok := vm.OptionalArg(5, "sort_keys"); ok {
+		sortKeys = vm.Truthy(skVal)
+	}
 
 	result, err := encodeJSON(obj, indent, itemSep, keySep, sortKeys, 0)
 	if err != nil {
@@ -342,9 +342,13 @@ func encodeArray(items []runtime.Value, indent, itemSep, keySep string, sortKeys
 
 	for i, item := range items {
 		if i > 0 {
-			buf.WriteString(strings.TrimRight(itemSep, " "))
 			if indent != "" {
+				// The newline + indentation supplies the spacing, so drop any
+				// trailing space (CPython's indented item separator default ",").
+				buf.WriteString(strings.TrimRight(itemSep, " "))
 				buf.WriteByte('\n')
+			} else {
+				buf.WriteString(itemSep)
 			}
 		}
 
@@ -405,9 +409,13 @@ func encodeObject(d *runtime.PyDict, indent, itemSep, keySep string, sortKeys bo
 
 	for i, pair := range pairs {
 		if i > 0 {
-			buf.WriteString(strings.TrimRight(itemSep, " "))
 			if indent != "" {
+				// The newline + indentation supplies the spacing, so drop any
+				// trailing space (CPython's indented item separator default ",").
+				buf.WriteString(strings.TrimRight(itemSep, " "))
 				buf.WriteByte('\n')
+			} else {
+				buf.WriteString(itemSep)
 			}
 		}
 

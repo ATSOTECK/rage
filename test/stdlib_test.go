@@ -516,6 +516,90 @@ d.insert(1, 99)
 	assert.Contains(t, err.Error(), "IndexError")
 }
 
+// The following tests pin deque maxlen-eviction and remove behavior. The GC
+// leak-niling fix clears dropped backing-array slots; these confirm it does not
+// disturb the live contents (slice bounds are unchanged). Contents are read via
+// popleft/pop since deque has no list()/repr inspection.
+
+func TestDequeMaxlenAppendEvict(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3], 3)
+d.append(4)        # evicts the head (1) -> [2, 3, 4]
+first = d.popleft()
+last = d.pop()
+`)
+	assert.Equal(t, int64(2), vm.GetGlobal("first").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(4), vm.GetGlobal("last").(*runtime.PyInt).Value)
+}
+
+func TestDequeMaxlenAppendLeftEvict(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3], 3)
+d.appendleft(0)    # evicts the tail (3) -> [0, 1, 2]
+first = d.popleft()
+last = d.pop()
+`)
+	assert.Equal(t, int64(0), vm.GetGlobal("first").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(2), vm.GetGlobal("last").(*runtime.PyInt).Value)
+}
+
+func TestDequeMaxlenConstructorEvict(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 4, 5], 3)   # keeps the last 3 -> [3, 4, 5]
+first = d.popleft()
+last = d.pop()
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("first").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(5), vm.GetGlobal("last").(*runtime.PyInt).Value)
+}
+
+func TestDequeMaxlenExtendEvict(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2], 3)
+d.extend([3, 4, 5])   # keeps the last 3 -> [3, 4, 5]
+first = d.popleft()
+last = d.pop()
+`)
+	assert.Equal(t, int64(3), vm.GetGlobal("first").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(5), vm.GetGlobal("last").(*runtime.PyInt).Value)
+}
+
+func TestDequeRemoveContents(t *testing.T) {
+	vm := runCodeWithStdlib(t, `
+from collections import deque
+d = deque([1, 2, 3, 4])
+d.remove(2)        # -> [1, 3, 4]
+first = d.popleft()
+last = d.pop()
+mid = d.popleft()
+`)
+	assert.Equal(t, int64(1), vm.GetGlobal("first").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(4), vm.GetGlobal("last").(*runtime.PyInt).Value)
+	assert.Equal(t, int64(3), vm.GetGlobal("mid").(*runtime.PyInt).Value)
+}
+
+// Unbounded recursion must raise a catchable RecursionError rather than abort
+// the process with a Go fatal stack overflow (regression for the default
+// recursion limit set in NewVM).
+func TestRecursionErrorNotFatal(t *testing.T) {
+	runtime.ResetModules()
+	stdlib.InitAllModules()
+	vm := runtime.NewVM()
+	code, errs := compiler.CompileSource(`
+def recurse(n):
+    return recurse(n + 1)
+recurse(0)
+`, "<test>")
+	require.Empty(t, errs)
+	_, err := vm.Execute(code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RecursionError")
+}
+
 func TestCollectionsCounterDictNonInt(t *testing.T) {
 	// Counter(dict) with non-int values should raise TypeError
 	runtime.ResetModules()

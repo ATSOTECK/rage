@@ -82,12 +82,17 @@ def test_zip_longest():
     expect(list(itertools.zip_longest([1, 2, 3], [4, 5]))).to_be([(1, 4), (2, 5), (3, None)])
     expect(list(itertools.zip_longest([1], [2, 3], [4, 5, 6]))).to_be([(1, 2, 4), (None, 3, 5), (None, None, 6)])
     expect(list(itertools.zip_longest([1, 2], [3, 4]))).to_be([(1, 3), (2, 4)])
+    # fillvalue keyword argument
+    expect(list(itertools.zip_longest([1, 2, 3], [4, 5], fillvalue=0))).to_be([(1, 4), (2, 5), (3, 0)])
 
 def test_product():
     expect(list(itertools.product([1, 2], [3, 4]))).to_be([(1, 3), (1, 4), (2, 3), (2, 4)])
     expect(list(itertools.product([1, 2], ["a", "b"], [True]))).to_be([(1, "a", True), (1, "b", True), (2, "a", True), (2, "b", True)])
     expect(list(itertools.product([1, 2, 3]))).to_be([(1,), (2,), (3,)])
     expect(list(itertools.product("AB", "xy"))).to_be([("A", "x"), ("A", "y"), ("B", "x"), ("B", "y")])
+    # repeat keyword argument
+    expect(list(itertools.product([0, 1], repeat=2))).to_be([(0, 0), (0, 1), (1, 0), (1, 1)])
+    expect(list(itertools.product([1, 2], ["a"], repeat=2))).to_be([(1, "a", 1, "a"), (1, "a", 2, "a"), (2, "a", 1, "a"), (2, "a", 2, "a")])
 
 def test_permutations():
     expect(list(itertools.permutations([1, 2, 3]))).to_be([(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)])

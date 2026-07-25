@@ -83,6 +83,11 @@ func NewVM() *VM {
 		builtins:      make(map[string]Value),
 		checkInterval: 1000, // Check context every 1000 instructions by default
 		checkCounter:  1000, // Initialize counter
+		// Default call-stack limit. Without this, runaway Python recursion
+		// overflows the Go goroutine stack and aborts the whole process with an
+		// uncatchable fatal error instead of a catchable RecursionError. Matches
+		// CPython's default and sys.getrecursionlimit(). 0 means unlimited.
+		maxRecursionDepth: 1000,
 	}
 	vm.initBuiltins()
 
@@ -420,7 +425,7 @@ func (vm *VM) callExitNoExc(cm Value) error {
 			_, err = fn.Fn(append([]Value{cm}, args...), nil)
 		}
 	case *PyGoFunc:
-		_, err = vm.callGoFunction(fn, args)
+		_, err = vm.callGoFunction(fn, args, nil)
 	default:
 		return fmt.Errorf("TypeError: __exit__ is not callable")
 	}

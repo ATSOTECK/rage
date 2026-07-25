@@ -21,6 +21,35 @@ func TestRageRun(t *testing.T) {
 	assert.NotNil(t, result)
 }
 
+// A default State bounds recursion so runaway recursion raises a catchable
+// RecursionError instead of crashing the host with a fatal stack overflow.
+func TestStateDefaultRecursionLimit(t *testing.T) {
+	state := rage.NewState()
+	defer state.Close()
+
+	_, err := state.Run(`
+def recurse(n):
+    return recurse(n + 1)
+recurse(0)
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RecursionError")
+}
+
+// WithMaxRecursionDepth overrides the default; a positive value still bounds.
+func TestStateCustomRecursionLimit(t *testing.T) {
+	state := rage.NewStateWithModules(rage.WithMaxRecursionDepth(50))
+	defer state.Close()
+
+	_, err := state.Run(`
+def recurse(n):
+    return recurse(n + 1)
+recurse(0)
+`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RecursionError")
+}
+
 func TestRageRunReturnsNilOnEmpty(t *testing.T) {
 	result, err := rage.Run(`pass`)
 	require.NoError(t, err)
@@ -156,7 +185,7 @@ func TestEnableModuleAfterCreation(t *testing.T) {
 
 	s, ok := rage.AsString(state.GetGlobal("result"))
 	assert.True(t, ok)
-	assert.Equal(t, "[1,2]", s)
+	assert.Equal(t, "[1, 2]", s) // CPython default item separator is ", "
 }
 
 func TestEnableAllModulesAfterCreation(t *testing.T) {

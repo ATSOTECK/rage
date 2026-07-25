@@ -118,7 +118,9 @@ func (d *PyDict) deleteItemByEquality(key Value, vm *VM) {
 func (d *PyDict) removeOrderedKey(key Value, vm *VM) {
 	for i, k := range d.orderedKeys {
 		if vm.equal(k, key) {
-			d.orderedKeys = append(d.orderedKeys[:i], d.orderedKeys[i+1:]...)
+			copy(d.orderedKeys[i:], d.orderedKeys[i+1:])
+			d.orderedKeys[len(d.orderedKeys)-1] = nil // release moved-out tail ref for GC
+			d.orderedKeys = d.orderedKeys[:len(d.orderedKeys)-1]
 			return
 		}
 	}
@@ -161,8 +163,10 @@ func (d *PyDict) DictDelete(key Value, vm *VM) bool {
 	entries := d.buckets[h]
 	for i, e := range entries {
 		if vm.equal(e.key, key) {
-			// Remove entry by replacing with last and truncating
-			d.buckets[h] = append(entries[:i], entries[i+1:]...)
+			// Remove entry, releasing the moved-out tail slot's refs for GC.
+			copy(entries[i:], entries[i+1:])
+			entries[len(entries)-1] = dictEntry{}
+			d.buckets[h] = entries[:len(entries)-1]
 			d.size--
 			d.deleteItemByEquality(e.key, vm)
 			d.removeOrderedKey(key, vm)
@@ -274,7 +278,9 @@ func (s *PySet) SetRemove(value Value, vm *VM) bool {
 	entries := s.buckets[h]
 	for i, e := range entries {
 		if vm.equal(e.value, value) {
-			s.buckets[h] = append(entries[:i], entries[i+1:]...)
+			copy(entries[i:], entries[i+1:])
+			entries[len(entries)-1] = setEntry{} // release moved-out tail ref for GC
+			s.buckets[h] = entries[:len(entries)-1]
 			s.size--
 			// Use the original key from the bucket (not the argument) for Items cleanup,
 			// since Go map delete uses identity equality for pointer types
