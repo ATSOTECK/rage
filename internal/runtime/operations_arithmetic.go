@@ -71,8 +71,41 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 			return MakeInt(^v.Value), nil
 		}
 	}
-	sym := map[Opcode]string{OpUnaryNegative: "-", OpUnaryPositive: "+", OpUnaryInvert: "~"}[op]
-	return nil, fmt.Errorf("TypeError: bad operand type for unary %s: '%s'", sym, vm.typeName(a))
+	return nil, fmt.Errorf("TypeError: bad operand type for unary %s: '%s'", opSymbol(op), vm.typeName(a))
+}
+
+// binaryOpDunders returns the forward and reflected dunder method names for a
+// binary opcode. ok is false for opcodes that have no dunder protocol.
+func binaryOpDunders(op Opcode) (forward, reverse string, ok bool) {
+	switch op {
+	case OpBinaryAdd:
+		return "__add__", "__radd__", true
+	case OpBinarySubtract:
+		return "__sub__", "__rsub__", true
+	case OpBinaryMultiply:
+		return "__mul__", "__rmul__", true
+	case OpBinaryDivide:
+		return "__truediv__", "__rtruediv__", true
+	case OpBinaryFloorDiv:
+		return "__floordiv__", "__rfloordiv__", true
+	case OpBinaryModulo:
+		return "__mod__", "__rmod__", true
+	case OpBinaryPower:
+		return "__pow__", "__rpow__", true
+	case OpBinaryMatMul:
+		return "__matmul__", "__rmatmul__", true
+	case OpBinaryAnd:
+		return "__and__", "__rand__", true
+	case OpBinaryOr:
+		return "__or__", "__ror__", true
+	case OpBinaryXor:
+		return "__xor__", "__rxor__", true
+	case OpBinaryLShift:
+		return "__lshift__", "__rlshift__", true
+	case OpBinaryRShift:
+		return "__rshift__", "__rrshift__", true
+	}
+	return "", "", false
 }
 
 // inplaceOp implements an augmented assignment (a op= b) for built-in types
@@ -113,40 +146,6 @@ func (vm *VM) inplaceOp(op Opcode, a, b Value) (Value, error) {
 		}
 	}
 	return vm.binaryOp(op-OpInplaceAdd+OpBinaryAdd, a, b)
-}
-
-// binaryOpDunders returns the forward and reflected dunder method names for a
-// binary opcode. ok is false for opcodes that have no dunder protocol.
-func binaryOpDunders(op Opcode) (forward, reverse string, ok bool) {
-	switch op {
-	case OpBinaryAdd:
-		return "__add__", "__radd__", true
-	case OpBinarySubtract:
-		return "__sub__", "__rsub__", true
-	case OpBinaryMultiply:
-		return "__mul__", "__rmul__", true
-	case OpBinaryDivide:
-		return "__truediv__", "__rtruediv__", true
-	case OpBinaryFloorDiv:
-		return "__floordiv__", "__rfloordiv__", true
-	case OpBinaryModulo:
-		return "__mod__", "__rmod__", true
-	case OpBinaryPower:
-		return "__pow__", "__rpow__", true
-	case OpBinaryMatMul:
-		return "__matmul__", "__rmatmul__", true
-	case OpBinaryAnd:
-		return "__and__", "__rand__", true
-	case OpBinaryOr:
-		return "__or__", "__ror__", true
-	case OpBinaryXor:
-		return "__xor__", "__rxor__", true
-	case OpBinaryLShift:
-		return "__lshift__", "__rlshift__", true
-	case OpBinaryRShift:
-		return "__rshift__", "__rrshift__", true
-	}
-	return "", "", false
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {

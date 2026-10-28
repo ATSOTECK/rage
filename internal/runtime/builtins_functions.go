@@ -1251,13 +1251,9 @@ func (vm *VM) sortValues(items []Value, keyFn Value, reverse bool) error {
 		if reverse {
 			a, b = b, a
 		}
-		result := vm.compareOp(OpCompareLt, a, b)
-		if result == nil {
-			// compareOp set vm.currentException (e.g. TypeError for incompatible types)
-			if vm.currentException != nil {
-				sortErr = vm.currentException
-				vm.currentException = nil
-			}
+		result, err := vm.compareChecked(OpCompareLt, a, b)
+		if err != nil {
+			sortErr = err
 			return false
 		}
 		return vm.truthy(result)

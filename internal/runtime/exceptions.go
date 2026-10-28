@@ -1,6 +1,10 @@
 package runtime
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 // Exception handling helpers
 
@@ -195,6 +199,13 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 		return nil, exc
 	}
 
+	// A timed-out or cancelled execution must not be resumable from Python:
+	// skip every handler (including except:/finally) and unwind the frame.
+	if abortErr := vm.contextDoneError(); abortErr != nil {
+		vm.popFrame()
+		return nil, abortErr
+	}
+
 	frame := vm.frame
 
 	// Search block stack for exception handler in the current frame only.
@@ -274,14 +285,35 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 	}
 
 	// No handler in this frame, pop frame and propagate to caller.
-	// Nil out the frame reference before truncating to allow GC to collect it.
+	vm.popFrame()
+	return nil, exc
+}
+
+// popFrame removes the current frame from the frame stack and makes the
+// caller's frame current. The vacated slot is nilled so the popped frame can
+// be garbage collected.
+func (vm *VM) popFrame() {
 	vm.frames[len(vm.frames)-1] = nil
 	vm.frames = vm.frames[:len(vm.frames)-1]
 	if len(vm.frames) > 0 {
 		vm.frame = vm.frames[len(vm.frames)-1]
 	}
+}
 
-	return nil, exc
+// contextDoneError returns the TimeoutError or CancelledError for an
+// execution whose context has finished, or nil while it is still running.
+func (vm *VM) contextDoneError() error {
+	if vm.ctx == nil {
+		return nil
+	}
+	switch vm.ctx.Err() {
+	case nil:
+		return nil
+	case context.DeadlineExceeded:
+		return &TimeoutError{}
+	default:
+		return &CancelledError{}
+	}
 }
 
 // exceptionPrefixes maps error message prefixes to exception type names
@@ -352,6 +384,86 @@ var exceptionPrefixes = []struct {
 	{"Warning", "Warning", ""},
 }
 
+// opSymbol returns the Python operator symbol for a binary, in-place,
+// or unary opcode ("+" for OpBinaryAdd, "+=" for OpInplaceAdd), falling back
+// to the opcode name.
+func opSymbol(op Opcode) string {
+	switch {
+	case op >= OpBinaryAdd && op <= OpBinaryXor:
+		return binaryOpSymbol(op)
+	case op == OpInplacePower:
+		return "**="
+	case op >= OpInplaceAdd && op <= OpInplaceXor:
+		return binaryOpSymbol(op-OpInplaceAdd+OpBinaryAdd) + "="
+	case op == OpUnaryPositive:
+		return "+"
+	case op == OpUnaryNegative:
+		return "-"
+	case op == OpUnaryInvert:
+		return "~"
+	}
+	return op.String()
+}
+
+// unprefixedErrorPatterns classifies Go errors whose message carries no
+// exception-type prefix. These messages mirror CPython's wording, so the
+// wording identifies the exception type; without this they would all surface
+// as RuntimeError and `except TypeError:` / `except NameError:` would miss them.
+// Checked in order; the first pattern contained in the message wins.
+var unprefixedErrorPatterns = []struct {
+	substr  string
+	excName string
+}{
+	{"' is not defined", "NameError"},
+	{"has no attribute '", "AttributeError"},
+	{"' is read-only", "AttributeError"},
+	{"' has no getter", "AttributeError"},
+	{"' has no setter", "AttributeError"},
+	{"' has no deleter", "AttributeError"},
+	{"cannot import name '", "ImportError"},
+	{"values to unpack", "ValueError"},
+	{"slice step cannot be zero", "ValueError"},
+	{"unsupported operand type(s)", "TypeError"},
+	{"not supported between instances of", "TypeError"},
+	{"bad operand type for", "TypeError"},
+	{"can only concatenate", "TypeError"},
+	{"unhashable type", "TypeError"},
+	{"has no len()", "TypeError"},
+	{"object is not subscriptable", "TypeError"},
+	{"object is not iterable", "TypeError"},
+	{"object is not callable", "TypeError"},
+	{"object is not an iterator", "TypeError"},
+	{"is not async iterable", "TypeError"},
+	{"is not an async iterator", "TypeError"},
+	{"is not awaitable", "TypeError"},
+	{"should return an integer", "TypeError"},
+	{"attribute name must be string", "TypeError"},
+	{"must be None or a string", "TypeError"},
+	{"descriptor '", "TypeError"},
+	{"() takes ", "TypeError"},
+	{"() missing ", "TypeError"},
+	{"() got an unexpected keyword argument", "TypeError"},
+	{"() got multiple values for argument", "TypeError"},
+	{"() requires at least", "TypeError"},
+	{"() requires an", "TypeError"},
+	{" expected at least ", "TypeError"},
+	{" expected at most ", "TypeError"},
+	{" expected 1 argument", "TypeError"},
+	{" expected exactly ", "TypeError"},
+	{"pop expected at least", "TypeError"},
+}
+
+// classifyUnprefixedError returns the exception class name implied by an
+// unprefixed error message, or "" if the message isn't recognized.
+func classifyUnprefixedError(msg string) string {
+	for _, p := range unprefixedErrorPatterns {
+		if strings.Contains(msg, p.substr) {
+			return p.excName
+		}
+	}
+	return ""
+}
+
 // wrapGoError converts a Go error to a Python exception
 func (vm *VM) wrapGoError(err error) *PyException {
 	if pyExc, ok := err.(*PyException); ok {
@@ -377,6 +489,11 @@ func (vm *VM) wrapGoError(err error) *PyException {
 				}
 			}
 			break
+		}
+	}
+	if excClass == nil {
+		if name := classifyUnprefixedError(errStr); name != "" {
+			excClass, _ = vm.builtins[name].(*PyClass)
 		}
 	}
 	if excClass == nil {
@@ -510,4 +627,35 @@ func (vm *VM) buildExceptionGroup(message string, exceptions []*PyException, isB
 		Instance: inst,
 	}
 	return exc, nil
+}
+
+// compareChecked runs compareOp and returns any exception it raised as an
+// error. compareOp reports errors through vm.currentException, which may
+// already hold an exception pending for an enclosing finally body or
+// __exit__ call; that pending exception is set aside for the comparison and
+// restored afterwards, so it isn't mistaken for (or clobbered by) this one.
+func (vm *VM) compareChecked(op Opcode, a, b Value) (Value, error) {
+	pending := vm.currentException
+	vm.currentException = nil
+	result := vm.compareOp(op, a, b)
+	if exc := vm.currentException; exc != nil {
+		vm.currentException = nil
+		return nil, exc
+	}
+	vm.currentException = pending
+	return result, nil
+}
+
+// truthyChecked is truthy with the same error isolation as compareChecked,
+// for __bool__/__len__ methods that raise.
+func (vm *VM) truthyChecked(v Value) (bool, error) {
+	pending := vm.currentException
+	vm.currentException = nil
+	result := vm.truthy(v)
+	if exc := vm.currentException; exc != nil {
+		vm.currentException = nil
+		return false, exc
+	}
+	vm.currentException = pending
+	return result, nil
 }

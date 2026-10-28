@@ -43,11 +43,7 @@ func (vm *VM) tryRichCompare(a, b Value, dunder, reflected string) (Value, bool)
 		result, found, err := vm.callDunder(inst, dunder, b)
 		if found && err != nil {
 			// Propagate exceptions from dunder methods (e.g. __lt__ raising RuntimeError)
-			if pyExc, ok := err.(*PyException); ok {
-				vm.currentException = pyExc
-			} else {
-				vm.currentException = &PyException{TypeName: "RuntimeError", Message: err.Error()}
-			}
+			vm.currentException = vm.wrapGoError(err)
 			return nil, true
 		}
 		if found && result != NotImplemented {
@@ -57,11 +53,7 @@ func (vm *VM) tryRichCompare(a, b Value, dunder, reflected string) (Value, bool)
 	if inst, ok := b.(*PyInstance); ok {
 		result, found, err := vm.callDunder(inst, reflected, a)
 		if found && err != nil {
-			if pyExc, ok := err.(*PyException); ok {
-				vm.currentException = pyExc
-			} else {
-				vm.currentException = &PyException{TypeName: "RuntimeError", Message: err.Error()}
-			}
+			vm.currentException = vm.wrapGoError(err)
 			return nil, true
 		}
 		if found && result != NotImplemented {

@@ -416,8 +416,9 @@ func (c *Compiler) compileTry(s *model.Try) {
 
 		for _, handler := range s.Handlers {
 			if handler.Type != nil {
-				// Check exception type using OpExceptionMatch
-				c.emit(runtime.OpDup)
+				// Check exception type using OpExceptionMatch. It peeks at the
+				// exception (leaving it on the stack) and pushes the match result,
+				// so no DUP is needed: [exc, type] -> [exc, bool].
 				c.compileExpr(handler.Type)
 				c.emit(runtime.OpExceptionMatch)
 				nextHandler := c.emitJump(runtime.OpPopJumpIfFalse)
@@ -439,10 +440,13 @@ func (c *Compiler) compileTry(s *model.Try) {
 					c.compileStmt(stmt)
 				}
 
-				// Clear exception variable after handler (Python 3 semantics)
+				// Unbind the exception variable after the handler (Python 3
+				// semantics): `e = None; del e`, so the delete can't fail even
+				// if the handler body already deleted e.
 				if handler.Name != nil {
 					c.emit(runtime.OpLoadNone)
 					c.compileStore(handler.Name)
+					c.compileDelete(handler.Name)
 				}
 
 				// Mark end of except handler (pops excHandlerStack)

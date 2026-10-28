@@ -7,7 +7,41 @@ import (
 	"unicode/utf8"
 )
 
+// run executes the current frame until it returns. Opcode handlers may return
+// raw Go errors without consulting the exception machinery; run routes those
+// to this frame's try/except/finally/with handlers and resumes at the handler,
+// so every error raised by an opcode is catchable by Python code.
 func (vm *VM) run() (Value, error) {
+	frame := vm.frame
+	vm.runDepth++
+	defer func() { vm.runDepth-- }()
+	if vm.runDepth > vm.nestingLimit() {
+		// Raised in the new frame (which has no handlers yet), unwinding it.
+		_, err := vm.tryHandleError(errRecursionDepth, frame)
+		return nil, err
+	}
+	for {
+		result, err := vm.runDispatch()
+		if err == nil || err == errExceptionHandledInOuterFrame {
+			return result, err
+		}
+		// An error that already went through handleException has unwound this
+		// frame off vm.frames; only errors this frame still owns are routed here.
+		if vm.frame != frame || len(vm.frames) == 0 || vm.frames[len(vm.frames)-1] != frame {
+			return nil, err
+		}
+		handled, herr := vm.tryHandleError(err, frame)
+		if herr != nil {
+			return nil, herr
+		}
+		if !handled {
+			return nil, err
+		}
+	}
+}
+
+// runDispatch is the bytecode dispatch loop for the current frame.
+func (vm *VM) runDispatch() (Value, error) {
 	frame := vm.frame
 
 	for frame.IP < len(frame.Code.Code) {
@@ -705,16 +739,11 @@ func (vm *VM) run() (Value, error) {
 			case OpCompareNeInt:
 				baseOp = OpCompareNe
 			}
-			frame.Stack[frame.SP] = vm.compareOp(baseOp, a, b)
-			if handled, result, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if result != nil {
-					return result, nil
-				}
-				break
+			cmpResult, cmpErr := vm.compareChecked(baseOp, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
+			frame.Stack[frame.SP] = cmpResult
 			frame.SP++
 
 		// ==========================================
@@ -763,15 +792,9 @@ func (vm *VM) run() (Value, error) {
 			}
 			// Fallback: map jump opcode to base compare opcode
 			baseOp := OpCompareLt + Opcode(op-OpCompareLtJump)
-			cmpResult := vm.compareOp(baseOp, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			cmpResult, cmpErr := vm.compareChecked(baseOp, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			if !vm.truthy(cmpResult) {
 				frame.IP = arg
@@ -821,15 +844,9 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			// Fallback to generic comparison
-			cmp := vm.compareOp(OpCompareLt, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			cmp, cmpErr := vm.compareChecked(OpCompareLt, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			vm.push(cmp)
 
@@ -1159,15 +1176,9 @@ func (vm *VM) run() (Value, error) {
 
 		case OpUnaryNot:
 			a := vm.pop()
-			result := vm.truthy(a)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, truthErr := vm.truthyChecked(a)
+			if truthErr != nil {
+				return nil, truthErr
 			}
 			if result {
 				vm.push(False)
@@ -1412,15 +1423,9 @@ func (vm *VM) run() (Value, error) {
 					break
 				}
 			}
-			result := vm.compareOp(op, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, cmpErr := vm.compareChecked(op, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
@@ -1430,15 +1435,9 @@ func (vm *VM) run() (Value, error) {
 			OpCompareIn, OpCompareNotIn:
 			b := vm.pop()
 			a := vm.pop()
-			result := vm.compareOp(op, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, cmpErr := vm.compareChecked(op, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			vm.push(result)
 
@@ -1635,7 +1634,7 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			if len(items) != arg {
-				err = fmt.Errorf("ValueError: not enough values to unpack (expected %d, got %d)", arg, len(items))
+				err = unpackCountError(arg, len(items))
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
 				} else if handled {

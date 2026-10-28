@@ -599,6 +599,12 @@ func (vm *VM) runGenerator() (Value, bool, error) {
 // runWithYieldSupport is like run() but returns (value, yielded, error) to support generators
 func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 	frame := vm.frame
+	vm.runDepth++
+	defer func() { vm.runDepth-- }()
+	if vm.runDepth > vm.nestingLimit() && vm.generatorThrow == nil {
+		// Raise RecursionError at the point the generator resumes.
+		vm.generatorThrow = vm.wrapGoError(errRecursionDepth)
+	}
 
 	// Check for pending exception from generator.throw()
 	if vm.generatorThrow != nil {

@@ -138,31 +138,51 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpCompareEq:
 		b := vm.pop()
 		a := vm.pop()
-		if vm.equal(a, b) {
-			vm.push(True)
-		} else {
-			vm.push(False)
+		cmp, cmpErr := vm.compareChecked(OpCompareEq, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
 		}
+		vm.push(cmp)
 	case OpCompareNe:
 		b := vm.pop()
 		a := vm.pop()
-		vm.push(vm.compareOp(OpCompareNe, a, b))
+		cmp, cmpErr := vm.compareChecked(OpCompareNe, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		vm.push(cmp)
 	case OpCompareLt:
 		b := vm.pop()
 		a := vm.pop()
-		vm.push(vm.compareOp(OpCompareLt, a, b))
+		cmp, cmpErr := vm.compareChecked(OpCompareLt, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		vm.push(cmp)
 	case OpCompareLe:
 		b := vm.pop()
 		a := vm.pop()
-		vm.push(vm.compareOp(OpCompareLe, a, b))
+		cmp, cmpErr := vm.compareChecked(OpCompareLe, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		vm.push(cmp)
 	case OpCompareGt:
 		b := vm.pop()
 		a := vm.pop()
-		vm.push(vm.compareOp(OpCompareGt, a, b))
+		cmp, cmpErr := vm.compareChecked(OpCompareGt, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		vm.push(cmp)
 	case OpCompareGe:
 		b := vm.pop()
 		a := vm.pop()
-		vm.push(vm.compareOp(OpCompareGe, a, b))
+		cmp, cmpErr := vm.compareChecked(OpCompareGe, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		vm.push(cmp)
 
 	// Unary operations
 	case OpUnaryNot:
@@ -927,12 +947,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		case OpCompareNeInt:
 			genericOp = OpCompareNe
 		}
-		result := vm.CompareOp(genericOp, a, b)
-		// compareOp signals errors via vm.currentException — propagate it.
-		if vm.currentException != nil {
-			exc := vm.currentException
-			vm.currentException = nil
-			return nil, exc
+		result, cmpErr := vm.compareChecked(genericOp, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
 		}
 		if result == nil {
 			return nil, fmt.Errorf("TypeError: comparison failed")
@@ -948,10 +965,18 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 				result = CompareInts(ai, bi) < 0
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+				cmp, cmpErr := vm.compareChecked(OpCompareLt, a, b)
+				if cmpErr != nil {
+					return nil, cmpErr
+				}
+				result = vm.truthy(cmp)
 			}
 		} else {
-			result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
+			cmp, cmpErr := vm.compareChecked(OpCompareLt, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
+			}
+			result = vm.truthy(cmp)
 		}
 		if !result {
 			frame.IP = arg
@@ -965,10 +990,18 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 				result = CompareInts(ai, bi) <= 0
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+				cmp, cmpErr := vm.compareChecked(OpCompareLe, a, b)
+				if cmpErr != nil {
+					return nil, cmpErr
+				}
+				result = vm.truthy(cmp)
 			}
 		} else {
-			result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
+			cmp, cmpErr := vm.compareChecked(OpCompareLe, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
+			}
+			result = vm.truthy(cmp)
 		}
 		if !result {
 			frame.IP = arg
@@ -982,10 +1015,18 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 				result = CompareInts(ai, bi) > 0
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+				cmp, cmpErr := vm.compareChecked(OpCompareGt, a, b)
+				if cmpErr != nil {
+					return nil, cmpErr
+				}
+				result = vm.truthy(cmp)
 			}
 		} else {
-			result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
+			cmp, cmpErr := vm.compareChecked(OpCompareGt, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
+			}
+			result = vm.truthy(cmp)
 		}
 		if !result {
 			frame.IP = arg
@@ -999,10 +1040,18 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 				result = CompareInts(ai, bi) >= 0
 			} else {
-				result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+				cmp, cmpErr := vm.compareChecked(OpCompareGe, a, b)
+				if cmpErr != nil {
+					return nil, cmpErr
+				}
+				result = vm.truthy(cmp)
 			}
 		} else {
-			result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
+			cmp, cmpErr := vm.compareChecked(OpCompareGe, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
+			}
+			result = vm.truthy(cmp)
 		}
 		if !result {
 			frame.IP = arg
@@ -1011,16 +1060,22 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpCompareEqJump:
 		b := vm.pop()
 		a := vm.pop()
-		result := vm.equal(a, b)
-		if !result {
+		cmp, cmpErr := vm.compareChecked(OpCompareEq, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		if !vm.truthy(cmp) {
 			frame.IP = arg
 		}
 
 	case OpCompareNeJump:
 		b := vm.pop()
 		a := vm.pop()
-		neResult := vm.compareOp(OpCompareNe, a, b)
-		if neResult == nil || !vm.truthy(neResult) {
+		cmp, cmpErr := vm.compareChecked(OpCompareNe, a, b)
+		if cmpErr != nil {
+			return nil, cmpErr
+		}
+		if !vm.truthy(cmp) {
 			frame.IP = arg
 		}
 

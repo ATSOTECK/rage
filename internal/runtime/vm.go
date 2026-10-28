@@ -49,12 +49,15 @@ type VM struct {
 	// Pending memory error from stack growth (checked in run loop)
 	pendingMemError bool
 
+	// runDepth counts nested executions of the interpreter loop (Python
+	// function calls and generator resumes). Unlike len(frames) it also sees
+	// recursion through generators, whose frames run on a separate frame stack.
+	runDepth int64
+
 	// Text conversion state (see conversions_repr.go)
 	reprActive map[Value]struct{} // containers currently being repr'd, for cycle detection
 	reprDepth  int                // nesting budget used by repr()/str() conversions
-	// Call order of recent keyword-argument maps (Go maps are unordered)
-	kwargOrders    [8]kwargOrderRecord
-	kwargOrderNext int
+
 	// framePool holds finished function frames for reuse by
 	// createFunctionFrame, avoiding two allocations per Python call.
 	framePool []*Frame
@@ -65,7 +68,26 @@ type VM struct {
 
 	// objectCls caches the builtin object class (see objectClass).
 	objectCls *PyClass
+
+	// Call order of recent keyword-argument maps (Go maps are unordered)
+	kwargOrders    [8]kwargOrderRecord
+	kwargOrderNext int
 }
+
+// hardNestingLimit caps interpreter nesting even when the recursion limit is
+// unlimited or set very high: past roughly 100k levels the Go stack overflows,
+// which is a fatal error that would take down the embedding process.
+const hardNestingLimit = 20000
+
+// nestingLimit is the effective maximum runDepth.
+func (vm *VM) nestingLimit() int64 {
+	if vm.maxRecursionDepth > 0 && vm.maxRecursionDepth < hardNestingLimit {
+		return vm.maxRecursionDepth
+	}
+	return hardNestingLimit
+}
+
+var errRecursionDepth = fmt.Errorf("RecursionError: maximum recursion depth exceeded")
 
 // TimeoutError is returned when script execution exceeds the time limit
 type TimeoutError struct {
@@ -308,6 +330,15 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 			return true, nil
 		}
 		return false, errExceptionHandledInOuterFrame
+	}
+	switch err.(type) {
+	case *TimeoutError, *CancelledError:
+		// Execution limits aren't Python exceptions: unwind without running
+		// any handler so scripts can't swallow them with except:.
+		if len(vm.frames) > 0 {
+			vm.popFrame()
+		}
+		return false, err
 	}
 	var pyExc *PyException
 	if pe, ok := err.(*PyException); ok {

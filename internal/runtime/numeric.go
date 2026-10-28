@@ -963,13 +963,9 @@ func (vm *VM) minMax(name string, args []Value, kwargs map[string]Value) (Value,
 			}
 			key = k
 		}
-		r := vm.compareOp(op, key, bestKey)
-		if r == nil {
-			if exc := vm.currentException; exc != nil {
-				vm.currentException = nil
-				return nil, exc
-			}
-			continue
+		r, err := vm.compareChecked(op, key, bestKey)
+		if err != nil {
+			return nil, err
 		}
 		if vm.truthy(r) {
 			best, bestKey = item, key

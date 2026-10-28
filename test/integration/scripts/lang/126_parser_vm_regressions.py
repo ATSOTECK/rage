@@ -76,6 +76,47 @@ def test_short_circuit_in_call_args():
     expect(f(0, 2, 3)).to_be(((0, 3), (2, 3)))
     expect(f(1, 2, 3)).to_be(((2, 3), (1, 3)))
 
+def test_typed_except_inside_loop():
+    total = 0
+    for i in range(5):
+        try:
+            if i % 2:
+                raise ValueError(i)
+            total += i
+        except ValueError:
+            total += 100
+    expect(total).to_be(206)
+
+# === Exceptions ===
+
+def test_builtin_errors_have_python_types():
+    def kind(fn):
+        try:
+            fn()
+        except TypeError:
+            return "TypeError"
+        except NameError:
+            return "NameError"
+        except AttributeError:
+            return "AttributeError"
+        return "none"
+    expect(kind(lambda: None * 2)).to_be("TypeError")
+    expect(kind(lambda: len(5))).to_be("TypeError")
+    expect(kind(lambda: undefined_name_xyz)).to_be("NameError")
+    expect(kind(lambda: int.no_such_attr)).to_be("AttributeError")
+
+def test_raw_errors_caught_in_same_frame():
+    caught = []
+    try:
+        undefined_name_xyz
+    except NameError:
+        caught.append("name")
+    try:
+        x = 1 + None
+    except TypeError:
+        caught.append("type")
+    expect(caught).to_be(["name", "type"])
+
 def test_soft_keywords():
     import re
     match = re.match("a", "abc")
@@ -98,13 +139,76 @@ def test_fstring_forms():
     expect((f"{x=}", f"{ x = }", f"{s=}", f"{x=:>4}", f"{x==1=}")).to_be(("x=1", " x = 1", "s='hi'", "x=   1", "x==1=True"))
     expect((f"{'{'}", f"{'}'}", f"{d['a:b']}", f"{x:'>5}", f"{x:{w}}|")).to_be(("{", "}", "5", "''''1", "     1|"))
 
+def test_nested_with_outer_suppresses():
+    log = []
+    class CM:
+        def __init__(self, n):
+            self.n = n
+        def __enter__(self):
+            return self
+        def __exit__(self, et, ev, tb):
+            log.append(self.n)
+            return self.n == 1
+    def f():
+        with CM(1):
+            with CM(2):
+                raise KeyError
+        return "after"
+    expect((f(), log)).to_be(("after", [2, 1]))
+
+def test_compare_in_finally_during_unwind():
+    def g(a, b):
+        out = []
+        try:
+            try:
+                raise ValueError("v")
+            finally:
+                if a < b:
+                    out.append("lt")
+                if "x" in "xyz":
+                    out.append("in")
+        except ValueError as e:
+            out.append(str(e))
+        return out
+    expect(g(1, 2)).to_be(["lt", "in", "v"])
+
+def test_bare_name_of_deleted_local_raises():
+    def f():
+        x = 5
+        del x
+        try:
+            x
+        except UnboundLocalError:
+            return "unbound"
+        return "no error"
+    expect(f()).to_be("unbound")
+
+def test_generator_recursion_is_catchable():
+    # Unbounded recursion through generators used to overflow the Go stack
+    # and kill the host process.
+    def g(n):
+        yield from g(n + 1)
+    caught = False
+    try:
+        list(g(0))
+    except RecursionError:
+        caught = True
+    expect(caught).to_be(True)
+
 test("elif_chain", test_elif_chain)
 test("elif_chain_no_else", test_elif_chain_no_else)
 test("single_line_suites", test_single_line_suites)
 test("comments_in_odd_places", test_comments_in_odd_places)
 test("semicolons", test_semicolons)
 test("short_circuit_in_call_args", test_short_circuit_in_call_args)
+test("typed_except_inside_loop", test_typed_except_inside_loop)
+test("builtin_errors_have_python_types", test_builtin_errors_have_python_types)
+test("raw_errors_caught_in_same_frame", test_raw_errors_caught_in_same_frame)
 test("soft_keywords", test_soft_keywords)
 test("fstring_forms", test_fstring_forms)
+test("nested_with_outer_suppresses", test_nested_with_outer_suppresses)
+test("compare_in_finally_during_unwind", test_compare_in_finally_during_unwind)
+test("bare_name_of_deleted_local_raises", test_bare_name_of_deleted_local_raises)
+test("generator_recursion_is_catchable", test_generator_recursion_is_catchable)
 
 print("Parser/VM regression tests completed")
