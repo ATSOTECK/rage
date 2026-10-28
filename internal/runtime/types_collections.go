@@ -38,6 +38,11 @@ type PyDict struct {
 	size          int
 	orderedKeys   []Value     // Insertion-ordered keys for Python 3.7+ dict ordering
 	instanceOwner *PyInstance // if non-nil, sync mutations back to instance's Dict
+
+	// Kind marks dicts created by collections.Counter/defaultdict/OrderedDict
+	// (see dict_kinds.go); DefaultFactory is a defaultdict's default_factory.
+	Kind           DictKind
+	DefaultFactory Value
 }
 
 func (d *PyDict) Type() string { return "dict" }

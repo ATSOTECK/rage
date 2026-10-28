@@ -99,7 +99,11 @@ func (vm *VM) reprValue(v Value) (string, error) {
 		}
 		return vm.reprItems(val, "(", ")", "(...)", val.Items)
 	case *PyDict:
-		return vm.reprDict(val)
+		s, err := vm.reprDict(val)
+		if err != nil || val.Kind == DictPlain {
+			return s, err
+		}
+		return vm.reprDictKind(val, s)
 	case *PySet:
 		if val.SetLen() == 0 {
 			return "set()", nil
@@ -408,6 +412,21 @@ func methodQualName(m *PyMethod) string {
 		}
 	}
 	return m.Func.Name
+}
+
+// userDataDunder calls a special method (such as __len__ or __getitem__)
+// registered in the type metatable of a userdata value. found is false when
+// the type doesn't define it.
+func (vm *VM) userDataDunder(ud *PyUserData, name string, args ...Value) (Value, bool, error) {
+	if ud.Metatable == nil {
+		return nil, false, nil
+	}
+	method, err := vm.getAttr(ud, name)
+	if err != nil {
+		return nil, false, nil
+	}
+	result, err := vm.call(method, args, nil)
+	return result, true, err
 }
 
 // userDataText calls a __repr__/__str__ method registered in the type

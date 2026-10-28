@@ -731,7 +731,7 @@ func TestNamedtupleValidFieldsStillWork(t *testing.T) {
 from collections import namedtuple
 Point = namedtuple('Point', ['x', 'y'])
 p = Point(3, 4)
-result = p['x'] + p['y']
+result = p.x + p[1]
 `)
 	assert.Equal(t, int64(7), vm.GetGlobal("result").(*runtime.PyInt).Value)
 }

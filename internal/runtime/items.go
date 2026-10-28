@@ -82,6 +82,11 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		if val, found := o.DictGet(index, vm); found {
 			return val, nil
 		}
+		if o.Kind != DictPlain {
+			if val, ok, err := vm.dictMissing(o, index); ok {
+				return val, err
+			}
+		}
 		return nil, vm.newKeyError(index)
 	case *PyRange:
 		i, err := vm.getIntIndex(index)

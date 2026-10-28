@@ -149,6 +149,9 @@ func (vm *VM) inplaceOp(op Opcode, a, b Value) (Value, error) {
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	if r, handled, err := vm.counterBinaryOp(op, a, b); handled {
+		return r, err
+	}
 	// Bool is a subclass of int in Python - coerce bools to ints for arithmetic
 	if ab, ok := a.(*PyBool); ok {
 		if ab.Value {

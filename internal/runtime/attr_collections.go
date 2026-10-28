@@ -161,6 +161,11 @@ func (vm *VM) getAttrList(lst *PyList, name string) (Value, error) {
 
 // getAttrDict handles attribute access on *PyDict values.
 func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
+	if d.Kind != DictPlain {
+		if m := vm.dictKindAttr(d, name); m != nil {
+			return m, nil
+		}
+	}
 	switch name {
 	case "get":
 		return &PyBuiltinFunc{Name: "dict.get", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

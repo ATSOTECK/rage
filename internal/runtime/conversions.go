@@ -341,6 +341,14 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 			return vm.iteratorToList(iterResult)
 		}
 		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
+	case *PyUserData:
+		if iterResult, found, err := vm.userDataDunder(val, "__iter__"); found {
+			if err != nil {
+				return nil, err
+			}
+			return vm.toList(iterResult)
+		}
+		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	default:
 		return nil, fmt.Errorf("'%s' object is not iterable", vm.typeName(v))
 	}
@@ -422,6 +430,23 @@ func (vm *VM) truthy(v Value) bool {
 		}
 		// Default to true for instances
 		return true
+	case *PyUserData:
+		// Types registered from Go may define __bool__ or __len__
+		for _, name := range [...]string{"__bool__", "__len__"} {
+			if r, found, err := vm.userDataDunder(val, name); found {
+				if err != nil {
+					vm.currentException = vm.wrapGoError(err)
+					return false
+				}
+				switch rv := r.(type) {
+				case *PyBool:
+					return rv.Value
+				case *PyInt:
+					return rv.Value != 0
+				}
+			}
+		}
+		return true
 	default:
 		return true
 	}
@@ -483,7 +508,7 @@ func (vm *VM) typeName(v Value) string {
 	case *PyTuple:
 		return "tuple"
 	case *PyDict:
-		return "dict"
+		return val.kindName()
 	case *PySet:
 		return "set"
 	case *PyFrozenSet:

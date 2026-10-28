@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"strings"
@@ -890,6 +891,33 @@ func (vm *VM) contains(container, item Value) bool {
 				}
 				vm.currentException = nil
 				return false
+			}
+		}
+	case *PyUserData:
+		if r, found, err := vm.userDataDunder(c, "__contains__", item); found {
+			if err != nil {
+				vm.currentException = vm.wrapGoError(err)
+				return false
+			}
+			return vm.truthy(r)
+		}
+		// Fall back to iteration, as for instances
+		iter, err := vm.getIter(c)
+		if err != nil {
+			vm.currentException = vm.wrapGoError(fmt.Errorf("TypeError: argument of type '%s' is not iterable", vm.typeName(c)))
+			return false
+		}
+		for {
+			v, done, err := vm.iterNext(iter)
+			if err != nil {
+				vm.currentException = vm.wrapGoError(err)
+				return false
+			}
+			if done {
+				return false
+			}
+			if vm.containsIdentityOrEqual(v, item) {
+				return true
 			}
 		}
 	case *PyInstance:

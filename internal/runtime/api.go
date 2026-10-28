@@ -218,6 +218,14 @@ func (vm *VM) OptionalBool(pos int, def bool) bool {
 	return def
 }
 
+// Kwargs returns all keyword arguments passed to the running Go function.
+func (vm *VM) Kwargs() map[string]Value {
+	if vm.frame == nil {
+		return nil
+	}
+	return vm.frame.Kwargs
+}
+
 // Kwarg returns the keyword argument with the given name and reports whether it
 // was supplied. Stack-based Go builtins (PyGoFunc) use this to read keyword args.
 func (vm *VM) Kwarg(name string) (Value, bool) {

@@ -27,6 +27,16 @@ func (vm *VM) lenOf(v Value) (int64, error) {
 		return rangeLen(o), nil
 	case *PyDictView:
 		return int64(o.Dict.DictLen()), nil
+	case *PyUserData:
+		if r, found, err := vm.userDataDunder(o, "__len__"); found {
+			if err != nil {
+				return 0, err
+			}
+			if n, ok := r.(*PyInt); ok {
+				return n.Value, nil
+			}
+			return 0, fmt.Errorf("TypeError: '%s' object cannot be interpreted as an integer", vm.typeName(r))
+		}
 	}
 	return 0, fmt.Errorf("TypeError: object of type '%s' has no len()", vm.typeName(v))
 }
