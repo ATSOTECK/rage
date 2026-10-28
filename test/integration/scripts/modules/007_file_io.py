@@ -1203,4 +1203,140 @@ test("CPython: file binary encoding", test_cpython_file_binary_encoding)
 test("CPython: file context exception", test_cpython_file_context_exception)
 test("CPython: file readline after iteration", test_cpython_file_readline_after_iteration)
 
+
+# === readline(size) must preserve bytes past `size` for the next read ===
+# Regression: ReadString('\n') over-reads the full line, then size-limit
+# slicing silently discards the remainder. The next readline() should still
+# see the rest of the first line followed by subsequent lines.
+def test_readline_with_size_preserves_remainder():
+    path = tmp_dir + "/readline_limit.txt"
+    f = open(path, "w")
+    f.write("hello world\nsecond line\n")
+    f.close()
+
+    f = open(path, "r")
+    a = f.readline(5)   # first 5 bytes
+    b = f.readline()    # rest of first line
+    c = f.readline()    # second line
+    f.close()
+    expect(a).to_be("hello")
+    expect(b).to_be(" world\n")
+    expect(c).to_be("second line\n")
+
+
+def test_readline_size_stops_at_newline():
+    # readline(size) returns the line including '\n' if encountered before size.
+    path = tmp_dir + "/readline_stop.txt"
+    f = open(path, "w")
+    f.write("ab\nlong line here\n")
+    f.close()
+
+    f = open(path, "r")
+    a = f.readline(100)  # short line fits well under 100; returns "ab\n"
+    b = f.readline(4)    # next 4 bytes of long line
+    c = f.readline()     # remainder
+    f.close()
+    expect(a).to_be("ab\n")
+    expect(b).to_be("long")
+    expect(c).to_be(" line here\n")
+
+
+test("readline(size) preserves remainder", test_readline_with_size_preserves_remainder)
+test("readline(size) stops at newline", test_readline_size_stops_at_newline)
+
+
+# === StringIO / BytesIO iteration raises catchable StopIteration ===
+# Regression: vm.RaiseError("StopIteration") (without the trailing colon)
+# fell through to RuntimeError, so user code couldn't catch the sentinel.
+from io import StringIO, BytesIO
+
+def test_stringio_next_raises_stopiteration_not_runtime_error():
+    sio = StringIO("only\n")
+    next(sio)
+    # except clause uses the exception-type matcher: StopIteration should
+    # match (whereas RuntimeError must not). Pre-fix, the missing colon
+    # in the io implementation made the exception fall through to
+    # RuntimeError, so RuntimeError would have matched.
+    caught_as_runtime = False
+    try:
+        try:
+            next(sio)
+        except RuntimeError:
+            caught_as_runtime = True
+    except StopIteration:
+        pass
+    expect(caught_as_runtime).to_be(False)
+
+
+def test_bytesio_next_raises_stopiteration_not_runtime_error():
+    bio = BytesIO(b"only\n")
+    next(bio)
+    caught_as_runtime = False
+    try:
+        try:
+            next(bio)
+        except RuntimeError:
+            caught_as_runtime = True
+    except StopIteration:
+        pass
+    expect(caught_as_runtime).to_be(False)
+
+
+# === open() accepts all CPython positional args ===
+# Regression: open(p, mode, buffering, encoding) used to mis-bind `buffering`
+# into the encoding slot because only (file, mode, encoding) was understood.
+def test_open_positional_encoding_at_index_3():
+    p = tmp_dir + "/open_pos_enc.txt"
+    f = open(p, "w", -1, "utf-8")
+    f.write("hello")
+    f.close()
+    f = open(p, "r", -1, "utf-8")
+    expect(f.read()).to_be("hello")
+    f.close()
+
+
+def test_open_positional_buffering_does_not_break_encoding():
+    p = tmp_dir + "/open_pos_buf.txt"
+    f = open(p, "w", -1, "utf-8", None, None, True)
+    f.write("ok")
+    f.close()
+    f = open(p)
+    expect(f.read()).to_be("ok")
+    f.close()
+
+
+def test_open_duplicate_arg_raises_typeerror():
+    p = tmp_dir + "/open_dup.txt"
+    raised = False
+    try:
+        # mode given positionally AND as kwarg
+        open(p, "w", mode="r")
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+# === BytesIO rejects str instead of silently UTF-8 encoding ===
+def test_bytesio_rejects_string():
+    raised = False
+    try:
+        BytesIO("hello")
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+def test_bytesio_accepts_bytes():
+    b = BytesIO(b"hi")
+    expect(b.read()).to_be(b"hi")
+
+
+test("StringIO next() raises StopIteration, not RuntimeError", test_stringio_next_raises_stopiteration_not_runtime_error)
+test("BytesIO next() raises StopIteration, not RuntimeError", test_bytesio_next_raises_stopiteration_not_runtime_error)
+test("open(): encoding at positional index 3", test_open_positional_encoding_at_index_3)
+test("open(): full positional shape preserves encoding", test_open_positional_buffering_does_not_break_encoding)
+test("open(): duplicate positional+kwarg raises", test_open_duplicate_arg_raises_typeerror)
+test("BytesIO(str) raises TypeError", test_bytesio_rejects_string)
+test("BytesIO(bytes) accepts bytes-like", test_bytesio_accepts_bytes)
+
 print("File I/O tests completed")

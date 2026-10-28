@@ -21,6 +21,28 @@ func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
 	return false
 }
 
+// selfMatchingTypes are the builtin types whose class pattern with a single
+// positional sub-pattern matches the subject itself (PEP 634).
+var selfMatchingTypes = map[string]bool{
+	"bool": true, "bytearray": true, "bytes": true, "dict": true, "float": true,
+	"frozenset": true, "int": true, "list": true, "set": true, "str": true, "tuple": true,
+}
+
+// isSelfMatchingClass reports whether cls is one of the builtin types in
+// selfMatchingTypes (the builtin itself, not a user-defined namesake).
+func (vm *VM) isSelfMatchingClass(cls Value) bool {
+	var name string
+	switch c := cls.(type) {
+	case *PyBuiltinFunc:
+		name = c.Name
+	case *PyClass:
+		name = c.Name
+	default:
+		return false
+	}
+	return selfMatchingTypes[name] && vm.builtins[name] == cls
+}
+
 // hasMethod checks if an instance has a method via MRO lookup.
 func (vm *VM) hasMethod(instance *PyInstance, name string) bool {
 	for _, cls := range instance.Class.Mro {
@@ -39,13 +61,12 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 		for _, cls := range instance.Class.Mro {
 			if method, ok := cls.Dict[name]; ok {
 				// Prepend instance as self
-				allArgs := append([]Value{instance}, args...)
 				switch fn := method.(type) {
 				case *PyFunction:
-					result, err := vm.callFunction(fn, allArgs, nil)
+					result, err := vm.callFunctionWithSelf(fn, instance, args, nil)
 					return result, true, err
 				case *PyBuiltinFunc:
-					result, err := fn.Fn(allArgs, nil)
+					result, err := fn.Fn(prependArg(instance, args), nil)
 					return result, true, err
 				}
 			}
@@ -53,13 +74,12 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 	} else {
 		// Fallback: check instance's class dict directly if MRO is empty
 		if method, ok := instance.Class.Dict[name]; ok {
-			allArgs := append([]Value{instance}, args...)
 			switch fn := method.(type) {
 			case *PyFunction:
-				result, err := vm.callFunction(fn, allArgs, nil)
+				result, err := vm.callFunctionWithSelf(fn, instance, args, nil)
 				return result, true, err
 			case *PyBuiltinFunc:
-				result, err := fn.Fn(allArgs, nil)
+				result, err := fn.Fn(prependArg(instance, args), nil)
 				return result, true, err
 			}
 		}

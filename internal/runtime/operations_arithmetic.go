@@ -3,7 +3,7 @@ package runtime
 import (
 	"fmt"
 	"math"
-	"math/cmplx"
+	"math/big"
 	"strings"
 )
 
@@ -48,7 +48,7 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 	case OpUnaryNegative:
 		switch v := a.(type) {
 		case *PyInt:
-			return MakeInt(-v.Value), nil
+			return intNegate(v), nil
 		case *PyFloat:
 			return &PyFloat{Value: -v.Value}, nil
 		case *PyComplex:
@@ -65,13 +65,93 @@ func (vm *VM) unaryOp(op Opcode, a Value) (Value, error) {
 		}
 	case OpUnaryInvert:
 		if v, ok := a.(*PyInt); ok {
+			if v.BigValue != nil {
+				return MakeBigInt(new(big.Int).Not(v.BigValue)), nil
+			}
 			return MakeInt(^v.Value), nil
 		}
 	}
-	return nil, fmt.Errorf("TypeError: bad operand type for unary %s: '%s'", op.String(), vm.typeName(a))
+	return nil, fmt.Errorf("TypeError: bad operand type for unary %s: '%s'", opSymbol(op), vm.typeName(a))
+}
+
+// binaryOpDunders returns the forward and reflected dunder method names for a
+// binary opcode. ok is false for opcodes that have no dunder protocol.
+func binaryOpDunders(op Opcode) (forward, reverse string, ok bool) {
+	switch op {
+	case OpBinaryAdd:
+		return "__add__", "__radd__", true
+	case OpBinarySubtract:
+		return "__sub__", "__rsub__", true
+	case OpBinaryMultiply:
+		return "__mul__", "__rmul__", true
+	case OpBinaryDivide:
+		return "__truediv__", "__rtruediv__", true
+	case OpBinaryFloorDiv:
+		return "__floordiv__", "__rfloordiv__", true
+	case OpBinaryModulo:
+		return "__mod__", "__rmod__", true
+	case OpBinaryPower:
+		return "__pow__", "__rpow__", true
+	case OpBinaryMatMul:
+		return "__matmul__", "__rmatmul__", true
+	case OpBinaryAnd:
+		return "__and__", "__rand__", true
+	case OpBinaryOr:
+		return "__or__", "__ror__", true
+	case OpBinaryXor:
+		return "__xor__", "__rxor__", true
+	case OpBinaryLShift:
+		return "__lshift__", "__rlshift__", true
+	case OpBinaryRShift:
+		return "__rshift__", "__rrshift__", true
+	}
+	return "", "", false
+}
+
+// inplaceOp implements an augmented assignment (a op= b) for built-in types
+// that update in place: list +=, set |= &= -= ^= and dict |=. Everything else
+// falls back to the corresponding binary operator.
+func (vm *VM) inplaceOp(op Opcode, a, b Value) (Value, error) {
+	switch av := a.(type) {
+	case *PyList:
+		if op == OpInplaceAdd {
+			items, err := vm.toList(b)
+			if err != nil {
+				return nil, err
+			}
+			if vm.maxCollectionSize > 0 && int64(len(av.Items)+len(items)) > vm.maxCollectionSize {
+				return nil, fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			}
+			av.Items = append(av.Items, items...)
+			return av, nil
+		}
+	case *PySet:
+		if handled, err := vm.setInplaceOp(op, av, b); handled {
+			if err != nil {
+				return nil, err
+			}
+			return av, nil
+		}
+	case *PyDict:
+		if op == OpInplaceOr {
+			// dict |= accepts anything dict.update() does
+			update, err := vm.getAttrDict(av, "update")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := update.(*PyBuiltinFunc).Fn([]Value{b}, nil); err != nil {
+				return nil, err
+			}
+			return av, nil
+		}
+	}
+	return vm.binaryOp(op-OpInplaceAdd+OpBinaryAdd, a, b)
 }
 
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
+	if r, handled, err := vm.counterBinaryOp(op, a, b); handled {
+		return r, err
+	}
 	// Bool is a subclass of int in Python - coerce bools to ints for arithmetic
 	if ab, ok := a.(*PyBool); ok {
 		if ab.Value {
@@ -89,115 +169,35 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 	}
 
 	// Check for dunder methods on instances first
-	dunders := map[Opcode]struct{ forward, reverse string }{
-		OpBinaryAdd:      {"__add__", "__radd__"},
-		OpBinarySubtract: {"__sub__", "__rsub__"},
-		OpBinaryMultiply: {"__mul__", "__rmul__"},
-		OpBinaryDivide:   {"__truediv__", "__rtruediv__"},
-		OpBinaryFloorDiv: {"__floordiv__", "__rfloordiv__"},
-		OpBinaryModulo:   {"__mod__", "__rmod__"},
-		OpBinaryPower:    {"__pow__", "__rpow__"},
-		OpBinaryMatMul:   {"__matmul__", "__rmatmul__"},
-		OpBinaryAnd:      {"__and__", "__rand__"},
-		OpBinaryOr:       {"__or__", "__ror__"},
-		OpBinaryXor:      {"__xor__", "__rxor__"},
-		OpBinaryLShift:   {"__lshift__", "__rlshift__"},
-		OpBinaryRShift:   {"__rshift__", "__rrshift__"},
-	}
-
-	if dunder, ok := dunders[op]; ok {
-		// Try forward method on left operand
-		if inst, ok := a.(*PyInstance); ok {
-			if result, found, err := vm.callDunder(inst, dunder.forward, b); found {
-				// Check for NotImplemented sentinel (we return nil in that case)
-				if result != nil {
-					return result, err
+	instA, aIsInst := a.(*PyInstance)
+	instB, bIsInst := b.(*PyInstance)
+	if aIsInst || bIsInst {
+		if forward, reverse, ok := binaryOpDunders(op); ok {
+			// Try forward method on left operand
+			if aIsInst {
+				if result, found, err := vm.callDunder(instA, forward, b); found {
+					// Check for NotImplemented sentinel (we return nil in that case)
+					if result != nil {
+						return result, err
+					}
 				}
 			}
-		}
-		// Try reverse method on right operand
-		if inst, ok := b.(*PyInstance); ok {
-			if result, found, err := vm.callDunder(inst, dunder.reverse, a); found {
-				if result != nil {
-					return result, err
+			// Try reverse method on right operand
+			if bIsInst {
+				if result, found, err := vm.callDunder(instB, reverse, a); found {
+					if result != nil {
+						return result, err
+					}
 				}
 			}
 		}
 	}
 
-	// Fast path: int op int (most common case in numeric code)
+	// int op int, with arbitrary precision
 	if ai, ok := a.(*PyInt); ok {
 		if bi, ok := b.(*PyInt); ok {
-			switch op {
-			case OpBinaryAdd:
-				return MakeInt(ai.Value + bi.Value), nil
-			case OpBinarySubtract:
-				return MakeInt(ai.Value - bi.Value), nil
-			case OpBinaryMultiply:
-				return MakeInt(ai.Value * bi.Value), nil
-			case OpBinaryDivide:
-				if bi.Value == 0 {
-					return nil, fmt.Errorf("ZeroDivisionError: division by zero")
-				}
-				return &PyFloat{Value: float64(ai.Value) / float64(bi.Value)}, nil
-			case OpBinaryFloorDiv:
-				if bi.Value == 0 {
-					return nil, fmt.Errorf("ZeroDivisionError: integer division or modulo by zero")
-				}
-				// Python floor division: always rounds toward negative infinity
-				result := ai.Value / bi.Value
-				// If signs differ and there's a remainder, adjust toward -inf
-				if (ai.Value < 0) != (bi.Value < 0) && ai.Value%bi.Value != 0 {
-					result--
-				}
-				return MakeInt(result), nil
-			case OpBinaryModulo:
-				if bi.Value == 0 {
-					return nil, fmt.Errorf("ZeroDivisionError: integer division or modulo by zero")
-				}
-				// Python modulo: result has same sign as divisor
-				result := ai.Value % bi.Value
-				if result != 0 && (result < 0) != (bi.Value < 0) {
-					result += bi.Value
-				}
-				return MakeInt(result), nil
-			case OpBinaryPower:
-				// Use integer exponentiation to avoid float precision loss
-				if bi.Value < 0 {
-					// Negative exponent returns float
-					return &PyFloat{Value: math.Pow(float64(ai.Value), float64(bi.Value))}, nil
-				}
-				return MakeInt(intPow(ai.Value, bi.Value)), nil
-			case OpBinaryLShift:
-				if bi.Value < 0 {
-					return nil, fmt.Errorf("ValueError: negative shift count")
-				}
-				if bi.Value > 63 {
-					// For very large shifts, result is 0 (or overflow behavior)
-					if ai.Value == 0 {
-						return MakeInt(0), nil
-					}
-					return MakeInt(0), nil // Simplified: large left shifts overflow to 0
-				}
-				return MakeInt(ai.Value << uint(bi.Value)), nil
-			case OpBinaryRShift:
-				if bi.Value < 0 {
-					return nil, fmt.Errorf("ValueError: negative shift count")
-				}
-				if bi.Value > 63 {
-					// Right shift by large amount gives 0 or -1 (for negative numbers)
-					if ai.Value < 0 {
-						return MakeInt(-1), nil
-					}
-					return MakeInt(0), nil
-				}
-				return MakeInt(ai.Value >> uint(bi.Value)), nil
-			case OpBinaryAnd:
-				return MakeInt(ai.Value & bi.Value), nil
-			case OpBinaryOr:
-				return MakeInt(ai.Value | bi.Value), nil
-			case OpBinaryXor:
-				return MakeInt(ai.Value ^ bi.Value), nil
+			if result, handled, err := vm.intBinaryOp(op, ai, bi); handled {
+				return result, err
 			}
 		}
 	}
@@ -242,6 +242,21 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 				copy(result, ab.Value)
 				copy(result[len(ab.Value):], bb.Value)
 				return &PyBytes{Value: result}, nil
+			}
+		}
+	}
+
+	// Sequence repetition by an int too large for an index
+	if op == OpBinaryMultiply {
+		for _, pair := range [2][2]Value{{a, b}, {b, a}} {
+			if n, ok := pair[1].(*PyInt); ok && n.BigValue != nil {
+				switch seq := pair[0].(type) {
+				case *PyString, *PyList, *PyTuple, *PyBytes:
+					if n.BigValue.Sign() > 0 {
+						return nil, fmt.Errorf("OverflowError: cannot fit 'int' into an index-sized integer")
+					}
+					return vm.binaryOp(op, seq, MakeInt(0))
+				}
 			}
 		}
 	}
@@ -458,161 +473,11 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 
 	// Set/FrozenSet operations: |, &, -, ^
 	if op == OpBinaryOr || op == OpBinaryAnd || op == OpBinarySubtract || op == OpBinaryXor {
-		// Helper to get items from set or frozenset
-		getSetItems := func(v Value) (map[Value]struct{}, bool) {
-			switch s := v.(type) {
-			case *PySet:
-				return s.Items, true
-			case *PyFrozenSet:
-				return s.Items, true
-			}
-			return nil, false
+		if result, ok, err := vm.setBinaryOp(op, a, b); ok {
+			return result, err
 		}
-
-		aItems, aIsSet := getSetItems(a)
-		bItems, bIsSet := getSetItems(b)
-
-		if aIsSet && bIsSet {
-			// Determine return type: frozenset if both are frozenset, otherwise set
-			_, aIsFrozen := a.(*PyFrozenSet)
-			_, bIsFrozen := b.(*PyFrozenSet)
-			returnFrozen := aIsFrozen && bIsFrozen
-
-			switch op {
-			case OpBinaryOr: // Union
-				if returnFrozen {
-					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-					for k := range aItems {
-						result.FrozenSetAdd(k, vm)
-					}
-					for k := range bItems {
-						result.FrozenSetAdd(k, vm)
-					}
-					return result, nil
-				}
-				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-				for k := range aItems {
-					result.SetAdd(k, vm)
-				}
-				for k := range bItems {
-					result.SetAdd(k, vm)
-				}
-				return result, nil
-
-			case OpBinaryAnd: // Intersection
-				if returnFrozen {
-					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-					for k := range aItems {
-						for k2 := range bItems {
-							if vm.equal(k, k2) {
-								result.FrozenSetAdd(k, vm)
-								break
-							}
-						}
-					}
-					return result, nil
-				}
-				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-				for k := range aItems {
-					for k2 := range bItems {
-						if vm.equal(k, k2) {
-							result.SetAdd(k, vm)
-							break
-						}
-					}
-				}
-				return result, nil
-
-			case OpBinarySubtract: // Difference
-				if returnFrozen {
-					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-					for k := range aItems {
-						found := false
-						for k2 := range bItems {
-							if vm.equal(k, k2) {
-								found = true
-								break
-							}
-						}
-						if !found {
-							result.FrozenSetAdd(k, vm)
-						}
-					}
-					return result, nil
-				}
-				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-				for k := range aItems {
-					found := false
-					for k2 := range bItems {
-						if vm.equal(k, k2) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						result.SetAdd(k, vm)
-					}
-				}
-				return result, nil
-
-			case OpBinaryXor: // Symmetric difference
-				if returnFrozen {
-					result := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-					// Add items from a not in b
-					for k := range aItems {
-						found := false
-						for k2 := range bItems {
-							if vm.equal(k, k2) {
-								found = true
-								break
-							}
-						}
-						if !found {
-							result.FrozenSetAdd(k, vm)
-						}
-					}
-					// Add items from b not in a
-					for k := range bItems {
-						found := false
-						for k2 := range aItems {
-							if vm.equal(k, k2) {
-								found = true
-								break
-							}
-						}
-						if !found {
-							result.FrozenSetAdd(k, vm)
-						}
-					}
-					return result, nil
-				}
-				result := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-				for k := range aItems {
-					found := false
-					for k2 := range bItems {
-						if vm.equal(k, k2) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						result.SetAdd(k, vm)
-					}
-				}
-				for k := range bItems {
-					found := false
-					for k2 := range aItems {
-						if vm.equal(k, k2) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						result.SetAdd(k, vm)
-					}
-				}
-				return result, nil
-			}
+		if result, ok, err := vm.viewSetOp(op, a, b); ok {
+			return result, err
 		}
 	}
 
@@ -639,58 +504,53 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 		}
 
 		// Promote non-complex operand if the other is complex
-		if aIsComplex && !bIsComplex {
-			switch v := b.(type) {
+		promote := func(v Value) (*PyComplex, bool, error) {
+			switch n := v.(type) {
 			case *PyInt:
-				bc = MakeComplex(float64(v.Value), 0)
-				bIsComplex = true
+				f, err := intToFloat(n)
+				return MakeComplex(f, 0), true, err
 			case *PyFloat:
-				bc = MakeComplex(v.Value, 0)
-				bIsComplex = true
+				return MakeComplex(n.Value, 0), true, nil
+			}
+			return nil, false, nil
+		}
+		var err error
+		if aIsComplex && !bIsComplex {
+			if bc, bIsComplex, err = promote(b); err != nil {
+				return nil, err
 			}
 		}
 		if bIsComplex && !aIsComplex {
-			switch v := a.(type) {
-			case *PyInt:
-				ac = MakeComplex(float64(v.Value), 0)
-				aIsComplex = true
-			case *PyFloat:
-				ac = MakeComplex(v.Value, 0)
-				aIsComplex = true
+			if ac, aIsComplex, err = promote(a); err != nil {
+				return nil, err
 			}
 		}
 
 		if aIsComplex && bIsComplex {
+			ca := complex(ac.Real, ac.Imag)
+			cb := complex(bc.Real, bc.Imag)
 			switch op {
 			case OpBinaryAdd:
 				return MakeComplex(ac.Real+bc.Real, ac.Imag+bc.Imag), nil
 			case OpBinarySubtract:
 				return MakeComplex(ac.Real-bc.Real, ac.Imag-bc.Imag), nil
 			case OpBinaryMultiply:
-				return MakeComplex(
-					ac.Real*bc.Real-ac.Imag*bc.Imag,
-					ac.Real*bc.Imag+ac.Imag*bc.Real,
-				), nil
+				r := complexProd(ca, cb)
+				return MakeComplex(real(r), imag(r)), nil
 			case OpBinaryDivide:
-				denom := bc.Real*bc.Real + bc.Imag*bc.Imag
-				if denom == 0 {
-					return nil, fmt.Errorf("ZeroDivisionError: complex division by zero")
+				r, err := complexQuot(ca, cb)
+				if err != nil {
+					return nil, err
 				}
-				return MakeComplex(
-					(ac.Real*bc.Real+ac.Imag*bc.Imag)/denom,
-					(ac.Imag*bc.Real-ac.Real*bc.Imag)/denom,
-				), nil
+				return MakeComplex(real(r), imag(r)), nil
 			case OpBinaryPower:
-				ca := complex(ac.Real, ac.Imag)
-				cb := complex(bc.Real, bc.Imag)
-				result := cmplx.Pow(ca, cb)
-				return MakeComplex(real(result), imag(result)), nil
-			case OpBinaryFloorDiv:
-				return nil, fmt.Errorf("TypeError: can't take floor of complex number.")
-			case OpBinaryModulo:
-				return nil, fmt.Errorf("TypeError: can't mod complex numbers.")
-			case OpBinaryLShift, OpBinaryRShift, OpBinaryAnd, OpBinaryOr, OpBinaryXor:
-				return nil, fmt.Errorf("TypeError: unsupported operand type(s) for %s: 'complex' and 'complex'", op.String())
+				r, err := complexPow(ca, cb)
+				if err != nil {
+					return nil, err
+				}
+				return MakeComplex(real(r), imag(r)), nil
+			case OpBinaryFloorDiv, OpBinaryModulo, OpBinaryLShift, OpBinaryRShift, OpBinaryAnd, OpBinaryOr, OpBinaryXor:
+				return nil, fmt.Errorf("TypeError: unsupported operand type(s) for %s: '%s' and '%s'", binaryOpSymbol(op), vm.typeName(a), vm.typeName(b))
 			}
 		}
 	}
@@ -703,11 +563,19 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 
 	// Convert to float if mixed types
 	if aIsInt && bIsFloat {
-		af = &PyFloat{Value: float64(ai.Value)}
+		f, err := intToFloat(ai)
+		if err != nil {
+			return nil, err
+		}
+		af = &PyFloat{Value: f}
 		aIsFloat = true
 	}
 	if aIsFloat && bIsInt {
-		bf = &PyFloat{Value: float64(bi.Value)}
+		f, err := intToFloat(bi)
+		if err != nil {
+			return nil, err
+		}
+		bf = &PyFloat{Value: f}
 		bIsFloat = true
 	}
 
@@ -721,29 +589,83 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 			return &PyFloat{Value: af.Value * bf.Value}, nil
 		case OpBinaryDivide:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("ZeroDivisionError: float division by zero")
+				return nil, fmt.Errorf("ZeroDivisionError: division by zero")
 			}
 			return &PyFloat{Value: af.Value / bf.Value}, nil
 		case OpBinaryFloorDiv:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("ZeroDivisionError: float floor division by zero")
+				return nil, fmt.Errorf("ZeroDivisionError: division by zero")
 			}
-			return &PyFloat{Value: math.Floor(af.Value / bf.Value)}, nil
+			q, _ := floatDivMod(af.Value, bf.Value)
+			return &PyFloat{Value: q}, nil
 		case OpBinaryModulo:
 			if bf.Value == 0 {
-				return nil, fmt.Errorf("ZeroDivisionError: float modulo")
+				return nil, fmt.Errorf("ZeroDivisionError: division by zero")
 			}
-			// Python modulo: result has same sign as divisor
-			r := math.Mod(af.Value, bf.Value)
-			if r != 0 && (r < 0) != (bf.Value < 0) {
-				r += bf.Value
-			}
+			_, r := floatDivMod(af.Value, bf.Value)
 			return &PyFloat{Value: r}, nil
 		case OpBinaryPower:
-			return &PyFloat{Value: math.Pow(af.Value, bf.Value)}, nil
+			return floatPow(af.Value, bf.Value)
 		}
 	}
 
-	return nil, fmt.Errorf("unsupported operand type(s) for %s: '%s' and '%s'",
-		op.String(), vm.typeName(a), vm.typeName(b))
+	// CPython's wording for sequence concatenation and repetition errors
+	switch op {
+	case OpBinaryAdd:
+		switch a.(type) {
+		case *PyList, *PyTuple, *PyString:
+			return nil, fmt.Errorf("TypeError: can only concatenate %s (not \"%s\") to %s", vm.typeName(a), vm.typeName(b), vm.typeName(a))
+		case *PyBytes:
+			return nil, fmt.Errorf("TypeError: can't concat %s to bytes", vm.typeName(b))
+		}
+	case OpBinaryMultiply:
+		switch a.(type) {
+		case *PyList, *PyTuple, *PyString, *PyBytes:
+			if numericFamily(b) > 1 {
+				return nil, fmt.Errorf("TypeError: can't multiply sequence by non-int of type '%s'", vm.typeName(b))
+			}
+		}
+		switch b.(type) {
+		case *PyList, *PyTuple, *PyString, *PyBytes:
+			if numericFamily(a) > 1 {
+				return nil, fmt.Errorf("TypeError: can't multiply sequence by non-int of type '%s'", vm.typeName(a))
+			}
+		}
+	}
+	return nil, fmt.Errorf("TypeError: unsupported operand type(s) for %s: '%s' and '%s'",
+		binaryOpSymbol(op), vm.typeName(a), vm.typeName(b))
+}
+
+// binaryOpSymbol returns the Python operator for a binary opcode, as used in
+// error messages.
+func binaryOpSymbol(op Opcode) string {
+	switch op {
+	case OpBinaryAdd:
+		return "+"
+	case OpBinarySubtract:
+		return "-"
+	case OpBinaryMultiply:
+		return "*"
+	case OpBinaryDivide:
+		return "/"
+	case OpBinaryFloorDiv:
+		return "//"
+	case OpBinaryModulo:
+		return "%"
+	case OpBinaryPower:
+		return "** or pow()"
+	case OpBinaryMatMul:
+		return "@"
+	case OpBinaryAnd:
+		return "&"
+	case OpBinaryOr:
+		return "|"
+	case OpBinaryXor:
+		return "^"
+	case OpBinaryLShift:
+		return "<<"
+	case OpBinaryRShift:
+		return ">>"
+	}
+	return op.String()
 }

@@ -10,9 +10,9 @@ def make_counter():
     return increment
 
 c = make_counter()
-test("nonlocal counter 1", lambda: expect(c(), 1))
-test("nonlocal counter 2", lambda: expect(c(), 2))
-test("nonlocal counter 3", lambda: expect(c(), 3))
+test("nonlocal counter 1", lambda: expect(c()).to_be(1))
+test("nonlocal counter 2", lambda: expect(c()).to_be(2))
+test("nonlocal counter 3", lambda: expect(c()).to_be(3))
 
 # Multiple nonlocals
 def multi():
@@ -26,8 +26,8 @@ def multi():
     return inner
 
 f = multi()
-test("multiple nonlocals first call", lambda: expect(f(), (11, 22)))
-test("multiple nonlocals second call", lambda: expect(f(), (12, 24)))
+test("multiple nonlocals first call", lambda: expect(f()).to_be((11, 22)))
+test("multiple nonlocals second call", lambda: expect(f()).to_be((12, 24)))
 
 # Nested nonlocal (3 levels deep)
 def outer():
@@ -41,8 +41,8 @@ def outer():
     return middle
 
 f = outer()()
-test("nested nonlocal first", lambda: expect(f(), 10))
-test("nested nonlocal second", lambda: expect(f(), 20))
+test("nested nonlocal first", lambda: expect(f()).to_be(10))
+test("nested nonlocal second", lambda: expect(f()).to_be(20))
 
 # nonlocal with other parameters
 def make_adder():
@@ -54,9 +54,9 @@ def make_adder():
     return add
 
 adder = make_adder()
-test("nonlocal with param 1", lambda: expect(adder(5), 5))
-test("nonlocal with param 2", lambda: expect(adder(10), 15))
-test("nonlocal with param 3", lambda: expect(adder(3), 18))
+test("nonlocal with param 1", lambda: expect(adder(5)).to_be(5))
+test("nonlocal with param 2", lambda: expect(adder(10)).to_be(15))
+test("nonlocal with param 3", lambda: expect(adder(3)).to_be(18))
 
 # nonlocal boolean toggle
 def toggle():
@@ -68,9 +68,9 @@ def toggle():
     return flip
 
 t = toggle()
-test("nonlocal toggle true", lambda: expect(t(), True))
-test("nonlocal toggle false", lambda: expect(t(), False))
-test("nonlocal toggle true again", lambda: expect(t(), True))
+test("nonlocal toggle true", lambda: expect(t()).to_be(True))
+test("nonlocal toggle false", lambda: expect(t()).to_be(False))
+test("nonlocal toggle true again", lambda: expect(t()).to_be(True))
 
 # Two closures sharing nonlocal state
 def shared():
@@ -88,8 +88,8 @@ inc, get = shared()
 inc()
 inc()
 inc()
-test("shared nonlocal via get", lambda: expect(get(), 3))
-test("shared nonlocal via inc", lambda: expect(inc(), 4))
+test("shared nonlocal via get", lambda: expect(get()).to_be(3))
+test("shared nonlocal via inc", lambda: expect(inc()).to_be(4))
 
 # nonlocal with default parameter
 def with_default():
@@ -101,8 +101,8 @@ def with_default():
     return inner
 
 f = with_default()
-test("nonlocal with default used", lambda: expect(f(), 95))
-test("nonlocal with default overridden", lambda: expect(f(10), 85))
+test("nonlocal with default used", lambda: expect(f()).to_be(95))
+test("nonlocal with default overridden", lambda: expect(f(10)).to_be(85))
 
 # Independent closures don't share state
 c1 = make_counter()
@@ -110,8 +110,8 @@ c2 = make_counter()
 c1()
 c1()
 c1()
-test("independent closure 1", lambda: expect(c1(), 4))
-test("independent closure 2", lambda: expect(c2(), 1))
+test("independent closure 1", lambda: expect(c1()).to_be(4))
+test("independent closure 2", lambda: expect(c2()).to_be(1))
 
 # nonlocal string mutation
 def make_greeting():
@@ -126,8 +126,8 @@ def make_greeting():
     return update, get
 
 update, get = make_greeting()
-test("nonlocal string update", lambda: expect(update("world"), "hello, world"))
-test("nonlocal string get", lambda: expect(get(), "hello, world"))
+test("nonlocal string update", lambda: expect(update("world")).to_be("hello, world"))
+test("nonlocal string get", lambda: expect(get()).to_be("hello, world"))
 
 # nonlocal in loop
 def make_accumulator():
@@ -141,4 +141,4 @@ def make_accumulator():
 acc = make_accumulator()
 acc(1)
 acc(2)
-test("nonlocal accumulator", lambda: expect(acc(3), [1, 2, 3]))
+test("nonlocal accumulator", lambda: expect(acc(3)).to_be([1, 2, 3]))

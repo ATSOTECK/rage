@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -74,11 +75,32 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		}
 		return MakeInt(int64(o.Value[idx])), nil
 	case *PyDict:
+		if !isHashable(index) {
+			return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(index))
+		}
 		// Use hash-based lookup for O(1) average case
 		if val, found := o.DictGet(index, vm); found {
 			return val, nil
 		}
-		return nil, fmt.Errorf("KeyError: %v", index)
+		if o.Kind != DictPlain {
+			if val, ok, err := vm.dictMissing(o, index); ok {
+				return val, err
+			}
+		}
+		return nil, vm.newKeyError(index)
+	case *PyRange:
+		i, err := vm.getIntIndex(index)
+		if err != nil {
+			return nil, fmt.Errorf("TypeError: range indices must be integers or slices, not %s", vm.typeName(index))
+		}
+		n := rangeLen(o)
+		if i < 0 {
+			i += n
+		}
+		if i < 0 || i >= n {
+			return nil, fmt.Errorf("IndexError: range object index out of range")
+		}
+		return MakeInt(o.Start + i*o.Step), nil
 	case *PyUserData:
 		// Check for __getitem__ method in metatable
 		if o.Metatable != nil {
@@ -177,97 +199,166 @@ func (vm *VM) isKeyError(err error) bool {
 	return strings.HasPrefix(err.Error(), "KeyError:")
 }
 
-// computeSliceIndices normalizes start/stop/step for a sequence of the given length.
-// It handles None defaults, negative indices, and bounds clamping.
+// getAttrSlice handles attribute access on *PySlice values.
+func (vm *VM) getAttrSlice(s *PySlice, name string) (Value, error) {
+	orNone := func(v Value) Value {
+		if v == nil {
+			return None
+		}
+		return v
+	}
+	switch name {
+	case "start":
+		return orNone(s.Start), nil
+	case "stop":
+		return orNone(s.Stop), nil
+	case "step":
+		return orNone(s.Step), nil
+	case "indices":
+		return &PyBuiltinFunc{Name: "slice.indices", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: slice.indices() takes exactly one argument (%d given)", len(args))
+			}
+			length, err := vm.getIntIndex(args[0])
+			if err != nil {
+				return nil, err
+			}
+			if length < 0 {
+				return nil, fmt.Errorf("ValueError: length should not be negative")
+			}
+			start, stop, step, _, err := vm.sliceIndices(s, int(length))
+			if err != nil {
+				return nil, err
+			}
+			return &PyTuple{Items: []Value{MakeInt(int64(start)), MakeInt(int64(stop)), MakeInt(int64(step))}}, nil
+		}}, nil
+	}
+	return nil, fmt.Errorf("AttributeError: 'slice' object has no attribute '%s'", name)
+}
+
+// unpackCountError builds the ValueError raised when unpacking a sequence of
+// the wrong length into `expected` targets.
+func unpackCountError(expected, got int) error {
+	if got > expected {
+		return fmt.Errorf("ValueError: too many values to unpack (expected %d, got %d)", expected, got)
+	}
+	return fmt.Errorf("ValueError: not enough values to unpack (expected %d, got %d)", expected, got)
+}
+
+// computeSliceIndices normalizes start/stop/step for a sequence of the given
+// length, following CPython's PySlice_AdjustIndices: out-of-range bounds are
+// clamped, and for a negative step a stop of -1 means "through index 0".
 func computeSliceIndices(slice *PySlice, length int, getInt func(v Value, def int) int) (start, stop, step int, err error) {
 	step = getInt(slice.Step, 1)
 	if step == 0 {
-		return 0, 0, 0, fmt.Errorf("slice step cannot be zero")
+		return 0, 0, 0, fmt.Errorf("ValueError: slice step cannot be zero")
 	}
-
-	// Compute start/stop with correct defaults based on step direction
-	if step > 0 {
-		if slice.Start == nil || slice.Start == None {
-			start = 0
-		} else {
-			start = getInt(slice.Start, 0)
-		}
-		if slice.Stop == nil || slice.Stop == None {
-			stop = length
-		} else {
-			stop = getInt(slice.Stop, length)
-		}
-	} else {
-		// For negative step, defaults are reversed
-		if slice.Start == nil || slice.Start == None {
-			start = length - 1
-		} else {
-			start = getInt(slice.Start, length-1)
-		}
-		if slice.Stop == nil || slice.Stop == None {
-			stop = -length - 1 // Sentinel to include index 0
-		} else {
-			stop = getInt(slice.Stop, -length-1)
-		}
+	// Defaults when a bound is None
+	defStart, defStop := 0, length
+	if step < 0 {
+		defStart, defStop = length-1, -1
 	}
-
-	// Handle negative indices
-	if start < 0 && start >= -length {
-		start = length + start
-	}
-	if stop < 0 && stop >= -length {
-		stop = length + stop
-	}
-
-	// Clamp to bounds
-	if step > 0 {
-		if start < 0 {
-			start = 0
+	adjust := func(v Value, def int) int {
+		if v == nil || v == None {
+			return def
 		}
-		if stop > length {
-			stop = length
+		i := getInt(v, def)
+		if i < 0 {
+			i += length
+			if i < 0 {
+				if step < 0 {
+					return -1
+				}
+				return 0
+			}
+		} else if i >= length {
+			if step < 0 {
+				return length - 1
+			}
+			return length
 		}
-	} else {
-		if start >= length {
-			start = length - 1
-		}
+		return i
 	}
-
-	return start, stop, step, nil
+	return adjust(slice.Start, defStart), adjust(slice.Stop, defStop), step, nil
 }
 
-// collectSliceIndices returns the sequence of indices selected by a slice over a given length.
+// sliceLength returns the number of elements selected by normalized indices.
+func sliceLength(start, stop, step int) int {
+	if step < 0 {
+		if stop < start {
+			return (start-stop-1)/(-step) + 1
+		}
+	} else if start < stop {
+		return (stop-start-1)/step + 1
+	}
+	return 0
+}
+
+// collectSliceIndices returns the sequence of indices selected by normalized
+// slice bounds (as produced by computeSliceIndices).
 func collectSliceIndices(start, stop, step int) []int {
-	var indices []int
-	if step > 0 {
-		for i := start; i < stop; i += step {
-			indices = append(indices, i)
-		}
-	} else {
-		// stop can be -1 to include index 0
-		for i := start; i > stop && i >= 0; i += step {
-			indices = append(indices, i)
-		}
+	n := sliceLength(start, stop, step)
+	if n == 0 {
+		return nil
+	}
+	indices := make([]int, n)
+	for i := range indices {
+		indices[i] = start + i*step
 	}
 	return indices
 }
 
-// sliceSequence handles slicing for lists, tuples, bytes, and strings
-func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
-	// Helper to get int from slice component (None means use default)
-	getInt := func(v Value, def int) int {
-		if v == nil || v == None {
-			return def
-		}
-		if i, err := vm.getIntIndex(v); err == nil {
-			return int(i)
-		}
-		return int(vm.toInt(v))
+// sliceBound converts a slice bound to an int. Ints too large for an index are
+// clamped, as CPython does for slices.
+func (vm *VM) sliceBound(v Value, def int) (int, error) {
+	if v == nil || v == None {
+		return def, nil
 	}
+	if i, ok := v.(*PyInt); ok && i.BigValue != nil {
+		if i.BigValue.Sign() < 0 {
+			return math.MinInt32, nil
+		}
+		return math.MaxInt32, nil
+	}
+	i, err := vm.getIntIndex(v)
+	if err != nil {
+		return 0, fmt.Errorf("TypeError: slice indices must be integers or None or have an __index__ method")
+	}
+	// Clamp far-out-of-range values so length arithmetic cannot overflow
+	if i > math.MaxInt32 {
+		i = math.MaxInt32
+	} else if i < math.MinInt32 {
+		i = math.MinInt32
+	}
+	return int(i), nil
+}
 
+// sliceIndices resolves a slice against a sequence length, returning the
+// normalized bounds and the number of selected elements.
+func (vm *VM) sliceIndices(slice *PySlice, length int) (start, stop, step, n int, err error) {
+	var boundErr error
+	getInt := func(v Value, def int) int {
+		i, err := vm.sliceBound(v, def)
+		if err != nil && boundErr == nil {
+			boundErr = err
+		}
+		return i
+	}
+	start, stop, step, err = computeSliceIndices(slice, length, getInt)
+	if boundErr != nil {
+		return 0, 0, 0, 0, boundErr
+	}
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return start, stop, step, sliceLength(start, stop, step), nil
+}
+
+// sliceSequence handles slicing for lists, tuples, bytes, strings and ranges
+func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 	switch o := obj.(type) {
 	case *PyList:
-		start, stop, step, err := computeSliceIndices(slice, len(o.Items), getInt)
+		start, stop, step, _, err := vm.sliceIndices(slice, len(o.Items))
 		if err != nil {
 			return nil, err
 		}
@@ -279,7 +370,7 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 		return &PyList{Items: result}, nil
 
 	case *PyTuple:
-		start, stop, step, err := computeSliceIndices(slice, len(o.Items), getInt)
+		start, stop, step, _, err := vm.sliceIndices(slice, len(o.Items))
 		if err != nil {
 			return nil, err
 		}
@@ -291,7 +382,7 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 		return &PyTuple{Items: result}, nil
 
 	case *PyBytes:
-		start, stop, step, err := computeSliceIndices(slice, len(o.Value), getInt)
+		start, stop, step, _, err := vm.sliceIndices(slice, len(o.Value))
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +395,7 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 
 	case *PyString:
 		runes := []rune(o.Value)
-		start, stop, step, err := computeSliceIndices(slice, len(runes), getInt)
+		start, stop, step, _, err := vm.sliceIndices(slice, len(runes))
 		if err != nil {
 			return nil, err
 		}
@@ -314,21 +405,34 @@ func (vm *VM) sliceSequence(obj Value, slice *PySlice) (Value, error) {
 			result[i] = runes[idx]
 		}
 		return &PyString{Value: string(result)}, nil
+
+	case *PyRange:
+		start, stop, step, _, err := vm.sliceIndices(slice, int(rangeLen(o)))
+		if err != nil {
+			return nil, err
+		}
+		return &PyRange{
+			Start: o.Start + int64(start)*o.Step,
+			Stop:  o.Start + int64(stop)*o.Step,
+			Step:  o.Step * int64(step),
+		}, nil
 	}
 
-	return nil, fmt.Errorf("'%s' object is not subscriptable", vm.typeName(obj))
+	return nil, fmt.Errorf("TypeError: '%s' object is not subscriptable", vm.typeName(obj))
 }
 
 func (vm *VM) setItem(obj Value, index Value, val Value) error {
-	// Handle slice assignment
+	// Handle slice assignment on lists (instances receive the slice object)
 	if slice, ok := index.(*PySlice); ok {
-		return vm.setSlice(obj, slice, val)
+		if _, isInst := obj.(*PyInstance); !isInst {
+			return vm.setSlice(obj, slice, val)
+		}
 	}
 	switch o := obj.(type) {
 	case *PyList:
 		i, err := vm.getIntIndex(index)
 		if err != nil {
-			return err
+			return fmt.Errorf("TypeError: list indices must be integers or slices, not %s", vm.typeName(index))
 		}
 		idx := int(i)
 		if idx < 0 {
@@ -356,165 +460,78 @@ func (vm *VM) setItem(obj Value, index Value, val Value) error {
 	return fmt.Errorf("TypeError: '%s' object does not support item assignment", vm.typeName(obj))
 }
 
+// setSlice implements lst[slice] = iterable.
 func (vm *VM) setSlice(obj Value, slice *PySlice, val Value) error {
 	lst, ok := obj.(*PyList)
 	if !ok {
-		return fmt.Errorf("TypeError: '%s' object does not support slice assignment", vm.typeName(obj))
+		return fmt.Errorf("TypeError: '%s' object does not support item assignment", vm.typeName(obj))
 	}
-	newItems, err := vm.toList(val)
+	start, stop, step, n, err := vm.sliceIndices(slice, len(lst.Items))
 	if err != nil {
 		return err
 	}
-
-	length := len(lst.Items)
-	start := 0
-	stop := length
-	if slice.Start != nil && slice.Start != None {
-		i, err := vm.getIntIndex(slice.Start)
+	var newItems []Value
+	if src, isList := val.(*PyList); isList {
+		// Copy first so that a[::] = a and similar self-assignments work
+		newItems = append([]Value(nil), src.Items...)
+	} else {
+		newItems, err = vm.toList(val)
 		if err != nil {
-			return err
-		}
-		start = int(i)
-		if start < 0 {
-			start = length + start
-		}
-		if start < 0 {
-			start = 0
-		}
-		if start > length {
-			start = length
-		}
-	}
-	if slice.Stop != nil && slice.Stop != None {
-		i, err := vm.getIntIndex(slice.Stop)
-		if err != nil {
-			return err
-		}
-		stop = int(i)
-		if stop < 0 {
-			stop = length + stop
-		}
-		if stop < 0 {
-			stop = 0
-		}
-		if stop > length {
-			stop = length
-		}
-	}
-	if start > stop {
-		stop = start
-	}
-
-	// Replace lst.Items[start:stop] with newItems
-	result := make([]Value, 0, start+len(newItems)+(length-stop))
-	result = append(result, lst.Items[:start]...)
-	result = append(result, newItems...)
-	result = append(result, lst.Items[stop:]...)
-	lst.Items = result
-	return nil
-}
-
-func (vm *VM) delSlice(obj Value, slice *PySlice) error {
-	lst, ok := obj.(*PyList)
-	if !ok {
-		return fmt.Errorf("TypeError: '%s' object does not support slice deletion", vm.typeName(obj))
-	}
-
-	length := len(lst.Items)
-	step := 1
-	if slice.Step != nil && slice.Step != None {
-		i, err := vm.getIntIndex(slice.Step)
-		if err != nil {
-			return err
-		}
-		step = int(i)
-		if step == 0 {
-			return fmt.Errorf("ValueError: slice step cannot be zero")
-		}
-	}
-
-	start := 0
-	stop := length
-	if step < 0 {
-		start = length - 1
-		stop = -length - 1
-	}
-	if slice.Start != nil && slice.Start != None {
-		i, err := vm.getIntIndex(slice.Start)
-		if err != nil {
-			return err
-		}
-		start = int(i)
-		if start < 0 {
-			start = length + start
-		}
-		if step > 0 {
-			if start < 0 {
-				start = 0
+			if step == 1 {
+				return fmt.Errorf("TypeError: can only assign an iterable")
 			}
-			if start > length {
-				start = length
-			}
-		} else {
-			if start < -1 {
-				start = -1
-			}
-			if start >= length {
-				start = length - 1
-			}
-		}
-	}
-	if slice.Stop != nil && slice.Stop != None {
-		i, err := vm.getIntIndex(slice.Stop)
-		if err != nil {
-			return err
-		}
-		stop = int(i)
-		if stop < 0 {
-			stop = length + stop
-		}
-		if step > 0 {
-			if stop < 0 {
-				stop = 0
-			}
-			if stop > length {
-				stop = length
-			}
-		} else {
-			if stop < -length-1 {
-				stop = -length - 1
-			}
-			if stop >= length {
-				stop = length - 1
-			}
+			return fmt.Errorf("TypeError: must assign iterable to extended slice")
 		}
 	}
 
 	if step == 1 {
-		// Contiguous deletion - fast path
-		if start >= stop {
-			return nil
+		if stop < start {
+			stop = start
 		}
-		result := make([]Value, 0, start+(length-stop))
+		newLen := len(lst.Items) - (stop - start) + len(newItems)
+		if vm.maxCollectionSize > 0 && int64(newLen) > vm.maxCollectionSize {
+			return fmt.Errorf("MemoryError: list size limit exceeded (limit is %d)", vm.maxCollectionSize)
+		}
+		result := make([]Value, 0, newLen)
 		result = append(result, lst.Items[:start]...)
+		result = append(result, newItems...)
 		result = append(result, lst.Items[stop:]...)
 		lst.Items = result
 		return nil
 	}
 
-	// Step-based deletion: collect indices to delete
-	toDelete := make(map[int]bool)
-	if step > 0 {
-		for i := start; i < stop; i += step {
-			toDelete[i] = true
-		}
-	} else {
-		for i := start; i > stop; i += step {
-			toDelete[i] = true
-		}
+	// Extended slice: sizes must match exactly
+	if len(newItems) != n {
+		return fmt.Errorf("ValueError: attempt to assign sequence of size %d to extended slice of size %d", len(newItems), n)
 	}
+	for i, idx := range collectSliceIndices(start, stop, step) {
+		lst.Items[idx] = newItems[i]
+	}
+	return nil
+}
 
-	result := make([]Value, 0, length-len(toDelete))
+// delSlice implements del lst[slice].
+func (vm *VM) delSlice(obj Value, slice *PySlice) error {
+	lst, ok := obj.(*PyList)
+	if !ok {
+		return fmt.Errorf("TypeError: '%s' object does not support item deletion", vm.typeName(obj))
+	}
+	start, stop, step, n, err := vm.sliceIndices(slice, len(lst.Items))
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	if step == 1 {
+		lst.Items = append(lst.Items[:start:start], lst.Items[stop:]...)
+		return nil
+	}
+	toDelete := make(map[int]bool, n)
+	for _, idx := range collectSliceIndices(start, stop, step) {
+		toDelete[idx] = true
+	}
+	result := make([]Value, 0, len(lst.Items)-n)
 	for i, item := range lst.Items {
 		if !toDelete[i] {
 			result = append(result, item)
@@ -525,15 +542,17 @@ func (vm *VM) delSlice(obj Value, slice *PySlice) error {
 }
 
 func (vm *VM) delItem(obj Value, index Value) error {
-	// Handle slice deletion
+	// Handle slice deletion on lists (instances receive the slice object)
 	if slice, ok := index.(*PySlice); ok {
-		return vm.delSlice(obj, slice)
+		if _, isInst := obj.(*PyInstance); !isInst {
+			return vm.delSlice(obj, slice)
+		}
 	}
 	switch o := obj.(type) {
 	case *PyList:
 		i, err := vm.getIntIndex(index)
 		if err != nil {
-			return err
+			return fmt.Errorf("TypeError: list indices must be integers or slices, not %s", vm.typeName(index))
 		}
 		idx := int(i)
 		if idx < 0 {
@@ -542,12 +561,17 @@ func (vm *VM) delItem(obj Value, index Value) error {
 		if idx < 0 || idx >= len(o.Items) {
 			return fmt.Errorf("IndexError: list assignment index out of range")
 		}
-		o.Items = append(o.Items[:idx], o.Items[idx+1:]...)
+		copy(o.Items[idx:], o.Items[idx+1:])
+		o.Items[len(o.Items)-1] = nil // release moved-out tail ref for GC
+		o.Items = o.Items[:len(o.Items)-1]
 		return nil
 	case *PyDict:
+		if !isHashable(index) {
+			return fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(index))
+		}
 		// Use hash-based deletion for O(1) average case
 		if !o.DictDelete(index, vm) {
-			return fmt.Errorf("KeyError: %s", vm.repr(index))
+			return vm.newKeyError(index)
 		}
 		return nil
 	case *PyInstance:

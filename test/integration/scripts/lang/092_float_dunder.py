@@ -1,7 +1,7 @@
 from test_framework import test, expect
 
 # Test 1: Basic __float__ conversion
-def test_basic_float(t):
+def test_basic_float():
     class Temperature:
         def __init__(self, celsius):
             self.celsius = celsius
@@ -14,7 +14,7 @@ def test_basic_float(t):
 test("basic __float__ conversion", test_basic_float)
 
 # Test 2: __float__ returning int converted to float
-def test_float_from_int(t):
+def test_float_from_int():
     class Whole:
         def __init__(self, val):
             self.val = val
@@ -27,7 +27,7 @@ def test_float_from_int(t):
 test("__float__ from int value", test_float_from_int)
 
 # Test 3: __float__ used in arithmetic
-def test_float_in_arithmetic(t):
+def test_float_in_arithmetic():
     class Weight:
         def __init__(self, kg):
             self.kg = kg
@@ -41,7 +41,7 @@ def test_float_in_arithmetic(t):
 test("__float__ used in arithmetic", test_float_in_arithmetic)
 
 # Test 4: __float__ with negative value
-def test_float_negative(t):
+def test_float_negative():
     class Num:
         def __init__(self, val):
             self.val = val
@@ -54,7 +54,7 @@ def test_float_negative(t):
 test("__float__ with negative value", test_float_negative)
 
 # Test 5: __float__ inherited from base class
-def test_float_inherited(t):
+def test_float_inherited():
     class Base:
         def __init__(self, val):
             self.val = val
@@ -70,7 +70,7 @@ def test_float_inherited(t):
 test("__float__ inherited from base class", test_float_inherited)
 
 # Test 6: __float__ with zero
-def test_float_zero(t):
+def test_float_zero():
     class Zero:
         def __float__(self):
             return 0.0
@@ -81,7 +81,7 @@ def test_float_zero(t):
 test("__float__ with zero", test_float_zero)
 
 # Test 7: float() without __float__ raises TypeError
-def test_float_no_dunder(t):
+def test_float_no_dunder():
     class NoFloat:
         pass
 
@@ -95,7 +95,7 @@ def test_float_no_dunder(t):
 test("float() without __float__ raises TypeError", test_float_no_dunder)
 
 # Test 8: __float__ returning non-float raises TypeError
-def test_float_returns_non_float(t):
+def test_float_returns_non_float():
     class Bad:
         def __float__(self):
             return "not a float"

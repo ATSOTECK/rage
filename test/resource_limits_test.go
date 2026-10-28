@@ -3,6 +3,7 @@ package test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ATSOTECK/rage/internal/compiler"
 	"github.com/ATSOTECK/rage/internal/runtime"
@@ -409,4 +410,71 @@ func TestResourceLimitsAllocatedBytes(t *testing.T) {
 
 	// Should have tracked some bytes
 	assert.Greater(t, state.AllocatedBytes(), int64(0))
+}
+
+func TestResourceLimitsTimeoutNotSwallowedByExcept(t *testing.T) {
+	// A bare except (in the frame that times out or a caller) must not be
+	// able to catch the timeout and keep the script running.
+	source := `
+def spin():
+    while True:
+        pass
+
+def outer():
+    while True:
+        try:
+            spin()
+        except:
+            pass
+
+while True:
+    try:
+        outer()
+    except:
+        pass
+`
+	state := rage.NewState()
+	defer state.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := state.RunWithTimeout(source, 100*time.Millisecond)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout was swallowed by except: script still running after 5s")
+	}
+}
+
+func TestResourceLimitsUnlimitedRecursionDoesNotCrashHost(t *testing.T) {
+	// With no recursion limit, runaway recursion (including through
+	// generators, which run on their own frame stack) must raise
+	// RecursionError rather than overflow the Go stack.
+	source := `
+def g(n):
+    yield from g(n + 1)
+
+def f(n):
+    return f(n + 1)
+
+caught = []
+for fn in (lambda: list(g(0)), lambda: f(0)):
+    try:
+        fn()
+    except RecursionError:
+        caught.append(True)
+`
+	vm := runtime.NewVM()
+	vm.SetMaxRecursionDepth(0)
+	code, errs := compiler.CompileSource(source, "<test>")
+	require.Empty(t, errs)
+
+	_, err := vm.Execute(code)
+	require.NoError(t, err)
+	caught := vm.GetGlobal("caught").(*runtime.PyList)
+	assert.Len(t, caught.Items, 2)
 }

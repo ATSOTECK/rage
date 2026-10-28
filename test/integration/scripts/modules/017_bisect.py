@@ -131,11 +131,11 @@ test("insort is alias for insort_right", test_insort_alias)
 # =====================
 
 def test_bisect_left_key():
-    # List of tuples sorted by second element
+    # Per CPython semantics, key is NOT applied to x — pass x already keyed.
     a = [(0, 1), (0, 3), (0, 5), (0, 7)]
     def get_second(t):
         return t[1]
-    idx = bisect.bisect_left(a, (0, 4), key=get_second)
+    idx = bisect.bisect_left(a, 4, key=get_second)
     expect(idx).to_be(2)
 
 test("bisect_left with key function", test_bisect_left_key)
@@ -144,10 +144,25 @@ def test_bisect_right_key():
     a = [(0, 1), (0, 3), (0, 5), (0, 7)]
     def get_second(t):
         return t[1]
-    idx = bisect.bisect_right(a, (0, 5), key=get_second)
+    idx = bisect.bisect_right(a, 5, key=get_second)
     expect(idx).to_be(3)
 
 test("bisect_right with key function", test_bisect_right_key)
+
+def test_bisect_key_no_eval_on_x():
+    # Regression: ensure key is never invoked on x. If it were, the call
+    # would mutate `calls` and we could detect it.
+    calls = []
+    def k(elem):
+        calls.append(elem)
+        return elem
+    a = [1, 3, 5, 7]
+    bisect.bisect_left(a, 4, key=k)
+    # k must have been called only on elements of `a` — never on x=4.
+    for v in calls:
+        expect(v in a).to_be(True)
+
+test("bisect_left does not apply key to x", test_bisect_key_no_eval_on_x)
 
 def test_insort_left_key():
     a = ["a", "ccc", "ddddd"]

@@ -39,7 +39,7 @@ func TestToListDict(t *testing.T) {
 
 func TestToListSet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 	s.SetAdd(MakeInt(10), vm)
 	s.SetAdd(MakeInt(20), vm)
 
@@ -54,7 +54,7 @@ func TestToListSet(t *testing.T) {
 
 func TestToListFrozenSet(t *testing.T) {
 	vm := NewVM()
-	fs := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	fs := &PyFrozenSet{}
 	fs.FrozenSetAdd(MakeInt(5), vm)
 	fs.FrozenSetAdd(MakeInt(15), vm)
 
@@ -228,11 +228,12 @@ func TestToListEmptyDict(t *testing.T) {
 
 func TestTruthyFrozenSet(t *testing.T) {
 	vm := NewVM()
-	empty := &PyFrozenSet{Items: make(map[Value]struct{})}
+	empty := &PyFrozenSet{}
 	if vm.truthy(empty) {
 		t.Error("empty frozenset should be falsy")
 	}
-	nonEmpty := &PyFrozenSet{Items: map[Value]struct{}{MakeInt(1): {}}}
+	nonEmpty := &PyFrozenSet{}
+	nonEmpty.FrozenSetAdd(MakeInt(1), vm)
 	if !vm.truthy(nonEmpty) {
 		t.Error("non-empty frozenset should be truthy")
 	}
@@ -249,7 +250,8 @@ func TestTruthyNonEmptyDict(t *testing.T) {
 
 func TestTruthyNonEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: map[Value]struct{}{MakeInt(1): {}}}
+	s := &PySet{}
+	s.SetAdd(MakeInt(1), vm)
 	if !vm.truthy(s) {
 		t.Error("non-empty set should be truthy")
 	}
@@ -340,7 +342,7 @@ func TestStrEmptyDict(t *testing.T) {
 
 func TestStrEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{})}
+	s := &PySet{}
 	got := vm.str(s)
 	if got != "set()" {
 		t.Errorf("str(empty set) = %q, want %q", got, "set()")
@@ -349,7 +351,7 @@ func TestStrEmptySet(t *testing.T) {
 
 func TestStrNonEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 	s.SetAdd(MakeInt(42), vm)
 	got := vm.str(s)
 	if got != "{42}" {
@@ -359,7 +361,7 @@ func TestStrNonEmptySet(t *testing.T) {
 
 func TestStrEmptyFrozenSet(t *testing.T) {
 	vm := NewVM()
-	fs := &PyFrozenSet{Items: make(map[Value]struct{})}
+	fs := &PyFrozenSet{}
 	got := vm.str(fs)
 	if got != "frozenset()" {
 		t.Errorf("str(empty frozenset) = %q, want %q", got, "frozenset()")
@@ -368,7 +370,7 @@ func TestStrEmptyFrozenSet(t *testing.T) {
 
 func TestStrNonEmptyFrozenSet(t *testing.T) {
 	vm := NewVM()
-	fs := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	fs := &PyFrozenSet{}
 	fs.FrozenSetAdd(MakeInt(7), vm)
 	got := vm.str(fs)
 	if got != "frozenset({7})" {
@@ -440,8 +442,8 @@ func TestStrGoFunc(t *testing.T) {
 	vm := NewVM()
 	gf := &PyGoFunc{Name: "myfunc"}
 	got := vm.str(gf)
-	if got != "<go function myfunc>" {
-		t.Errorf("str(gofunc) = %q, want %q", got, "<go function myfunc>")
+	if got != "<built-in function myfunc>" {
+		t.Errorf("str(gofunc) = %q, want %q", got, "<built-in function myfunc>")
 	}
 }
 
@@ -564,7 +566,7 @@ func TestReprEmptyDict(t *testing.T) {
 
 func TestReprEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{})}
+	s := &PySet{}
 	got := vm.repr(s)
 	if got != "set()" {
 		t.Errorf("repr(empty set) = %q, want %q", got, "set()")
@@ -573,7 +575,7 @@ func TestReprEmptySet(t *testing.T) {
 
 func TestReprNonEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 	s.SetAdd(MakeInt(99), vm)
 	got := vm.repr(s)
 	if got != "{99}" {
@@ -1132,7 +1134,7 @@ func TestAsciiDict(t *testing.T) {
 
 func TestAsciiEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{})}
+	s := &PySet{}
 	got := vm.ascii(s)
 	if got != "set()" {
 		t.Errorf("ascii(empty set) = %q, want %q", got, "set()")
@@ -1141,7 +1143,7 @@ func TestAsciiEmptySet(t *testing.T) {
 
 func TestAsciiNonEmptySet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 	s.SetAdd(MakeInt(1), vm)
 	got := vm.ascii(s)
 	if got != "{1}" {
@@ -1162,9 +1164,14 @@ func TestAsciiInt(t *testing.T) {
 // =====================================
 
 func TestBytesReprSingleQuote(t *testing.T) {
+	// Like CPython, switch to double quotes when only ' appears
 	got := bytesRepr([]byte("it's"))
-	if got != `b'it\'s'` {
-		t.Errorf("bytesRepr with quote = %q, want %q", got, `b'it\'s'`)
+	if got != `b"it's"` {
+		t.Errorf("bytesRepr with quote = %q, want %q", got, `b"it's"`)
+	}
+	got = bytesRepr([]byte(`'"`))
+	if got != `b'\'"'` {
+		t.Errorf("bytesRepr with both quotes = %q, want %q", got, `b'\'"'`)
 	}
 }
 
@@ -1181,8 +1188,8 @@ func TestBytesReprEmpty(t *testing.T) {
 
 func TestAsciiReprSpecialChars(t *testing.T) {
 	got := asciiRepr("a\tb\nc\\d'e")
-	if got != `'a\tb\nc\\d\'e'` {
-		t.Errorf("asciiRepr = %q, want %q", got, `'a\tb\nc\\d\'e'`)
+	if got != `"a\tb\nc\\d'e"` {
+		t.Errorf("asciiRepr = %q, want %q", got, `"a\tb\nc\\d'e"`)
 	}
 }
 

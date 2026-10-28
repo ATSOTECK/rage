@@ -89,7 +89,9 @@ func (vm *VM) initBuiltinsClasses() {
 					if packageName == "" {
 						if nameVal, ok := globalsDict["__name__"]; ok {
 							if nameStr, ok := nameVal.(*PyString); ok {
-								packageName = nameStr.Value
+								if nameStr.Value != "__main__" { // the main script has no parent package
+									packageName = nameStr.Value
+								}
 							}
 						}
 					}
@@ -128,6 +130,7 @@ func (vm *VM) initBuiltinsClasses() {
 	vm.builtins["True"] = True
 	vm.builtins["False"] = False
 	vm.builtins["NotImplemented"] = NotImplemented
+	vm.builtins["Ellipsis"] = Ellipsis
 
 	// __build_class__ is used to create classes
 	vm.builtins["__build_class__"] = &PyBuiltinFunc{
@@ -392,6 +395,14 @@ func (vm *VM) initBuiltinsClasses() {
 				}
 			}
 
+			// A class that defines __eq__ without __hash__ is unhashable:
+			// CPython sets its __hash__ to None.
+			if _, hasEq := class.Dict["__eq__"]; hasEq {
+				if _, hasHash := class.Dict["__hash__"]; !hasHash {
+					class.Dict["__hash__"] = None
+				}
+			}
+
 			// Call __set_name__ on descriptors in the class dict
 			if err := vm.callSetName(class); err != nil {
 				return nil, err
@@ -593,6 +604,28 @@ func (vm *VM) initBuiltinsClasses() {
 		return
 	}
 	objectClass.Mro = []*PyClass{objectClass}
+	vm.initObjectTextMethods(objectClass)
+
+	// object.__hash__(self) - the default identity-based hash, so a class
+	// can restore hashability with __hash__ = object.__hash__.
+	objectClass.Dict["__hash__"] = &PyBuiltinFunc{
+		Name: "object.__hash__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: object.__hash__() takes exactly one argument (%d given)", len(args))
+			}
+			return MakeInt(int64(hashValue(args[0]) >> 1)), nil
+		},
+	}
+
+	// object.__init__(self, ...) - no-op terminus for super().__init__() chains
+	// and explicit Base.__init__(self) calls. Extra arguments are accepted.
+	objectClass.Dict["__init__"] = &PyBuiltinFunc{
+		Name: "object.__init__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			return None, nil
+		},
+	}
 
 	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
 	objectClass.Dict["__getattribute__"] = &PyBuiltinFunc{
@@ -743,7 +776,7 @@ func (vm *VM) initBuiltinsClasses() {
 	}}
 
 	// object.__new__(cls) - create a new instance of cls
-	objectClass.Dict["__new__"] = &PyBuiltinFunc{
+	vm.objectNew = &PyBuiltinFunc{
 		Name: "object.__new__",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) < 1 {
@@ -765,6 +798,7 @@ func (vm *VM) initBuiltinsClasses() {
 			}, nil
 		},
 	}
+	objectClass.Dict["__new__"] = vm.objectNew
 
 	// type is a proper PyClass (the metaclass of all classes)
 	typeClass := &PyClass{
@@ -786,13 +820,21 @@ func (vm *VM) initBuiltinsClasses() {
 					return v.Class, nil
 				case *PyClass:
 					return typeClass, nil
-				default:
-					// Return a class with the type name
-					typeName := vm.typeName(args[1])
-					cls := &PyClass{Name: typeName}
-					cls.Mro = []*PyClass{cls}
-					return cls, nil
+				case *PyException:
+					// Return the real exception class so identity checks
+					// like `type(e) is ValueError` work.
+					if v.ExcType != nil {
+						return v.ExcType, nil
+					}
+					// Fall through to the synthetic-class branch.
 				}
+				// Return a synthetic class with the right name. This handles
+				// built-in singletons (Ellipsis, NotImplemented, …) and any
+				// type without a backing *PyClass.
+				typeName := vm.typeName(args[1])
+				cls := &PyClass{Name: typeName}
+				cls.Mro = []*PyClass{cls}
+				return cls, nil
 			}
 			// 4-arg form: type.__new__(mcs, name, bases, namespace)
 			if len(args) == 4 {

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 )
 
 // GeneratorSend resumes a generator with a value and returns the next yielded value
@@ -39,20 +38,17 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
-	vm.frames = []*Frame{gen.Frame}
+	if gen.frames == nil {
+		gen.frames = make([]*Frame, 1, 4)
+	}
+	gen.frames = gen.frames[:1]
+	gen.frames[0] = gen.Frame
+	vm.frames = gen.frames
 	vm.currentException = gen.SavedCurrentException
 	vm.lastException = gen.SavedLastException
 	vm.excHandlerStack = gen.SavedExcHandlerStack
-	vm.generatorPendingReturn = gen.SavedPendingReturn
-	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
-	vm.generatorPendingJump = gen.SavedPendingJump
-	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// If resuming from yield, push the sent value onto the stack
 	if gen.Frame.IP > 0 {
@@ -62,14 +58,15 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	// Run until yield or return
 	result, yielded, err := vm.runGenerator()
 
+	// Keep the (possibly grown) call-stack buffer for the next resume,
+	// dropping any frame references so they can be collected.
+	clear(vm.frames[:cap(vm.frames)])
+	gen.frames = vm.frames[:0]
+
 	// Save generator's state
 	gen.SavedCurrentException = vm.currentException
 	gen.SavedLastException = vm.lastException
 	gen.SavedExcHandlerStack = vm.excHandlerStack
-	gen.SavedPendingReturn = vm.generatorPendingReturn
-	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	gen.SavedPendingJump = vm.generatorPendingJump
-	gen.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -77,10 +74,6 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		gen.State = GenClosed
@@ -106,20 +99,7 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, bool, error) {
 	if gen.State == GenClosed {
 		// Re-raise the exception
-		if pyExc, ok := excType.(*PyException); ok {
-			return nil, true, pyExc
-		}
-		if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
-			return nil, true, vm.createException(inst, nil)
-		}
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		return nil, true, &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	if gen.State == GenRunning {
@@ -131,46 +111,11 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 
 	if gen.State == GenCreated {
 		gen.State = GenClosed
-		if pyExc, ok := excType.(*PyException); ok {
-			return nil, true, pyExc
-		}
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		return nil, true, &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	// Generator is suspended at a yield point - throw the exception there
-	var exc *PyException
-
-	// Check if excType is already a PyException
-	if pyExc, ok := excType.(*PyException); ok {
-		exc = pyExc
-	} else if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
-		// Already-instantiated exception instance (e.g., ValueError("xyz"))
-		exc = vm.createException(inst, nil)
-	} else {
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		} else if excValue != nil && excValue != None {
-			excMsg = fmt.Sprintf("%v", excValue)
-		}
-
-		exc = &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-
-		// Check if excType is a class and set ExcType appropriately
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-	}
+	exc := vm.thrownException(excType, excValue)
 
 	// Set the pending exception on the VM for the generator to handle
 	vm.generatorThrow = exc
@@ -182,20 +127,12 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
 	vm.frames = []*Frame{gen.Frame}
 	vm.currentException = gen.SavedCurrentException
 	vm.lastException = gen.SavedLastException
 	vm.excHandlerStack = gen.SavedExcHandlerStack
-	vm.generatorPendingReturn = gen.SavedPendingReturn
-	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
-	vm.generatorPendingJump = gen.SavedPendingJump
-	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
@@ -204,10 +141,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	gen.SavedCurrentException = vm.currentException
 	gen.SavedLastException = vm.lastException
 	gen.SavedExcHandlerStack = vm.excHandlerStack
-	gen.SavedPendingReturn = vm.generatorPendingReturn
-	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	gen.SavedPendingJump = vm.generatorPendingJump
-	gen.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -215,10 +148,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		gen.State = GenClosed
@@ -324,20 +253,12 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
 	vm.currentException = coro.SavedCurrentException
 	vm.lastException = coro.SavedLastException
 	vm.excHandlerStack = coro.SavedExcHandlerStack
-	vm.generatorPendingReturn = coro.SavedPendingReturn
-	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
-	vm.generatorPendingJump = coro.SavedPendingJump
-	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	if coro.Frame.IP > 0 {
 		vm.push(value)
@@ -349,10 +270,6 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	coro.SavedCurrentException = vm.currentException
 	coro.SavedLastException = vm.lastException
 	coro.SavedExcHandlerStack = vm.excHandlerStack
-	coro.SavedPendingReturn = vm.generatorPendingReturn
-	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	coro.SavedPendingJump = vm.generatorPendingJump
-	coro.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -360,10 +277,6 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
@@ -387,18 +300,7 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value, bool, error) {
 	if coro.State == GenClosed {
 		// Re-raise the exception
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		exc := &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-		return nil, true, exc
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	if coro.State == GenRunning {
@@ -410,38 +312,11 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 
 	if coro.State == GenCreated {
 		coro.State = GenClosed
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		exc := &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-		return nil, true, exc
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	// Coroutine is suspended at an await point - throw the exception there
-	// Create the exception to throw
-	excMsg := "exception"
-	if str, ok := excValue.(*PyString); ok {
-		excMsg = str.Value
-	} else if excValue != nil && excValue != None {
-		excMsg = fmt.Sprintf("%v", excValue)
-	}
-
-	exc := &PyException{
-		TypeName: fmt.Sprintf("%v", excType),
-		Message:  excMsg,
-	}
-
-	// Check if excType is a class and set ExcType appropriately
-	if cls, ok := excType.(*PyClass); ok {
-		exc.ExcType = cls
-	}
+	exc := vm.thrownException(excType, excValue)
 
 	// Set the pending exception on the VM for the coroutine to handle
 	vm.generatorThrow = exc
@@ -453,20 +328,12 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
 	vm.currentException = coro.SavedCurrentException
 	vm.lastException = coro.SavedLastException
 	vm.excHandlerStack = coro.SavedExcHandlerStack
-	vm.generatorPendingReturn = coro.SavedPendingReturn
-	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
-	vm.generatorPendingJump = coro.SavedPendingJump
-	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
@@ -475,10 +342,6 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	coro.SavedCurrentException = vm.currentException
 	coro.SavedLastException = vm.lastException
 	coro.SavedExcHandlerStack = vm.excHandlerStack
-	coro.SavedPendingReturn = vm.generatorPendingReturn
-	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	coro.SavedPendingJump = vm.generatorPendingJump
-	coro.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -486,10 +349,6 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
@@ -573,6 +432,12 @@ func (vm *VM) runGenerator() (Value, bool, error) {
 // runWithYieldSupport is like run() but returns (value, yielded, error) to support generators
 func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 	frame := vm.frame
+	vm.runDepth++
+	defer func() { vm.runDepth-- }()
+	if vm.runDepth > vm.nestingLimit() && vm.generatorThrow == nil {
+		// Raise RecursionError at the point the generator resumes.
+		vm.generatorThrow = vm.wrapGoError(errRecursionDepth)
+	}
 
 	// Check for pending exception from generator.throw()
 	if vm.generatorThrow != nil {
@@ -648,7 +513,7 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 			// Check if the top of stack is the sent value (not an iterator)
 			// This happens on resume: stack is [..., iterator, sent_value]
 			switch iter.(type) {
-			case *PyGenerator, *PyCoroutine, *PyIterator:
+			case *PyGenerator, *PyCoroutine, *PyIterator, lazyIterator:
 				// Top is already the iterator
 			default:
 				// Top is the sent value, pop it and get the iterator below
@@ -748,54 +613,19 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 		case OpReturn:
 			frame.SP--
 			result := frame.Stack[frame.SP]
-			// Check for finally blocks on the block stack that need to run before returning
-			foundFinally := false
-			for len(frame.BlockStack) > 0 {
-				block := frame.BlockStack[len(frame.BlockStack)-1]
-				if block.Type == BlockFinally {
-					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-					frame.SP = block.Level
-					frame.IP = block.Handler
-					// Push a "return sentinel" so EndFinally knows to complete the return
-					vm.generatorPendingReturn = result
-					vm.generatorHasPendingReturn = true
-					// Push None as the "exception" for finally (no exception, just cleanup)
-					vm.push(None)
-					foundFinally = true
-					break
-				}
-				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			transferred, err := vm.unwindForReturn(frame, result)
+			if err != nil {
+				return nil, false, err
 			}
-			if foundFinally {
-				continue // Continue the outer opcode execution loop to run the finally block
+			if transferred {
+				continue
 			}
 			return result, false, nil
 
 		case OpContinueLoop:
-			// Continue loop - check for finally blocks that need to run first
-			foundFinally := false
-			for len(frame.BlockStack) > 0 {
-				block := frame.BlockStack[len(frame.BlockStack)-1]
-				if block.Type == BlockFinally {
-					frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
-					frame.SP = block.Level
-					frame.IP = block.Handler
-					// Set pending jump so EndFinally knows to jump to the loop target
-					vm.generatorPendingJump = arg
-					vm.generatorHasPendingJump = true
-					foundFinally = true
-					break
-				}
-				if block.Type == BlockLoop {
-					break // Stop at the loop block
-				}
-				frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			if _, err := vm.unwindForJump(frame, arg); err != nil {
+				return nil, false, err
 			}
-			if foundFinally {
-				continue
-			}
-			// No finally block, just jump directly
-			frame.IP = arg
 
 		case OpGenStart:
 			// No-op, just marks generator start
@@ -884,4 +714,25 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, []stri
 	}
 
 	return classNamespace, frame.Cells, frame.OrderedGlobalKeys, nil
+}
+
+// thrownException converts the arguments of generator.throw(typ[, val]) /
+// coroutine.throw into the exception to raise: an exception instance as-is,
+// or an exception class instantiated with val (if given).
+func (vm *VM) thrownException(excType, excValue Value) *PyException {
+	if pyExc, ok := excType.(*PyException); ok {
+		return pyExc
+	}
+	if cls, ok := excType.(*PyClass); ok && vm.isExceptionClass(cls) {
+		var args []Value
+		if excValue != nil && excValue != None {
+			args = []Value{excValue}
+		}
+		if inst, err := vm.call(cls, args, nil); err == nil {
+			return vm.createException(inst, nil)
+		} else {
+			return vm.wrapGoError(err)
+		}
+	}
+	return vm.createException(excType, nil)
 }

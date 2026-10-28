@@ -2,7 +2,7 @@ from operator import length_hint
 from test_framework import test, expect
 
 # Test 1: __length_hint__ on custom iterator
-def test_basic_length_hint(t):
+def test_basic_length_hint():
     class MyIter:
         def __init__(self, n):
             self.remaining = n
@@ -15,7 +15,7 @@ def test_basic_length_hint(t):
 test("basic __length_hint__", test_basic_length_hint)
 
 # Test 2: __len__ takes priority over __length_hint__
-def test_len_priority(t):
+def test_len_priority():
     class Both:
         def __len__(self):
             return 5
@@ -28,7 +28,7 @@ def test_len_priority(t):
 test("__len__ takes priority over __length_hint__", test_len_priority)
 
 # Test 3: Falls back to default when neither defined
-def test_fallback_default(t):
+def test_fallback_default():
     class Empty:
         pass
 
@@ -39,7 +39,7 @@ def test_fallback_default(t):
 test("falls back to default when no dunder", test_fallback_default)
 
 # Test 4: __length_hint__ returning 0
-def test_hint_zero(t):
+def test_hint_zero():
     class Exhausted:
         def __length_hint__(self):
             return 0
@@ -50,31 +50,31 @@ def test_hint_zero(t):
 test("__length_hint__ returning 0", test_hint_zero)
 
 # Test 5: length_hint on built-in list uses len
-def test_builtin_list(t):
+def test_builtin_list():
     expect(length_hint([1, 2, 3])).to_be(3)
 
 test("length_hint on built-in list", test_builtin_list)
 
 # Test 6: length_hint on built-in tuple
-def test_builtin_tuple(t):
+def test_builtin_tuple():
     expect(length_hint((1, 2))).to_be(2)
 
 test("length_hint on built-in tuple", test_builtin_tuple)
 
 # Test 7: length_hint on built-in dict
-def test_builtin_dict(t):
+def test_builtin_dict():
     expect(length_hint({"a": 1, "b": 2})).to_be(2)
 
 test("length_hint on built-in dict", test_builtin_dict)
 
 # Test 8: length_hint on built-in string
-def test_builtin_string(t):
+def test_builtin_string():
     expect(length_hint("hello")).to_be(5)
 
 test("length_hint on built-in string", test_builtin_string)
 
 # Test 9: __length_hint__ inherited
-def test_inherited(t):
+def test_inherited():
     class Base:
         def __length_hint__(self):
             return 7
@@ -88,7 +88,7 @@ def test_inherited(t):
 test("__length_hint__ inherited from base", test_inherited)
 
 # Test 10: Negative __length_hint__ raises ValueError
-def test_negative_hint(t):
+def test_negative_hint():
     class Bad:
         def __length_hint__(self):
             return -1
@@ -103,7 +103,7 @@ def test_negative_hint(t):
 test("negative __length_hint__ raises ValueError", test_negative_hint)
 
 # Test 11: Only __len__ defined
-def test_only_len(t):
+def test_only_len():
     class HasLen:
         def __len__(self):
             return 3
@@ -114,7 +114,7 @@ def test_only_len(t):
 test("only __len__ defined", test_only_len)
 
 # Test 12: Default value as second arg
-def test_default_arg(t):
+def test_default_arg():
     class NoHint:
         pass
 

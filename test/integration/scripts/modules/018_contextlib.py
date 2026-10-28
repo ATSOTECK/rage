@@ -353,6 +353,53 @@ def test_exitstack_suppress():
 
 test("ExitStack with suppressing context manager", test_exitstack_suppress)
 
+def test_exitstack_callback_exception_propagates():
+    # Regression: exceptions raised by callbacks must propagate, not be silently
+    # dropped when ExitStack.__exit__ returns. (CPython ExitStack tracks
+    # pending_raise; the new exception replaces normal exit.)
+    def boom():
+        raise RuntimeError("bang")
+
+    raised = None
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.callback(boom)
+    except RuntimeError as e:
+        raised = str(e)
+    expect(raised).to_be("bang")
+
+test("ExitStack propagates callback exceptions", test_exitstack_callback_exception_propagates)
+
+
+def test_exitstack_callback_exception_suppressed_by_outer():
+    # If a later (outer) callback suppresses the new exception, no exception
+    # leaves the stack.
+    log = []
+
+    class Suppressor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("outer exit")
+            return True  # suppress
+
+    def boom():
+        log.append("inner boom")
+        raise RuntimeError("bang")
+
+    raised = False
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(Suppressor())   # outer cleanup
+            stack.callback(boom)                # inner cleanup (LIFO: runs first)
+    except RuntimeError:
+        raised = True
+
+    expect(raised).to_be(False)
+    expect(log).to_be(["inner boom", "outer exit"])
+
+test("ExitStack callback exception suppressed by outer __exit__", test_exitstack_callback_exception_suppressed_by_outer)
+
 # =====================================================
 # AbstractContextManager
 # =====================================================
@@ -435,3 +482,53 @@ def test_exitstack_dynamic():
     expect(log).to_be(["a_enter", "b_enter", "c_enter", "c_exit", "b_exit", "a_exit"])
 
 test("practical: ExitStack with dynamic context managers", test_exitstack_dynamic)
+
+
+# === redirect_stdout / redirect_stderr actually swap sys.stdout/stderr ===
+# Regression: __enter__/__exit__ used to be silent no-ops.
+import sys
+
+class _Capture:
+    def __init__(self):
+        self.data = ""
+    def write(self, s):
+        self.data += s
+    def flush(self):
+        pass
+
+def test_redirect_stdout_captures_print():
+    buf = _Capture()
+    with contextlib.redirect_stdout(buf):
+        print("hello")
+        print("world")
+    expect(buf.data).to_be("hello\nworld\n")
+
+def test_redirect_stdout_restores_sys_stdout():
+    original = sys.stdout
+    buf = _Capture()
+    with contextlib.redirect_stdout(buf):
+        expect(sys.stdout is buf).to_be(True)
+    expect(sys.stdout is original).to_be(True)
+
+def test_redirect_stderr_swaps_sys_stderr():
+    original = sys.stderr
+    buf = _Capture()
+    with contextlib.redirect_stderr(buf):
+        expect(sys.stderr is buf).to_be(True)
+    expect(sys.stderr is original).to_be(True)
+
+def test_redirect_stdout_nested_lifo():
+    outer = _Capture()
+    inner = _Capture()
+    with contextlib.redirect_stdout(outer):
+        print("outer1")
+        with contextlib.redirect_stdout(inner):
+            print("inner")
+        print("outer2")
+    expect(outer.data).to_be("outer1\nouter2\n")
+    expect(inner.data).to_be("inner\n")
+
+test("redirect_stdout captures print", test_redirect_stdout_captures_print)
+test("redirect_stdout restores sys.stdout", test_redirect_stdout_restores_sys_stdout)
+test("redirect_stderr swaps sys.stderr", test_redirect_stderr_swaps_sys_stderr)
+test("redirect_stdout nested LIFO", test_redirect_stdout_nested_lifo)

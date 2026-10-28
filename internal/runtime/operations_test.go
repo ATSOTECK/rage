@@ -744,7 +744,7 @@ func TestContainsDict(t *testing.T) {
 
 func TestContainsSet(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 	s.SetAdd(MakeInt(42), vm)
 	if !vm.contains(s, MakeInt(42)) {
 		t.Error("42 should be in set")

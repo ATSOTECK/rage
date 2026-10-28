@@ -3,7 +3,6 @@ package runtime
 import (
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // PyCode wraps a CodeObject for Python access via compile()
@@ -26,138 +25,19 @@ func BuiltinRepr(vm *VM) int {
 		return 0
 	}
 
-	obj := vm.Get(1)
-	result := vm.Repr(obj)
+	result, err := vm.reprValue(vm.Get(1))
+	if err != nil {
+		// Propagate the Python exception (e.g. from a user __repr__) as-is
+		panic(vm.wrapGoError(err))
+	}
 	vm.Push(NewString(result))
 	return 1
 }
 
-// Repr returns the repr() string for a value
+// Repr returns the repr() string for a value. If a user-defined __repr__
+// raises, a generic "<type object>" placeholder is returned instead.
 func (vm *VM) Repr(v Value) string {
-	switch val := v.(type) {
-	case *PyNone:
-		return "None"
-	case *PyBool:
-		if val.Value {
-			return "True"
-		}
-		return "False"
-	case *PyInt:
-		return fmt.Sprintf("%d", val.Value)
-	case *PyFloat:
-		return fmt.Sprintf("%g", val.Value)
-	case *PyString:
-		// repr() adds quotes around strings and escapes special chars
-		return fmt.Sprintf("'%s'", escapeString(val.Value))
-	case *PyBytes:
-		return fmt.Sprintf("b'%s'", escapeBytes(val.Value))
-	case *PyList:
-		var items []string
-		for _, item := range val.Items {
-			items = append(items, vm.Repr(item))
-		}
-		return "[" + strings.Join(items, ", ") + "]"
-	case *PyTuple:
-		var items []string
-		for _, item := range val.Items {
-			items = append(items, vm.Repr(item))
-		}
-		if len(items) == 1 {
-			return "(" + items[0] + ",)"
-		}
-		return "(" + strings.Join(items, ", ") + ")"
-	case *PyDict:
-		var items []string
-		for k, v := range val.Items {
-			items = append(items, vm.Repr(k)+": "+vm.Repr(v))
-		}
-		return "{" + strings.Join(items, ", ") + "}"
-	case *PySet:
-		if len(val.Items) == 0 {
-			return "set()"
-		}
-		var items []string
-		for k := range val.Items {
-			items = append(items, vm.Repr(k))
-		}
-		return "{" + strings.Join(items, ", ") + "}"
-	case *PyInstance:
-		// Check for __repr__ method
-		if reprMethod, err := vm.getAttr(val, "__repr__"); err == nil && reprMethod != nil {
-			if result, err := vm.call(reprMethod, nil, nil); err == nil {
-				if s, ok := result.(*PyString); ok {
-					return s.Value
-				}
-			}
-		}
-		return fmt.Sprintf("<%s object at %p>", val.Class.Name, val)
-	case *PyClass:
-		return fmt.Sprintf("<class '%s'>", val.Name)
-	case *PyFunction:
-		return fmt.Sprintf("<function %s at %p>", val.Name, val)
-	case *PyBuiltinFunc:
-		return fmt.Sprintf("<built-in function %s>", val.Name)
-	case *PyGoFunc:
-		return fmt.Sprintf("<built-in function %s>", val.Name)
-	case *PyModule:
-		return fmt.Sprintf("<module '%s'>", val.Name)
-	case *PyCode:
-		return fmt.Sprintf("<code object %s at %p>", val.Code.Name, val)
-	default:
-		return fmt.Sprintf("<%s object at %p>", vm.typeName(v), v)
-	}
-}
-
-// escapeString escapes special characters for repr()
-func escapeString(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString("\\\\")
-		case '\'':
-			b.WriteString("\\'")
-		case '\n':
-			b.WriteString("\\n")
-		case '\r':
-			b.WriteString("\\r")
-		case '\t':
-			b.WriteString("\\t")
-		default:
-			if r < 32 || r > 126 {
-				b.WriteString(fmt.Sprintf("\\x%02x", r))
-			} else {
-				b.WriteRune(r)
-			}
-		}
-	}
-	return b.String()
-}
-
-// escapeBytes escapes bytes for repr()
-func escapeBytes(data []byte) string {
-	var b strings.Builder
-	for _, c := range data {
-		switch c {
-		case '\\':
-			b.WriteString("\\\\")
-		case '\'':
-			b.WriteString("\\'")
-		case '\n':
-			b.WriteString("\\n")
-		case '\r':
-			b.WriteString("\\r")
-		case '\t':
-			b.WriteString("\\t")
-		default:
-			if c < 32 || c > 126 {
-				b.WriteString(fmt.Sprintf("\\x%02x", c))
-			} else {
-				b.WriteByte(c)
-			}
-		}
-	}
-	return b.String()
+	return vm.repr(v)
 }
 
 // BuiltinDir implements dir([obj])
@@ -353,11 +233,8 @@ func BuiltinLocals(vm *VM) int {
 	// Find the caller's frame (skip the builtin's temporary frame)
 	callerFrame := vm.getCallerFrame()
 	if callerFrame != nil && callerFrame.Code != nil {
-		for i, name := range callerFrame.Code.VarNames {
-			if i < len(callerFrame.Locals) && callerFrame.Locals[i] != nil {
-				locals.Items[NewString(name)] = callerFrame.Locals[i]
-			}
-		}
+		// Keep the variables in definition order
+		locals = vm.localsDict(callerFrame.Code.VarNames, callerFrame.Locals)
 	}
 
 	vm.Push(locals)

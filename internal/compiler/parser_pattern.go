@@ -6,9 +6,36 @@ import (
 	"github.com/ATSOTECK/rage/internal/model"
 )
 
+// isSoftKeyword reports whether the current token is the identifier kw, for
+// soft keywords (match, case) that are only keywords in context.
+func (p *Parser) isSoftKeyword(kw string) bool {
+	tok := p.current()
+	return tok.Kind == model.TK_Identifier && tok.Literal == kw
+}
+
+// atMatchStatement reports whether the current logical line is a match
+// statement: it starts with the soft keyword `match`, ends with `:`, and is
+// followed by an indented block that begins with `case`. Anything else that
+// starts with `match` (re.match(...), match = 1) is an ordinary statement.
+func (p *Parser) atMatchStatement() bool {
+	if !p.isSoftKeyword("match") {
+		return false
+	}
+	end := p.pos + 1
+	for end < len(p.tokens) && p.tokens[end].Kind != model.TK_Newline && p.tokens[end].Kind != model.TK_EOF {
+		end++
+	}
+	if end+2 >= len(p.tokens) || end-1 <= p.pos+1 || p.tokens[end-1].Kind != model.TK_Colon {
+		return false
+	}
+	caseTok := p.tokens[end+2]
+	return p.tokens[end+1].Kind == model.TK_Indent &&
+		caseTok.Kind == model.TK_Identifier && caseTok.Literal == "case"
+}
+
 func (p *Parser) parseMatchStmt() model.Stmt {
 	startPos := p.current().Pos
-	p.expect(model.TK_Match)
+	p.advance() // soft keyword `match`
 
 	subject := p.parseExpression()
 	p.expect(model.TK_Colon)
@@ -16,7 +43,7 @@ func (p *Parser) parseMatchStmt() model.Stmt {
 	p.expect(model.TK_Indent)
 
 	var cases []*model.MatchCase
-	for p.check(model.TK_Case) {
+	for p.isSoftKeyword("case") {
 		cases = append(cases, p.parseMatchCase())
 	}
 
@@ -39,7 +66,7 @@ func (p *Parser) parseMatchStmt() model.Stmt {
 
 func (p *Parser) parseMatchCase() *model.MatchCase {
 	startPos := p.current().Pos
-	p.expect(model.TK_Case)
+	p.advance() // soft keyword `case`
 
 	pattern := p.parsePattern()
 
@@ -49,9 +76,7 @@ func (p *Parser) parseMatchCase() *model.MatchCase {
 	}
 
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var endPos model.Position
 	if len(body) > 0 {

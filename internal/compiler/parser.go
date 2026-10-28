@@ -56,11 +56,27 @@ func NewParser(source string) *Parser {
 // NewParserWithFilename creates a new parser with a filename for error messages.
 func NewParserWithFilename(source, filename string) *Parser {
 	lexer := NewLexerWithFilename(source, filename)
-	tokens, _ := lexer.Tokenize()
+	tokens, lexErrs := lexer.Tokenize()
+
+	// Comments carry no meaning for parsing. Dropping them here lets every
+	// grammar rule ignore them, including after a colon (`if x:  # note`)
+	// and inside brackets.
+	filtered := tokens[:0]
+	for _, tok := range tokens {
+		if tok.Kind != model.TK_Comment {
+			filtered = append(filtered, tok)
+		}
+	}
+
+	var errs []ParseError
+	for _, e := range lexErrs {
+		errs = append(errs, ParseError{Pos: e.Pos, Message: e.Message})
+	}
 	return &Parser{
 		lexer:  lexer,
-		tokens: tokens,
+		tokens: filtered,
 		pos:    0,
+		errors: errs,
 	}
 }
 
@@ -73,7 +89,7 @@ func (p *Parser) Parse() (*model.Module, []ParseError) {
 	}
 
 	for !p.isAtEnd() {
-		if p.check(model.TK_Newline) || p.check(model.TK_Comment) {
+		if p.check(model.TK_Newline) || p.check(model.TK_Semicolon) {
 			p.advance()
 			continue
 		}
@@ -186,7 +202,7 @@ func (p *Parser) parseBlock() []model.Stmt {
 	}
 
 	for !p.check(model.TK_Dedent) && !p.isAtEnd() {
-		if p.check(model.TK_Newline) || p.check(model.TK_Comment) {
+		if p.check(model.TK_Newline) || p.check(model.TK_Semicolon) {
 			p.advance()
 			continue
 		}
@@ -197,6 +213,32 @@ func (p *Parser) parseBlock() []model.Stmt {
 	}
 
 	p.match(model.TK_Dedent)
+	return stmts
+}
+
+// parseSuite parses the body of a compound statement after its colon: either
+// an indented block on the following lines, or simple statements on the same
+// line separated by semicolons (`if x: a = 1; b = 2`).
+func (p *Parser) parseSuite() []model.Stmt {
+	if p.match(model.TK_Newline) {
+		return p.parseBlock()
+	}
+
+	var stmts []model.Stmt
+	for !p.isAtEnd() && !p.check(model.TK_Newline) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			stmts = append(stmts, stmt)
+		}
+		if !p.match(model.TK_Semicolon) {
+			break
+		}
+	}
+	// Simple statements normally consume their own NEWLINE; consume it if the
+	// last one didn't (e.g. after a trailing semicolon).
+	if p.pos == 0 || p.tokens[p.pos-1].Kind != model.TK_Newline {
+		p.match(model.TK_Newline)
+	}
 	return stmts
 }
 

@@ -273,9 +273,9 @@ func TestCompareOpComplexNotOrderable(t *testing.T) {
 
 func TestCompareOpSetSubset(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(1), vm)
 	b.SetAdd(MakeInt(2), vm)
 
@@ -306,10 +306,10 @@ func TestCompareOpSetSubset(t *testing.T) {
 
 func TestCompareOpSetEquality(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(1), vm)
 	b.SetAdd(MakeInt(2), vm)
 
@@ -325,10 +325,10 @@ func TestCompareOpSetEquality(t *testing.T) {
 
 func TestCompareOpSetNotProperSubset(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(1), vm)
 	b.SetAdd(MakeInt(2), vm)
 
@@ -378,7 +378,7 @@ func TestContainsNonStringInStringTypeError(t *testing.T) {
 
 func TestContainsFrozenSet(t *testing.T) {
 	vm := NewVM()
-	fs := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	fs := &PyFrozenSet{}
 	fs.FrozenSetAdd(MakeInt(10), vm)
 	fs.FrozenSetAdd(MakeInt(20), vm)
 
@@ -514,11 +514,11 @@ func TestEqualDictsDifferentSize(t *testing.T) {
 
 func TestEqualSets(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
 
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(1), vm)
 	b.SetAdd(MakeInt(2), vm)
 
@@ -529,10 +529,10 @@ func TestEqualSets(t *testing.T) {
 
 func TestEqualSetsDifferent(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(2), vm)
 
 	if vm.equal(a, b) {
@@ -542,10 +542,10 @@ func TestEqualSetsDifferent(t *testing.T) {
 
 func TestEqualFrozenSets(t *testing.T) {
 	vm := NewVM()
-	a := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PyFrozenSet{}
 	a.FrozenSetAdd(MakeInt(1), vm)
 
-	b := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PyFrozenSet{}
 	b.FrozenSetAdd(MakeInt(1), vm)
 
 	if !vm.equal(a, b) {
@@ -555,10 +555,10 @@ func TestEqualFrozenSets(t *testing.T) {
 
 func TestEqualSetAndFrozenSet(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 
-	b := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PyFrozenSet{}
 	b.FrozenSetAdd(MakeInt(1), vm)
 
 	if !vm.equal(a, b) {
@@ -568,10 +568,10 @@ func TestEqualSetAndFrozenSet(t *testing.T) {
 
 func TestEqualFrozenSetAndSet(t *testing.T) {
 	vm := NewVM()
-	a := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PyFrozenSet{}
 	a.FrozenSetAdd(MakeInt(1), vm)
 
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(1), vm)
 
 	if !vm.equal(a, b) {
@@ -1058,9 +1058,9 @@ func TestBinaryOpFloatFloorDivByZero(t *testing.T) {
 
 func TestBinaryOpSetUnion(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(2), vm)
 
 	result, err := vm.binaryOp(OpBinaryOr, a, b)
@@ -1071,17 +1071,17 @@ func TestBinaryOpSetUnion(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *PySet, got %T", result)
 	}
-	if len(got.Items) != 2 {
-		t.Errorf("expected 2 items in union, got %d", len(got.Items))
+	if got.Len() != 2 {
+		t.Errorf("expected 2 items in union, got %d", got.Len())
 	}
 }
 
 func TestBinaryOpSetIntersection(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(2), vm)
 	b.SetAdd(MakeInt(3), vm)
 
@@ -1093,17 +1093,17 @@ func TestBinaryOpSetIntersection(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *PySet, got %T", result)
 	}
-	if len(got.Items) != 1 {
-		t.Errorf("expected 1 item in intersection, got %d", len(got.Items))
+	if got.Len() != 1 {
+		t.Errorf("expected 1 item in intersection, got %d", got.Len())
 	}
 }
 
 func TestBinaryOpSetDifference(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(2), vm)
 	b.SetAdd(MakeInt(3), vm)
 
@@ -1115,17 +1115,17 @@ func TestBinaryOpSetDifference(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *PySet, got %T", result)
 	}
-	if len(got.Items) != 1 {
-		t.Errorf("expected 1 item in difference, got %d", len(got.Items))
+	if got.Len() != 1 {
+		t.Errorf("expected 1 item in difference, got %d", got.Len())
 	}
 }
 
 func TestBinaryOpSetSymmetricDifference(t *testing.T) {
 	vm := NewVM()
-	a := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	a := &PySet{}
 	a.SetAdd(MakeInt(1), vm)
 	a.SetAdd(MakeInt(2), vm)
-	b := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	b := &PySet{}
 	b.SetAdd(MakeInt(2), vm)
 	b.SetAdd(MakeInt(3), vm)
 
@@ -1137,8 +1137,8 @@ func TestBinaryOpSetSymmetricDifference(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *PySet, got %T", result)
 	}
-	if len(got.Items) != 2 {
-		t.Errorf("expected 2 items in symmetric difference, got %d", len(got.Items))
+	if got.Len() != 2 {
+		t.Errorf("expected 2 items in symmetric difference, got %d", got.Len())
 	}
 }
 

@@ -1,19 +1,24 @@
 package compiler
 
 import (
+	"slices"
+
 	"github.com/ATSOTECK/rage/internal/runtime"
 )
 
 func (o *Optimizer) removeLoadPop(instrs []*instruction) bool {
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
 			continue
 		}
-		// Pattern: LOAD_FAST/LOAD_CONST followed by POP
-		if (instrs[i].op == runtime.OpLoadFast || instrs[i].op == runtime.OpLoadConst ||
-			instrs[i].op == runtime.OpLoadFast0 || instrs[i].op == runtime.OpLoadFast1 ||
-			instrs[i].op == runtime.OpLoadFast2 || instrs[i].op == runtime.OpLoadFast3 ||
+		if fusesJumpTarget(jumpTargets, i, 1) {
+			continue
+		}
+		// Pattern: constant load followed by POP. Local loads are kept: a
+		// bare `x` statement must still raise UnboundLocalError if x is unbound.
+		if (instrs[i].op == runtime.OpLoadConst ||
 			instrs[i].op == runtime.OpLoadNone || instrs[i].op == runtime.OpLoadTrue ||
 			instrs[i].op == runtime.OpLoadFalse) &&
 			instrs[i+1].op == runtime.OpPop {
@@ -26,9 +31,13 @@ func (o *Optimizer) removeLoadPop(instrs []*instruction) bool {
 }
 
 func (o *Optimizer) removeDupPop(instrs []*instruction) bool {
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 1) {
 			continue
 		}
 		if instrs[i].op == runtime.OpDup && instrs[i+1].op == runtime.OpPop {
@@ -88,6 +97,12 @@ func (o *Optimizer) optimizeJumps(instrs []*instruction, code *runtime.CodeObjec
 		// Skip if this instruction is a jump target - can't safely optimize
 		// because control flow may come from elsewhere with different stack state
 		if jumpTargets[i] {
+			continue
+		}
+		// Skip if the POP_JUMP_IF_FALSE is itself a jump target. JUMP_IF_FALSE_OR_POP
+		// (from `and`/`or`) lands on POP_JUMP_IF_FALSE expecting it to pop the
+		// short-circuit value — removing or rewriting it would leak that value.
+		if i+1 < len(instrs) && jumpTargets[i+1] {
 			continue
 		}
 
@@ -238,9 +253,13 @@ func (o *Optimizer) specializeLoadConst(instrs []*instruction, code *runtime.Cod
 
 func (o *Optimizer) detectIncrementPattern(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, LOAD_CONST 1, BINARY_ADD, STORE_FAST x -> INCREMENT_FAST x
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-3; i++ {
 		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 3) {
 			continue
 		}
 
@@ -319,9 +338,13 @@ func (o *Optimizer) detectIncrementPattern(instrs []*instruction, code *runtime.
 
 func (o *Optimizer) detectDecrementPattern(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, LOAD_CONST 1, BINARY_SUB, STORE_FAST x -> DECREMENT_FAST x
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-3; i++ {
 		if instrs[i].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 3) {
 			continue
 		}
 
@@ -360,9 +383,13 @@ func (o *Optimizer) detectDecrementPattern(instrs []*instruction, code *runtime.
 
 func (o *Optimizer) detectNegatePattern(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, UNARY_NEGATIVE, STORE_FAST x -> NEGATE_FAST x
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-2; i++ {
 		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 2) {
 			continue
 		}
 
@@ -396,9 +423,13 @@ func (o *Optimizer) detectNegatePattern(instrs []*instruction, code *runtime.Cod
 func (o *Optimizer) detectAddConstPattern(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, LOAD_CONST c, BINARY_ADD, STORE_FAST x -> ADD_CONST_FAST (x, c)
 	// Skip if c == 1 (handled by INCREMENT_FAST)
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-3; i++ {
 		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed || instrs[i+3].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 3) {
 			continue
 		}
 
@@ -475,32 +506,52 @@ func (o *Optimizer) getLoadFastIndex(instr *instruction) int {
 	return -1
 }
 
-// computeJumpTargets returns a map of instruction indices that are jump targets.
-// This is used to prevent unsafe optimizations that would merge instructions
-// where control flow can jump into the middle of the merged instruction.
-func (o *Optimizer) computeJumpTargets(instrs []*instruction) map[int]bool {
-	// Map offsets to instruction indices
-	offsetToIndex := make(map[int]int)
+// computeJumpTargets reports, per instruction index, whether the instruction is
+// a jump target. This is used to prevent unsafe optimizations that would merge
+// instructions where control flow can jump into the middle of the merged
+// instruction. The result reuses a buffer owned by the optimizer, so it is
+// only valid until the next call.
+func (o *Optimizer) computeJumpTargets(instrs []*instruction) []bool {
+	// Instruction offsets are increasing, so a jump's target index can be
+	// found by binary search instead of building an offset map.
+	offsets := o.jtOffsets[:0]
 	offset := 0
-	for i, instr := range instrs {
-		offsetToIndex[offset] = i
+	for _, instr := range instrs {
+		offsets = append(offsets, offset)
 		if instr.originalHadArg {
 			offset += 3
 		} else {
 			offset++
 		}
 	}
+	o.jtOffsets = offsets
 
-	// Mark jump targets
-	jumpTargets := make(map[int]bool)
+	jumpTargets := o.jtTargets[:0]
+	for range instrs {
+		jumpTargets = append(jumpTargets, false)
+	}
+	o.jtTargets = jumpTargets
 	for _, instr := range instrs {
 		if isJumpOp(instr.op) && instr.arg >= 0 {
-			if targetIdx, ok := offsetToIndex[instr.arg]; ok {
-				jumpTargets[targetIdx] = true
+			if idx, ok := slices.BinarySearch(offsets, instr.arg); ok {
+				jumpTargets[idx] = true
 			}
 		}
 	}
 	return jumpTargets
+}
+
+// fusesJumpTarget reports whether any instruction in instrs[i+1..i+n] is a
+// jump target. Fusing or removing such an instruction would let a jump land
+// mid-pattern (or skip the pattern's effect), so peephole rewrites that
+// collapse a run of instructions starting at i must check this first.
+func fusesJumpTarget(jumpTargets []bool, i, n int) bool {
+	for k := i + 1; k <= i+n && k < len(jumpTargets); k++ {
+		if jumpTargets[k] {
+			return true
+		}
+	}
+	return false
 }
 
 // Helper to get STORE_FAST index from instruction (handles specialized versions)
@@ -544,9 +595,13 @@ func (o *Optimizer) isLoadOne(instr *instruction, code *runtime.CodeObject) bool
 
 func (o *Optimizer) detectLoadFastLoadFast(instrs []*instruction) bool {
 	// Pattern: LOAD_FAST x, LOAD_FAST y -> LOAD_FAST_LOAD_FAST (packed)
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 1) {
 			continue
 		}
 
@@ -574,9 +629,13 @@ func (o *Optimizer) detectLoadFastLoadFast(instrs []*instruction) bool {
 
 func (o *Optimizer) detectLoadFastLoadConst(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_FAST x, LOAD_CONST y -> LOAD_FAST_LOAD_CONST (packed)
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 1) {
 			continue
 		}
 
@@ -606,9 +665,13 @@ func (o *Optimizer) detectLoadFastLoadConst(instrs []*instruction, code *runtime
 
 func (o *Optimizer) detectLoadConstLoadFast(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_CONST x, LOAD_FAST y -> LOAD_CONST_LOAD_FAST (packed)
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 1) {
 			continue
 		}
 
@@ -762,9 +825,13 @@ func (o *Optimizer) optimizeCompareJump(instrs []*instruction) bool {
 func (o *Optimizer) eliminateStoreLoad(instrs []*instruction) bool {
 	// Pattern: STORE_FAST x, LOAD_FAST x -> DUP, STORE_FAST x
 	// This keeps the value on the stack and avoids the re-load
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-1; i++ {
 		if instrs[i].removed || instrs[i+1].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 1) {
 			continue
 		}
 
@@ -841,9 +908,13 @@ func (o *Optimizer) threadJumps(instrs []*instruction) bool {
 func (o *Optimizer) optimizeLenCalls(instrs []*instruction, code *runtime.CodeObject) bool {
 	// Pattern: LOAD_GLOBAL "len", LOAD_xxx, CALL 1 -> LEN_GENERIC
 	// This avoids the function call overhead for len()
+	jumpTargets := o.computeJumpTargets(instrs)
 	changed := false
 	for i := 0; i < len(instrs)-2; i++ {
 		if instrs[i].removed || instrs[i+1].removed || instrs[i+2].removed {
+			continue
+		}
+		if fusesJumpTarget(jumpTargets, i, 2) {
 			continue
 		}
 

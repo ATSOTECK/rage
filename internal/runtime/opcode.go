@@ -1,6 +1,9 @@
 package runtime
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // Opcode represents a single bytecode instruction
 type Opcode byte
@@ -261,6 +264,13 @@ const (
 
 	// Annotations
 	OpSetupAnnotations // Ensure __annotations__ dict exists in current namespace
+
+	// Incremental builds for unpacking in displays and calls
+	OpListExtend  // Pop iterable, extend list at peek(arg)
+	OpSetUpdate   // Pop iterable, add its items to set at peek(arg)
+	OpDictUpdate  // Pop mapping, update dict at peek(arg)
+	OpDictMerge   // Pop mapping, merge into kwargs dict at peek(arg); duplicate keys are an error
+	OpListToTuple // Replace list on TOS with a tuple
 )
 
 // OpcodeNames maps opcodes to their string names for debugging
@@ -449,6 +459,11 @@ var OpcodeNames = map[Opcode]string{
 	OpLoadConstLoadFast:  "LOAD_CONST_LOAD_FAST",
 	OpLoadGlobalLoadFast: "LOAD_GLOBAL_LOAD_FAST",
 	OpSetupAnnotations:   "SETUP_ANNOTATIONS",
+	OpListExtend:         "LIST_EXTEND",
+	OpSetUpdate:          "SET_UPDATE",
+	OpDictUpdate:         "DICT_UPDATE",
+	OpDictMerge:          "DICT_MERGE",
+	OpListToTuple:        "LIST_TO_TUPLE",
 }
 
 func (op Opcode) String() string {
@@ -504,6 +519,7 @@ func init() {
 		OpLenList, OpLenString, OpLenTuple, OpLenDict, OpLenGeneric,
 		// Annotations
 		OpSetupAnnotations,
+		OpListToTuple,
 	}
 	for _, op := range noArgOpcodes {
 		hasArgTable[op] = false
@@ -540,6 +556,26 @@ type CodeObject struct {
 	Flags          CodeFlags   // Code flags
 	StackSize      int         // Maximum stack size needed
 	LineNoTab      []LineEntry // Line number table
+
+	// constValues caches Constants converted to runtime Values so that
+	// LOAD_CONST does not allocate a new object on every execution. It is
+	// built lazily on first use (see constValue) and is safe to share between
+	// VMs because constant values are immutable.
+	constValues atomic.Pointer[[]Value]
+}
+
+// constValue returns the runtime Value for constant idx, converting the
+// compiler's Go representation at most once per code object.
+func (vm *VM) constValue(co *CodeObject, idx int) Value {
+	if cv := co.constValues.Load(); cv != nil && len(*cv) == len(co.Constants) {
+		return (*cv)[idx]
+	}
+	values := make([]Value, len(co.Constants))
+	for i, c := range co.Constants {
+		values[i] = vm.toValue(c)
+	}
+	co.constValues.Store(&values)
+	return values[idx]
 }
 
 // CodeFlags represents flags for code objects

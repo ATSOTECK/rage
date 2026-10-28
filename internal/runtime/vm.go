@@ -27,10 +27,6 @@ type VM struct {
 	generatorThrow *PyException // Exception to throw into generator on resume
 
 	// Generator return/continue-through-finally state
-	generatorPendingReturn    Value // Return value pending while finally block executes
-	generatorHasPendingReturn bool  // Whether a return is pending
-	generatorPendingJump      int   // Jump target pending while finally block executes (continue/break)
-	generatorHasPendingJump   bool  // Whether a jump is pending
 
 	// except* state stack
 	exceptStarStack []ExceptStarState
@@ -47,7 +43,46 @@ type VM struct {
 
 	// Pending memory error from stack growth (checked in run loop)
 	pendingMemError bool
+
+	// runDepth counts nested executions of the interpreter loop (Python
+	// function calls and generator resumes). Unlike len(frames) it also sees
+	// recursion through generators, whose frames run on a separate frame stack.
+	runDepth int64
+
+	// Text conversion state (see conversions_repr.go)
+	reprActive map[Value]struct{} // containers currently being repr'd, for cycle detection
+	reprDepth  int                // nesting budget used by repr()/str() conversions
+
+	// framePool holds finished function frames for reuse by
+	// createFunctionFrame, avoiding two allocations per Python call.
+	framePool []*Frame
+
+	// objectNew is the builtin object.__new__, which classCall can invoke
+	// without copying its arguments.
+	objectNew *PyBuiltinFunc
+
+	// objectCls caches the builtin object class (see objectClass).
+	objectCls *PyClass
+
+	// Call order of recent keyword-argument maps (Go maps are unordered)
+	kwargOrders    [8]kwargOrderRecord
+	kwargOrderNext int
 }
+
+// hardNestingLimit caps interpreter nesting even when the recursion limit is
+// unlimited or set very high: past roughly 100k levels the Go stack overflows,
+// which is a fatal error that would take down the embedding process.
+const hardNestingLimit = 20000
+
+// nestingLimit is the effective maximum runDepth.
+func (vm *VM) nestingLimit() int64 {
+	if vm.maxRecursionDepth > 0 && vm.maxRecursionDepth < hardNestingLimit {
+		return vm.maxRecursionDepth
+	}
+	return hardNestingLimit
+}
+
+var errRecursionDepth = fmt.Errorf("RecursionError: maximum recursion depth exceeded")
 
 // TimeoutError is returned when script execution exceeds the time limit
 type TimeoutError struct {
@@ -82,8 +117,17 @@ func NewVM() *VM {
 		builtins:      make(map[string]Value),
 		checkInterval: 1000, // Check context every 1000 instructions by default
 		checkCounter:  1000, // Initialize counter
+		// Default call-stack limit. Without this, runaway Python recursion
+		// overflows the Go goroutine stack and aborts the whole process with an
+		// uncatchable fatal error instead of a catchable RecursionError. Matches
+		// CPython's default and sys.getrecursionlimit(). 0 means unlimited.
+		maxRecursionDepth: 1000,
 	}
 	vm.initBuiltins()
+
+	// Code run directly by the VM is the main module, so scripts can use the
+	// `if __name__ == "__main__":` idiom.
+	vm.Globals["__name__"] = NewString("__main__")
 
 	// Add pending builtins registered by stdlib modules (e.g., open() from IO module)
 	for name, fn := range GetPendingBuiltins() {
@@ -91,6 +135,15 @@ func NewVM() *VM {
 	}
 
 	return vm
+}
+
+// objectClass returns the builtin object class, caching the builtins lookup
+// for hot paths such as attribute assignment.
+func (vm *VM) objectClass() *PyClass {
+	if vm.objectCls == nil {
+		vm.objectCls = vm.builtinClass("object")
+	}
+	return vm.objectCls
 }
 
 // SetCheckInterval sets how often the VM checks for timeout/cancellation.
@@ -277,6 +330,15 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 		}
 		return false, errExceptionHandledInOuterFrame
 	}
+	switch err.(type) {
+	case *TimeoutError, *CancelledError:
+		// Execution limits aren't Python exceptions: unwind without running
+		// any handler so scripts can't swallow them with except:.
+		if len(vm.frames) > 0 {
+			vm.popFrame()
+		}
+		return false, err
+	}
 	var pyExc *PyException
 	if pe, ok := err.(*PyException); ok {
 		pyExc = pe
@@ -298,6 +360,138 @@ func (vm *VM) tryHandleError(err error, frame *Frame) (bool, error) {
 		return false, errExceptionHandledInOuterFrame
 	}
 	return true, nil
+}
+
+// cleanupWithBlock runs __exit__ for a BlockWith being unwound and removes the
+// cm from the operand stack. If __exit__ raises, the exception is routed to
+// remaining handlers in the same frame: the caller receives (true, nil) when a
+// handler caught it, (false, err) when it went uncaught. On normal cleanup the
+// caller receives (false, nil) and should continue unwinding.
+func (vm *VM) cleanupWithBlock(frame *Frame, block Block) (caught bool, err error) {
+	if block.Level <= 0 {
+		return false, nil
+	}
+	cm := frame.Stack[block.Level-1]
+	if exitErr := vm.callExitNoExc(cm); exitErr != nil {
+		// Remove cm from operand stack before propagating.
+		frame.SP = block.Level - 1
+		var pyExc *PyException
+		if pe, ok := exitErr.(*PyException); ok {
+			pyExc = pe
+		} else {
+			pyExc = vm.wrapGoError(exitErr)
+		}
+		if _, herr := vm.handleException(pyExc); herr != nil {
+			return false, herr
+		}
+		return true, nil
+	}
+	frame.SP = block.Level - 1
+	return false, nil
+}
+
+// unwindForReturn walks the frame's block stack while a return is in flight.
+//   - BlockFinally: stores `result` as a pending return, transfers control to
+//     the finally body, and returns (true, nil). The caller should continue
+//     dispatching opcodes; OpEndFinally will resume the unwind when the
+//     finally body completes.
+//   - BlockWith: calls __exit__(None, None, None) on the context manager. If
+//     it raises, hands the exception to handleException — which walks the
+//     remaining block stack for a handler. Returns (true, nil) on caught,
+//     (false, err) on uncaught.
+//   - Other blocks: dropped silently — no cleanup obligation on return.
+// Returns (false, nil) when the block stack is exhausted; the caller pops
+// the frame and returns `result`.
+func (vm *VM) unwindForReturn(frame *Frame, result Value) (bool, error) {
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		switch block.Type {
+		case BlockFinally:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			fin := frame.finally()
+			fin.pendingReturn = result
+			fin.hasPendingReturn = true
+			fin.hasPendingJump = false // a return abandons any pending break/continue
+			fin.pendingDepth = len(frame.BlockStack)
+			vm.push(None)
+			return true, nil
+		case BlockWith:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			caught, err := vm.cleanupWithBlock(frame, block)
+			if err != nil {
+				return false, err
+			}
+			if caught {
+				return true, nil
+			}
+		default:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+		}
+	}
+	return false, nil
+}
+
+// unwindForJump is the break/continue analogue of unwindForReturn: walks the
+// frame's block stack running cleanup, and either transfers control to the
+// nearest finally body (with the jump target stashed for OpEndFinally to
+// resume) or sets frame.IP directly when no finally remains.
+func (vm *VM) unwindForJump(frame *Frame, target int) (bool, error) {
+	for len(frame.BlockStack) > 0 {
+		block := frame.BlockStack[len(frame.BlockStack)-1]
+		switch block.Type {
+		case BlockFinally:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			frame.SP = block.Level
+			frame.IP = block.Handler
+			fin := frame.finally()
+			fin.pendingJump = target
+			fin.hasPendingJump = true
+			fin.hasPendingReturn = false // break/continue abandons any pending return
+			fin.pendingDepth = len(frame.BlockStack)
+			return true, nil
+		case BlockWith:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+			caught, err := vm.cleanupWithBlock(frame, block)
+			if err != nil {
+				return false, err
+			}
+			if caught {
+				return true, nil
+			}
+		default:
+			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
+		}
+	}
+	frame.IP = target
+	return false, nil
+}
+
+// callExitNoExc invokes cm.__exit__(None, None, None) for normal-flow cleanup.
+func (vm *VM) callExitNoExc(cm Value) error {
+	exitMethod, err := vm.getAttr(cm, "__exit__")
+	if err != nil {
+		return fmt.Errorf("AttributeError: __exit__: %w", err)
+	}
+	args := []Value{None, None, None}
+	switch fn := exitMethod.(type) {
+	case *PyMethod:
+		_, err = vm.callFunction(fn.Func, append([]Value{fn.Instance}, args...), nil)
+	case *PyFunction:
+		_, err = vm.callFunction(fn, append([]Value{cm}, args...), nil)
+	case *PyBuiltinFunc:
+		if fn.Bound {
+			_, err = fn.Fn(args, nil)
+		} else {
+			_, err = fn.Fn(append([]Value{cm}, args...), nil)
+		}
+	case *PyGoFunc:
+		_, err = vm.callGoFunction(fn, args, nil)
+	default:
+		return fmt.Errorf("TypeError: __exit__ is not callable")
+	}
+	return err
 }
 
 // Stack operations - using stack pointer with pre-allocated slice
@@ -342,7 +536,9 @@ func (vm *VM) pop() Value {
 		panic("stack underflow: cannot pop from empty stack")
 	}
 	vm.frame.SP--
-	return vm.frame.Stack[vm.frame.SP]
+	v := vm.frame.Stack[vm.frame.SP]
+	vm.frame.Stack[vm.frame.SP] = nil // release popped ref for GC (matters for suspended generator frames)
+	return v
 }
 
 func (vm *VM) top() Value {

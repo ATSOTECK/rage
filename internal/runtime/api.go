@@ -218,6 +218,45 @@ func (vm *VM) OptionalBool(pos int, def bool) bool {
 	return def
 }
 
+// Kwargs returns all keyword arguments passed to the running Go function.
+func (vm *VM) Kwargs() map[string]Value {
+	if vm.frame == nil {
+		return nil
+	}
+	return vm.frame.Kwargs
+}
+
+// Kwarg returns the keyword argument with the given name and reports whether it
+// was supplied. Stack-based Go builtins (PyGoFunc) use this to read keyword args.
+func (vm *VM) Kwarg(name string) (Value, bool) {
+	if vm.frame == nil || vm.frame.Kwargs == nil {
+		return nil, false
+	}
+	v, ok := vm.frame.Kwargs[name]
+	return v, ok
+}
+
+// OptionalArg returns the argument at 1-based positional index pos if present,
+// otherwise the keyword argument named name. The bool reports whether the
+// argument was supplied by either means. Use for positional-or-keyword params.
+func (vm *VM) OptionalArg(pos int, name string) (Value, bool) {
+	if pos > 0 && vm.GetTop() >= pos {
+		return vm.Get(pos), true
+	}
+	return vm.Kwarg(name)
+}
+
+// OptionalIntArg returns the int value of the positional-or-keyword argument,
+// or def if it was not supplied or was None.
+func (vm *VM) OptionalIntArg(pos int, name string, def int64) int64 {
+	if v, ok := vm.OptionalArg(pos, name); ok {
+		if _, isNone := v.(*PyNone); !isNone {
+			return vm.toInt(v)
+		}
+	}
+	return def
+}
+
 // =====================================
 // Type Checking Methods
 // =====================================
@@ -724,7 +763,7 @@ func IsTrue(v Value) bool {
 	case *PyBool:
 		return val.Value
 	case *PyInt:
-		return val.Value != 0
+		return val.Value != 0 || val.BigValue != nil
 	case *PyFloat:
 		return val.Value != 0.0
 	case *PyString:
@@ -736,7 +775,7 @@ func IsTrue(v Value) bool {
 	case *PyDict:
 		return len(val.Items) > 0 || val.DictLen() > 0
 	case *PySet:
-		return len(val.Items) > 0
+		return val.Len() > 0
 	default:
 		return v != nil
 	}
@@ -745,6 +784,28 @@ func IsTrue(v Value) bool {
 // Truthy returns whether a Python value is truthy (exported wrapper)
 func (vm *VM) Truthy(v Value) bool {
 	return vm.truthy(v)
+}
+
+// StrValue returns str(v), propagating exceptions raised by __str__/__repr__
+// (exported wrapper)
+func (vm *VM) StrValue(v Value) (string, error) {
+	return vm.strValue(v)
+}
+
+// ReprValue returns repr(v), propagating exceptions raised by __repr__
+// (exported wrapper)
+func (vm *VM) ReprValue(v Value) (string, error) {
+	return vm.reprValue(v)
+}
+
+// FormatValue returns format(v, spec) (exported wrapper)
+func (vm *VM) FormatValue(v Value, spec string) (string, error) {
+	return vm.formatValue(v, spec)
+}
+
+// FloatRepr returns repr() of a float: the shortest round-tripping text.
+func FloatRepr(f float64) string {
+	return floatRepr(f)
 }
 
 // Equal tests equality of two Python values (exported wrapper)
@@ -848,6 +909,17 @@ func (vm *VM) TypeNameOf(v Value) string {
 	return vm.typeName(v)
 }
 
+// BinaryOp applies a binary operator (e.g. OpBinaryMultiply) to two values
+// with full Python semantics, for use by stdlib packages.
+func (vm *VM) BinaryOp(op Opcode, a, b Value) (Value, error) {
+	return vm.binaryOp(op, a, b)
+}
+
+// IndexInt converts a value to an arbitrary-precision int via __index__.
+func (vm *VM) IndexInt(v Value) (*PyInt, error) {
+	return vm.indexInt(v)
+}
+
 // GetIntIndex exports getIntIndex for use by stdlib packages.
 func (vm *VM) GetIntIndex(v Value) (int64, error) {
 	return vm.getIntIndex(v)
@@ -878,7 +950,7 @@ func (vm *VM) RaiseError(format string, args ...any) {
 		"BytesWarning", "ResourceWarning", "EncodingWarning",
 		"PendingDeprecationWarning", "StopAsyncIteration",
 	} {
-		if len(msg) > len(prefix)+2 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
+		if len(msg) >= len(prefix)+1 && msg[:len(prefix)] == prefix && msg[len(prefix)] == ':' {
 			excType = prefix
 			msg = msg[len(prefix)+1:]
 			// Trim leading space

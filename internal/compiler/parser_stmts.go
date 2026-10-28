@@ -7,6 +7,9 @@ import (
 // Statement parsing
 
 func (p *Parser) parseStatement() model.Stmt {
+	if p.atMatchStatement() {
+		return p.parseMatchStmt()
+	}
 	switch p.current().Kind {
 	case model.TK_If:
 		return p.parseIfStmt()
@@ -46,8 +49,6 @@ func (p *Parser) parseStatement() model.Stmt {
 		return p.parseGlobalStmt()
 	case model.TK_Nonlocal:
 		return p.parseNonlocalStmt()
-	case model.TK_Match:
-		return p.parseMatchStmt()
 	case model.TK_At:
 		return p.parseDecorated()
 	default:
@@ -178,18 +179,18 @@ func (p *Parser) parseIfStmt() model.Stmt {
 
 	test := p.parseExpression()
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
+	body := p.parseSuite()
 
-	body := p.parseBlock()
-
+	// Each elif becomes an If nested in the previous branch's OrElse, so
+	// `if a / elif b / elif c / else` is If(a, OrElse: If(b, OrElse: If(c, OrElse: else))).
 	var orElse []model.Stmt
+	var lastElif *model.If
 	for p.check(model.TK_Elif) {
 		elifPos := p.current().Pos
 		p.advance()
 		elifTest := p.parseExpression()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		elifBody := p.parseBlock()
+		elifBody := p.parseSuite()
 
 		// Wrap elif as nested If
 		var elifEndPos model.Position
@@ -198,24 +199,28 @@ func (p *Parser) parseIfStmt() model.Stmt {
 		} else {
 			elifEndPos = elifPos
 		}
-		orElse = []model.Stmt{&model.If{
+		elif := &model.If{
 			Test:     elifTest,
 			Body:     elifBody,
 			StartPos: elifPos,
 			EndPos:   elifEndPos,
-		}}
+		}
+		if lastElif == nil {
+			orElse = []model.Stmt{elif}
+		} else {
+			lastElif.OrElse = []model.Stmt{elif}
+		}
+		lastElif = elif
 	}
 
 	if p.check(model.TK_Else) {
 		p.advance()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		if len(orElse) > 0 {
+		if lastElif != nil {
 			// Attach else to the last elif
-			lastElif := orElse[0].(*model.If)
-			lastElif.OrElse = p.parseBlock()
+			lastElif.OrElse = p.parseSuite()
 		} else {
-			orElse = p.parseBlock()
+			orElse = p.parseSuite()
 		}
 	}
 
@@ -243,16 +248,13 @@ func (p *Parser) parseWhileStmt() model.Stmt {
 
 	test := p.parseExpression()
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var orElse []model.Stmt
 	if p.check(model.TK_Else) {
 		p.advance()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		orElse = p.parseBlock()
+		orElse = p.parseSuite()
 	}
 
 	var endPos model.Position
@@ -281,16 +283,13 @@ func (p *Parser) parseForStmt() model.Stmt {
 	p.expect(model.TK_In)
 	iter := p.parseExpression()
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var orElse []model.Stmt
 	if p.check(model.TK_Else) {
 		p.advance()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		orElse = p.parseBlock()
+		orElse = p.parseSuite()
 	}
 
 	var endPos model.Position
@@ -357,9 +356,7 @@ func (p *Parser) parseFunctionDef(isAsync bool) model.Stmt {
 	}
 
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var endPos model.Position
 	if len(body) > 0 {
@@ -517,9 +514,7 @@ func (p *Parser) parseClassDef() model.Stmt {
 	}
 
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var endPos model.Position
 	if len(body) > 0 {
@@ -740,9 +735,7 @@ func (p *Parser) parseTryStmt() model.Stmt {
 	startPos := p.current().Pos
 	p.expect(model.TK_Try)
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var handlers []*model.ExceptHandler
 	for p.check(model.TK_Except) {
@@ -769,16 +762,14 @@ func (p *Parser) parseTryStmt() model.Stmt {
 	if p.check(model.TK_Else) {
 		p.advance()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		orElse = p.parseBlock()
+		orElse = p.parseSuite()
 	}
 
 	var finalBody []model.Stmt
 	if p.check(model.TK_Finally) {
 		p.advance()
 		p.expect(model.TK_Colon)
-		p.expect(model.TK_Newline)
-		finalBody = p.parseBlock()
+		finalBody = p.parseSuite()
 	}
 
 	var endPos model.Position
@@ -829,9 +820,7 @@ func (p *Parser) parseExceptHandler() *model.ExceptHandler {
 	}
 
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var endPos model.Position
 	if len(body) > 0 {
@@ -872,9 +861,7 @@ func (p *Parser) parseWithStmt() model.Stmt {
 	}
 
 	p.expect(model.TK_Colon)
-	p.expect(model.TK_Newline)
-
-	body := p.parseBlock()
+	body := p.parseSuite()
 
 	var endPos model.Position
 	if len(body) > 0 {

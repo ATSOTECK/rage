@@ -293,4 +293,62 @@ test("generator_negate_normal", test_generator_negate_normal)
 test("generator_negate_unbound", test_generator_negate_unbound)
 test("generator_close_runs_finally", test_generator_close_runs_finally)
 
+
+# === Generator OpLoadDeref must raise UnboundLocalError on unbound cell ===
+# Regression: the generator-path used to silently push None for an unbound
+# cell, masking closure-rebinding bugs that the main dispatch correctly
+# raises UnboundLocalError for.
+def test_generator_unbound_cell_raises():
+    def make():
+        def g():
+            yield x  # 'x' is captured (assigned below) but not yet bound at yield time
+            x = 1
+        return g
+
+    g = make()()
+    raised = False
+    try:
+        next(g)
+    except UnboundLocalError:
+        raised = True
+    except NameError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+# === Generator specialized int opcodes fall back instead of Go-panicking ===
+# Regression: OpBinaryAddInt etc. did unchecked .(*PyInt) casts that would
+# Go-panic on a non-int operand. They now fall back to the generic op,
+# raising a Python-level error instead.
+def test_generator_specialized_int_op_fallback():
+    def g():
+        # 5 + "x" used to Go-panic in the specialized add path; now it
+        # surfaces as a regular Python error.
+        yield 5 + "x"
+
+    raised = False
+    try:
+        list(g())
+    except BaseException:
+        raised = True
+    expect(raised).to_be(True)
+
+
+def test_generator_specialized_int_compare_fallback():
+    def g():
+        # int < float — used to Go-panic in the specialized compare path
+        # when the peephole optimizer emitted OpCompareLtInt for a value
+        # that turned out not to be int at runtime. With the fix, this
+        # just falls back to the generic compare and succeeds.
+        yield 1 < 2.5
+        yield 3 < 1.0
+
+    got = list(g())
+    expect(got).to_be([True, False])
+
+
+test("generator_unbound_cell_raises", test_generator_unbound_cell_raises)
+test("generator_specialized_int_op_fallback", test_generator_specialized_int_op_fallback)
+test("generator_specialized_int_compare_fallback", test_generator_specialized_int_compare_fallback)
+
 print("CPython generator tests completed")

@@ -199,4 +199,76 @@ test("with_in_loop", test_with_in_loop)
 test("counter_cm", test_counter_cm)
 test("exit_receives_exception", test_exit_receives_exception)
 
+
+# === return inside `with` must run __exit__ ===
+# Regression: OpReturn unwound the frame without walking the block stack,
+# so __exit__ was skipped when the return target was inside a `with`.
+def test_return_inside_with_runs_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("exit")
+            return False
+
+    def f():
+        with CM():
+            return 42
+
+    expect(f()).to_be(42)
+    expect(log).to_be(["exit"])
+
+
+def test_return_inside_nested_with_runs_all_exits():
+    log = []
+
+    class CM:
+        def __init__(self, name):
+            self.name = name
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("exit " + self.name)
+            return False
+
+    def f():
+        with CM("outer"):
+            with CM("inner"):
+                return "done"
+
+    expect(f()).to_be("done")
+    # Innermost first (LIFO)
+    expect(log).to_be(["exit inner", "exit outer"])
+
+
+def test_return_inside_with_in_generator_runs_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("exit")
+            return False
+
+    def gen():
+        with CM():
+            yield 1
+            return
+
+    g = gen()
+    expect(next(g)).to_be(1)
+    try:
+        next(g)
+    except StopIteration:
+        pass
+    expect(log).to_be(["exit"])
+
+
+test("return_inside_with_runs_exit", test_return_inside_with_runs_exit)
+test("return_inside_nested_with_runs_all_exits", test_return_inside_nested_with_runs_all_exits)
+test("return_inside_with_in_generator_runs_exit", test_return_inside_with_in_generator_runs_exit)
+
 print("CPython context manager tests completed")

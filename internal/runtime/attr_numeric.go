@@ -68,99 +68,68 @@ func (vm *VM) getAttrInt(v *PyInt, name string) (Value, error) {
 
 	case "to_bytes":
 		return &PyBuiltinFunc{Name: "int.to_bytes", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			// to_bytes(length, byteorder, *, signed=False)
-			length := 0
-			byteorder := ""
-			signed := false
+			// to_bytes(length=1, byteorder='big', *, signed=False)
+			length := 1
+			byteorder := "big"
 
 			if len(args) >= 1 {
 				length = int(vm.toInt(args[0]))
 			} else if kv, ok := kwargs["length"]; ok {
 				length = int(vm.toInt(kv))
-			} else {
-				return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'length'")
+			}
+			if length < 0 {
+				return nil, fmt.Errorf("ValueError: length argument must be non-negative")
 			}
 
+			bo := Value(nil)
 			if len(args) >= 2 {
-				if s, ok := args[1].(*PyString); ok {
-					byteorder = s.Value
-				} else {
-					return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
-				}
+				bo = args[1]
 			} else if kv, ok := kwargs["byteorder"]; ok {
-				if s, ok := kv.(*PyString); ok {
-					byteorder = s.Value
-				} else {
-					return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str")
-				}
-			} else {
-				return nil, fmt.Errorf("TypeError: to_bytes() missing required argument: 'byteorder'")
+				bo = kv
 			}
-
+			if bo != nil {
+				s, ok := bo.(*PyString)
+				if !ok {
+					return nil, fmt.Errorf("TypeError: to_bytes() argument 'byteorder' must be str, not %s", vm.typeName(bo))
+				}
+				byteorder = s.Value
+			}
 			if byteorder != "big" && byteorder != "little" {
 				return nil, fmt.Errorf("ValueError: byteorder must be either 'little' or 'big'")
 			}
 
+			signed := false
 			if kv, ok := kwargs["signed"]; ok {
 				signed = vm.Truthy(kv)
 			}
 
-			val := v.Value
-			if v.BigValue != nil {
-				if v.BigValue.IsInt64() {
-					val = v.BigValue.Int64()
-				} else {
-					return nil, fmt.Errorf("OverflowError: int too big to convert")
-				}
-			}
-
-			if val < 0 && !signed {
+			x := v.BigIntValue()
+			if x.Sign() < 0 && !signed {
 				return nil, fmt.Errorf("OverflowError: can't convert negative int to unsigned")
 			}
-
-			var uval uint64
-			if val < 0 {
-				// Two's complement for negative values
-				uval = uint64(val)
-			} else {
-				uval = uint64(val)
+			tooBig := fmt.Errorf("OverflowError: int too big to convert")
+			mag := x
+			if x.Sign() < 0 {
+				// Two's complement within length bytes
+				mag = new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), uint(8*length)), x)
+				if mag.Sign() < 0 {
+					return nil, tooBig
+				}
 			}
-
+			raw := mag.Bytes()
+			if len(raw) > length {
+				return nil, tooBig
+			}
 			result := make([]byte, length)
-
-			if signed && val < 0 {
-				// Fill with 0xff for negative numbers (sign extension)
-				for i := range result {
-					result[i] = 0xff
-				}
-			}
-
-			// Write bytes in big-endian order first
-			for i := length - 1; i >= 0; i-- {
-				result[i] = byte(uval & 0xff)
-				uval >>= 8
-			}
-
-			// Check for overflow: if uval still has bits, the number doesn't fit
-			if val >= 0 && uval != 0 {
-				return nil, fmt.Errorf("OverflowError: int too big to convert")
-			}
-			if signed && val < 0 {
-				// For negative signed, check that sign bit is set in the MSB
-				if length > 0 && result[0]&0x80 == 0 {
-					return nil, fmt.Errorf("OverflowError: int too big to convert")
-				}
-			} else if !signed && val >= 0 {
-				// Already checked uval == 0 above
-			} else if signed && val >= 0 {
-				// Check sign bit isn't set (would look negative)
-				if length > 0 && result[0]&0x80 != 0 {
-					return nil, fmt.Errorf("OverflowError: int too big to convert")
+			copy(result[length-len(raw):], raw)
+			if signed && x.Sign() != 0 {
+				// The sign bit must agree with the value's sign
+				if length == 0 || (result[0]&0x80 != 0) != (x.Sign() < 0) {
+					return nil, tooBig
 				}
 			}
 
 			if byteorder == "little" {
-				// Reverse the bytes
 				for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
 					result[i], result[j] = result[j], result[i]
 				}

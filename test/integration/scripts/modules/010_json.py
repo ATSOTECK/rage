@@ -23,14 +23,14 @@ def test_dumps_escapes():
 
 def test_dumps_collections():
     expect(json.dumps([])).to_be("[]")
-    # RAGE json module doesn't include spaces after commas
-    expect(json.dumps([1, 2, 3])).to_be("[1,2,3]")
-    expect(json.dumps([[1, 2], [3, 4]])).to_be("[[1,2],[3,4]]")
+    # Default item separator is ", " (matches CPython)
+    expect(json.dumps([1, 2, 3])).to_be("[1, 2, 3]")
+    expect(json.dumps([[1, 2], [3, 4]])).to_be("[[1, 2], [3, 4]]")
     expect(json.dumps({})).to_be("{}")
     # Dict roundtrip (order not guaranteed)
     expect(json.loads(json.dumps({"a": 1, "b": 2})) == {"a": 1, "b": 2}).to_be(True)
     expect(json.loads(json.dumps({"outer": {"inner": "value"}})) == {"outer": {"inner": "value"}}).to_be(True)
-    expect(json.dumps((1, 2, 3))).to_be("[1,2,3]")
+    expect(json.dumps((1, 2, 3))).to_be("[1, 2, 3]")
 
 def test_dumps_indent():
     indented = json.dumps({"x": 1, "y": 2}, 2)
@@ -40,6 +40,15 @@ def test_dumps_indent():
 def test_dumps_sort_keys():
     sorted_json = json.dumps({"z": 1, "a": 2, "m": 3}, None, None, True)
     expect(json.loads(sorted_json) == {"z": 1, "a": 2, "m": 3}).to_be(True)
+
+def test_dumps_keyword_args():
+    # indent, sort_keys, separators all work as keyword arguments
+    expect(json.dumps([1, 2], indent=2)).to_be("[\n  1,\n  2\n]")
+    expect(json.dumps({"b": 1, "a": 2}, sort_keys=True)).to_be('{"a": 2, "b": 1}')
+    expect(json.dumps([1, 2, 3], separators=(";", ":"))).to_be("[1;2;3]")
+    # Default item separator includes a space (matches CPython)
+    expect(json.dumps({"a": 1}, sort_keys=True)).to_be('{"a": 1}')
+    expect(json.dumps([1, 2, 3], sort_keys=True)).to_be("[1, 2, 3]")
 
 def test_loads_basic_types():
     expect(json.loads("null")).to_be(None)
@@ -206,6 +215,7 @@ test("dumps_escapes", test_dumps_escapes)
 test("dumps_collections", test_dumps_collections)
 test("dumps_indent", test_dumps_indent)
 test("dumps_sort_keys", test_dumps_sort_keys)
+test("dumps_keyword_args", test_dumps_keyword_args)
 test("loads_basic_types", test_loads_basic_types)
 test("loads_escapes", test_loads_escapes)
 test("loads_collections", test_loads_collections)

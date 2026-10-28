@@ -7,7 +7,41 @@ import (
 	"unicode/utf8"
 )
 
+// run executes the current frame until it returns. Opcode handlers may return
+// raw Go errors without consulting the exception machinery; run routes those
+// to this frame's try/except/finally/with handlers and resumes at the handler,
+// so every error raised by an opcode is catchable by Python code.
 func (vm *VM) run() (Value, error) {
+	frame := vm.frame
+	vm.runDepth++
+	defer func() { vm.runDepth-- }()
+	if vm.runDepth > vm.nestingLimit() {
+		// Raised in the new frame (which has no handlers yet), unwinding it.
+		_, err := vm.tryHandleError(errRecursionDepth, frame)
+		return nil, err
+	}
+	for {
+		result, err := vm.runDispatch()
+		if err == nil || err == errExceptionHandledInOuterFrame {
+			return result, err
+		}
+		// An error that already went through handleException has unwound this
+		// frame off vm.frames; only errors this frame still owns are routed here.
+		if vm.frame != frame || len(vm.frames) == 0 || vm.frames[len(vm.frames)-1] != frame {
+			return nil, err
+		}
+		handled, herr := vm.tryHandleError(err, frame)
+		if herr != nil {
+			return nil, herr
+		}
+		if !handled {
+			return nil, err
+		}
+	}
+}
+
+// runDispatch is the bytecode dispatch loop for the current frame.
+func (vm *VM) runDispatch() (Value, error) {
 	frame := vm.frame
 
 	for frame.IP < len(frame.Code.Code) {
@@ -91,7 +125,7 @@ func (vm *VM) run() (Value, error) {
 			if frame.SP >= len(frame.Stack) {
 				vm.ensureStack(1)
 			}
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[arg])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, arg)
 			frame.SP++
 
 		case OpLoadName:
@@ -114,8 +148,10 @@ func (vm *VM) run() (Value, error) {
 
 		case OpStoreName:
 			name := frame.Code.Names[arg]
-			if _, exists := frame.Globals[name]; !exists && frame.OrderedGlobalKeys != nil {
-				frame.OrderedGlobalKeys = append(frame.OrderedGlobalKeys, name)
+			if frame.OrderedGlobalKeys != nil {
+				if _, exists := frame.Globals[name]; !exists {
+					frame.OrderedGlobalKeys = append(frame.OrderedGlobalKeys, name)
+				}
 			}
 			frame.Globals[name] = vm.pop()
 
@@ -302,7 +338,7 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(v.Value + 1)
+				frame.Locals[arg] = AddInts(v, MakeInt(1))
 			} else {
 				// Fallback for non-int
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
@@ -323,7 +359,7 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(v.Value - 1)
+				frame.Locals[arg] = SubInts(v, MakeInt(1))
 			} else {
 				result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
 				if err != nil {
@@ -343,7 +379,7 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(-v.Value)
+				frame.Locals[arg] = NegateInt(v)
 			} else if v, ok := frame.Locals[arg].(*PyFloat); ok {
 				frame.Locals[arg] = &PyFloat{Value: -v.Value}
 			} else {
@@ -365,11 +401,11 @@ func (vm *VM) run() (Value, error) {
 			// arg contains packed indices: low byte = local index, high byte = const index
 			localIdx := arg & 0xFF
 			constIdx := (arg >> 8) & 0xFF
-			constVal := vm.toValue(frame.Code.Constants[constIdx])
+			constVal := vm.constValue(frame.Code, constIdx)
 			localVal := frame.Locals[localIdx]
-			if li, ok := localVal.(*PyInt); ok {
-				if ci, ok := constVal.(*PyInt); ok {
-					frame.Locals[localIdx] = MakeInt(li.Value + ci.Value)
+			if li, ok := localVal.(*PyInt); ok && li.BigValue == nil {
+				if ci, ok := constVal.(*PyInt); ok && ci.BigValue == nil {
+					frame.Locals[localIdx] = AddInts(li, ci)
 					break
 				}
 			}
@@ -396,15 +432,15 @@ func (vm *VM) run() (Value, error) {
 					frame.Locals[arg] = &PyFloat{Value: lf.Value + af.Value}
 					break
 				}
-				if ai, ok := addend.(*PyInt); ok {
+				if ai, ok := addend.(*PyInt); ok && ai.BigValue == nil {
 					frame.Locals[arg] = &PyFloat{Value: lf.Value + float64(ai.Value)}
 					break
 				}
 			}
 			// Fast path for int accumulation
-			if li, ok := localVal.(*PyInt); ok {
-				if ai, ok := addend.(*PyInt); ok {
-					frame.Locals[arg] = MakeInt(li.Value + ai.Value)
+			if li, ok := localVal.(*PyInt); ok && li.BigValue == nil {
+				if ai, ok := addend.(*PyInt); ok && ai.BigValue == nil {
+					frame.Locals[arg] = AddInts(li, ai)
 					break
 				}
 				if af, ok := addend.(*PyFloat); ok {
@@ -453,7 +489,7 @@ func (vm *VM) run() (Value, error) {
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = val
 			frame.SP++
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, constIdx)
 			frame.SP++
 
 		case OpStoreFastLoadFast:
@@ -475,9 +511,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = AddInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -500,9 +536,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = SubInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -524,9 +560,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = MulInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -550,8 +586,8 @@ func (vm *VM) run() (Value, error) {
 			frame.SP--
 			a := frame.Stack[frame.SP]
 			// Fast path for int/int division
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if bi.Value == 0 {
 						divErr := fmt.Errorf("ZeroDivisionError: division by zero")
 						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
@@ -579,7 +615,7 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			if af, ok := a.(*PyFloat); ok {
-				if bi, ok := b.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if bi.Value == 0 {
 						divErr := fmt.Errorf("ZeroDivisionError: float division by zero")
 						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
@@ -630,13 +666,13 @@ func (vm *VM) run() (Value, error) {
 					frame.SP++
 					break
 				}
-				if bi, ok := b.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					frame.Stack[frame.SP] = &PyFloat{Value: af.Value + float64(bi.Value)}
 					frame.SP++
 					break
 				}
 			}
-			if ai, ok := a.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
 				if bf, ok := b.(*PyFloat); ok {
 					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) + bf.Value}
 					frame.SP++
@@ -661,8 +697,8 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					var cmp bool
 					switch op {
 					case OpCompareLtInt:
@@ -703,16 +739,11 @@ func (vm *VM) run() (Value, error) {
 			case OpCompareNeInt:
 				baseOp = OpCompareNe
 			}
-			frame.Stack[frame.SP] = vm.compareOp(baseOp, a, b)
-			if handled, result, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if result != nil {
-					return result, nil
-				}
-				break
+			cmpResult, cmpErr := vm.compareChecked(baseOp, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
+			frame.Stack[frame.SP] = cmpResult
 			frame.SP++
 
 		// ==========================================
@@ -740,8 +771,8 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					var cmp bool
 					switch op {
 					case OpCompareLtJump:
@@ -761,15 +792,9 @@ func (vm *VM) run() (Value, error) {
 			}
 			// Fallback: map jump opcode to base compare opcode
 			baseOp := OpCompareLt + Opcode(op-OpCompareLtJump)
-			cmpResult := vm.compareOp(baseOp, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			cmpResult, cmpErr := vm.compareChecked(baseOp, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			if !vm.truthy(cmpResult) {
 				frame.IP = arg
@@ -808,8 +833,8 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, local2)
 			}
 			// Fast path for ints
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if ai.Value < bi.Value {
 						vm.push(True)
 					} else {
@@ -819,15 +844,9 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			// Fallback to generic comparison
-			cmp := vm.compareOp(OpCompareLt, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			cmp, cmpErr := vm.compareChecked(OpCompareLt, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			vm.push(cmp)
 
@@ -913,9 +932,9 @@ func (vm *VM) run() (Value, error) {
 			case *PyDict:
 				length = int64(len(v.Items))
 			case *PySet:
-				length = int64(len(v.Items))
+				length = int64(v.Len())
 			case *PyFrozenSet:
-				length = int64(len(v.Items))
+				length = int64(v.Len())
 			case *PyBytes:
 				length = int64(len(v.Value))
 			case *PyInstance:
@@ -929,7 +948,7 @@ func (vm *VM) run() (Value, error) {
 						}
 						return nil, err
 					}
-					if i, ok := result.(*PyInt); ok {
+					if i, ok := result.(*PyInt); ok && i.BigValue == nil {
 						length = i.Value
 					} else {
 						lenErr := fmt.Errorf("__len__() should return an integer")
@@ -950,7 +969,11 @@ func (vm *VM) run() (Value, error) {
 					return nil, lenErr
 				}
 			default:
-				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				n, lenErr := vm.lenOf(obj)
+				if lenErr == nil {
+					length = n
+					break
+				}
 				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
 					return nil, handleErr
 				} else if handled {
@@ -974,7 +997,7 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, localIdx)
 			}
 			vm.ensureStack(2) // Ensure space for two pushes
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, constIdx)
 			frame.SP++
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -1153,15 +1176,9 @@ func (vm *VM) run() (Value, error) {
 
 		case OpUnaryNot:
 			a := vm.pop()
-			result := vm.truthy(a)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, truthErr := vm.truthyChecked(a)
+			if truthErr != nil {
+				return nil, truthErr
 			}
 			if result {
 				vm.push(False)
@@ -1187,9 +1204,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = AddInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1212,9 +1229,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = SubInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1236,9 +1253,9 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = MulInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1290,7 +1307,7 @@ func (vm *VM) run() (Value, error) {
 					continue
 				}
 				if op == OpInplaceMultiply {
-					if n, ok := b.(*PyInt); ok {
+					if n, ok := b.(*PyInt); ok && n.BigValue == nil {
 						count := int(n.Value)
 						if count <= 0 {
 							lst.Items = []Value{}
@@ -1378,9 +1395,8 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
-			// Fall back to regular binary op
-			binOp := op - OpInplaceAdd + OpBinaryAdd
-			result, err = vm.binaryOp(binOp, a, b)
+			// In-place update for built-in containers, else the regular binary op
+			result, err = vm.inplaceOp(op, a, b)
 			if err != nil {
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
@@ -1396,8 +1412,8 @@ func (vm *VM) run() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if ai.Value < bi.Value {
 						frame.Stack[frame.SP] = True
 					} else {
@@ -1407,15 +1423,9 @@ func (vm *VM) run() (Value, error) {
 					break
 				}
 			}
-			result := vm.compareOp(op, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, cmpErr := vm.compareChecked(op, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			frame.Stack[frame.SP] = result
 			frame.SP++
@@ -1425,15 +1435,9 @@ func (vm *VM) run() (Value, error) {
 			OpCompareIn, OpCompareNotIn:
 			b := vm.pop()
 			a := vm.pop()
-			result := vm.compareOp(op, a, b)
-			if handled, r, err := vm.checkCurrentException(); handled {
-				if err != nil {
-					return nil, err
-				}
-				if r != nil {
-					return r, nil
-				}
-				break
+			result, cmpErr := vm.compareChecked(op, a, b)
+			if cmpErr != nil {
+				return nil, cmpErr
 			}
 			vm.push(result)
 
@@ -1441,8 +1445,12 @@ func (vm *VM) run() (Value, error) {
 			frame.IP = arg
 
 		case OpContinueLoop:
-			// Continue loop - same as jump in regular VM, handled specially in generators
-			frame.IP = arg
+			// Used for break/continue when cleanup is needed (enclosing
+			// try/finally or with). Walks the block stack: __exit__ on any
+			// active `with`, route through `try/finally` via pendingJump.
+			if _, err := vm.unwindForJump(frame, arg); err != nil {
+				return nil, err
+			}
 
 		case OpJumpIfTrue:
 			if vm.truthy(vm.top()) {
@@ -1500,6 +1508,22 @@ func (vm *VM) run() (Value, error) {
 
 		case OpForIter:
 			iter := vm.top()
+			if r, ok := iter.(*rangeIterator); ok {
+				// Fast path for `for i in range(...)`
+				if r.remaining > 0 {
+					if frame.SP >= len(frame.Stack) {
+						vm.ensureStack(1)
+					}
+					frame.Stack[frame.SP] = MakeInt(r.next)
+					frame.SP++
+					r.remaining--
+					r.next += r.step
+				} else {
+					frame.SP-- // Pop iterator
+					frame.IP = arg
+				}
+				break
+			}
 			val, done, err := vm.iterNext(iter)
 			if err != nil {
 				vm.pop() // Pop iterator before handling error
@@ -1548,17 +1572,11 @@ func (vm *VM) run() (Value, error) {
 					continue
 				}
 			}
-			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-			var buildSetErr error
-			for i := 0; i < arg; i++ {
-				val := vm.pop()
-				if !isHashable(val) {
-					buildSetErr = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
-					break
-				}
-				// Use hash-based storage for O(1) lookup
-				s.SetAdd(val, vm)
+			setItems := make([]Value, arg)
+			for i := arg - 1; i >= 0; i-- {
+				setItems[i] = vm.pop()
 			}
+			s, buildSetErr := vm.buildSet(setItems)
 			if buildSetErr != nil {
 				if handled, handleErr := vm.tryHandleError(buildSetErr, frame); handleErr != nil {
 					return nil, handleErr
@@ -1616,7 +1634,7 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 			if len(items) != arg {
-				err = fmt.Errorf("ValueError: not enough values to unpack (expected %d, got %d)", arg, len(items))
+				err = unpackCountError(arg, len(items))
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
 				} else if handled {
@@ -1859,47 +1877,45 @@ func (vm *VM) run() (Value, error) {
 			vm.push(fn)
 
 		case OpCall:
-			args := make([]Value, arg)
-			for i := arg - 1; i >= 0; i-- {
-				args[i] = vm.pop()
+			if frame.SP < arg+1 {
+				panic("stack underflow: cannot pop from empty stack")
 			}
-			callable := vm.pop()
-			result, err := vm.call(callable, args, nil)
+			base := frame.SP - arg
+			callable := frame.Stack[base-1]
+			frame.SP = base - 1
+			var result Value
+			switch fn := callable.(type) {
+			case *PyFunction:
+				// Python functions copy their arguments into the new frame's
+				// locals before running, so pass a view of the operand stack
+				// instead of allocating an argument slice.
+				result, err = vm.callFunction(fn, frame.Stack[base:base+arg:base+arg], nil)
+			case *PyMethod:
+				// Same as above, reusing the callable's slot for self.
+				frame.Stack[base-1] = fn.Instance
+				result, err = vm.callFunction(fn.Func, frame.Stack[base-1:base+arg:base+arg], nil)
+			case *PyClass:
+				// The callable's slot becomes scratch space for cls/self.
+				result, err = vm.callClass(fn, frame.Stack[base-1:base+arg:base+arg], nil)
+			default:
+				args := make([]Value, arg)
+				copy(args, frame.Stack[base:base+arg])
+				result, err = vm.call(callable, args, nil)
+			}
 			if err != nil {
-				// Check if exception was already handled in an outer frame
-				if err == errExceptionHandledInOuterFrame {
-					// Check if the handler is in THIS frame
-					if vm.frame == frame {
-						// Handler is in this frame, continue from handler
-						continue
-					}
-					// Handler is in an even outer frame, propagate
-					return nil, err
+				// tryHandleError chains __context__ from the active except
+				// handler (so exceptions raised inside a called function
+				// get the enclosing handler's exception as __context__),
+				// dispatches to a handler, and signals frame transfer via
+				// errExceptionHandledInOuterFrame.
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				// Check if it's a Python exception that can be handled
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						// No handler found, propagate exception
-						return nil, handleErr
-					}
-					// Handler found - check if it's in this frame
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
-					// Handler is in current frame, continue
+				if handled {
 					continue
 				}
-				// Convert Go error to Python exception so try/except can catch it
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 
@@ -1915,6 +1931,7 @@ func (vm *VM) run() (Value, error) {
 				kwargs[name] = vm.pop()
 				totalArgs--
 			}
+			vm.RecordKwargNames(kwargs, kwNames)
 			args := make([]Value, totalArgs)
 			for i := totalArgs - 1; i >= 0; i-- {
 				args[i] = vm.pop()
@@ -1922,34 +1939,14 @@ func (vm *VM) run() (Value, error) {
 			callable := vm.pop()
 			result, err := vm.call(callable, args, kwargs)
 			if err != nil {
-				// Check if exception was already handled in an outer frame
-				if err == errExceptionHandledInOuterFrame {
-					if vm.frame == frame {
-						continue
-					}
-					return nil, err
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				// Check if it's a Python exception that can be handled
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						return nil, handleErr
-					}
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
+				if handled {
 					continue
 				}
-				// Convert Go error to Python exception so try/except can catch it
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 
@@ -1961,12 +1958,15 @@ func (vm *VM) run() (Value, error) {
 				kwargsVal := vm.pop()
 				if kwargsDict, ok := kwargsVal.(*PyDict); ok {
 					kwargs = make(map[string]Value)
+					var names []string
 					for _, key := range kwargsDict.Keys(vm) {
 						if ks, ok := key.(*PyString); ok {
 							val, _ := kwargsDict.DictGet(key, vm)
 							kwargs[ks.Value] = val
+							names = append(names, ks.Value)
 						}
 					}
+					vm.RecordKwargOrder(kwargs, names)
 				}
 			}
 			argsTuple := vm.pop()
@@ -2002,31 +2002,14 @@ func (vm *VM) run() (Value, error) {
 			}
 			result, err := vm.call(callable, args, kwargs)
 			if err != nil {
-				if err == errExceptionHandledInOuterFrame {
-					if vm.frame == frame {
-						continue
-					}
-					return nil, err
+				handled, herr := vm.tryHandleError(err, frame)
+				if herr != nil {
+					return nil, herr
 				}
-				if pyExc, ok := err.(*PyException); ok {
-					_, handleErr := vm.handleException(pyExc)
-					if handleErr != nil {
-						return nil, handleErr
-					}
-					if vm.frame != frame {
-						return nil, errExceptionHandledInOuterFrame
-					}
+				if handled {
 					continue
 				}
-				pyExc := vm.wrapGoError(err)
-				_, handleErr := vm.handleException(pyExc)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if vm.frame != frame {
-					return nil, errExceptionHandledInOuterFrame
-				}
-				continue
+				return nil, err
 			}
 			vm.push(result)
 
@@ -2034,6 +2017,17 @@ func (vm *VM) run() (Value, error) {
 			// Inline pop for return
 			frame.SP--
 			result := frame.Stack[frame.SP]
+			// Walk the block stack: __exit__ on any active `with`, defer into
+			// `try/finally` via the pending-return mechanism. If control was
+			// transferred (to a finally body or exception handler), continue
+			// dispatching; OpEndFinally will resume the return.
+			transferred, err := vm.unwindForReturn(frame, result)
+			if err != nil {
+				return nil, err
+			}
+			if transferred {
+				continue
+			}
 			if len(vm.frames) > 0 {
 				// Nil out the frame reference before truncating to allow GC to collect it.
 				// Without this, the underlying slice array retains a pointer to the popped
@@ -2112,283 +2106,54 @@ func (vm *VM) run() (Value, error) {
 			vm.push(anext)
 
 		// Pattern matching opcodes
+		case OpListExtend:
+			if err := vm.opListExtend(arg); err != nil {
+				return nil, err
+			}
+
+		case OpSetUpdate:
+			if err := vm.opSetUpdate(arg); err != nil {
+				return nil, err
+			}
+
+		case OpDictUpdate:
+			if err := vm.opDictUpdate(arg); err != nil {
+				return nil, err
+			}
+
+		case OpDictMerge:
+			if err := vm.opDictMerge(arg); err != nil {
+				return nil, err
+			}
+
+		case OpListToTuple:
+			vm.opListToTuple()
+
 		case OpMatchSequence:
-			// Check if TOS is a sequence with the expected length
-			// arg = expected length (-1 means any length is ok)
-			// Does NOT pop subject - leaves it for element access
-			subject := vm.top()
-			expectedLen := arg
-
-			// Check if it's a matchable sequence (list or tuple, not string/bytes)
-			var length int
-			isSequence := false
-			switch s := subject.(type) {
-			case *PyList:
-				length = len(s.Items)
-				isSequence = true
-			case *PyTuple:
-				length = len(s.Items)
-				isSequence = true
-			}
-
-			// expectedLen of 65535 (0xFFFF) means any length is acceptable (star pattern)
-			anyLength := expectedLen == 65535 || expectedLen == -1
-
-			if !isSequence {
-				vm.push(False)
-			} else if !anyLength && length != expectedLen {
-				vm.push(False)
-			} else {
-				vm.push(True)
-			}
+			vm.opMatchSequence(arg)
 
 		case OpMatchStar:
-			// Check minimum length for star pattern
-			// arg = minLength (beforeStar + afterStar)
-			// Does NOT pop subject
-			subject := vm.top()
-			minLen := arg
-
-			var length int
-			switch s := subject.(type) {
-			case *PyList:
-				length = len(s.Items)
-			case *PyTuple:
-				length = len(s.Items)
-			default:
-				vm.push(False)
-				continue
-			}
-
-			if length < minLen {
-				vm.push(False)
-			} else {
-				vm.push(True)
-			}
+			vm.opMatchStar(arg)
 
 		case OpExtractStar:
-			// Extract star slice from sequence
-			// arg = beforeStar << 8 | afterStar
-			beforeStar := arg >> 8
-			afterStar := arg & 0xFF
-			subject := vm.top()
-
-			var items []Value
-			switch s := subject.(type) {
-			case *PyList:
-				items = s.Items
-			case *PyTuple:
-				items = s.Items
-			default:
-				vm.push(&PyList{Items: nil})
-				continue
-			}
-
-			// Extract slice: items[beforeStar : len(items) - afterStar]
-			start := beforeStar
-			end := len(items) - afterStar
-			if end < start {
-				end = start
-			}
-			slice := make([]Value, end-start)
-			copy(slice, items[start:end])
-			vm.push(&PyList{Items: slice})
+			vm.opExtractStar(arg)
 
 		case OpMatchMapping:
-			// Check if TOS is a mapping (dict)
-			subject := vm.top()
-			if _, ok := subject.(*PyDict); ok {
-				vm.push(True)
-			} else {
-				vm.pop()
-				vm.push(False)
-			}
+			vm.opMatchMapping()
 
 		case OpMatchKeys:
-			// Check if mapping has all required keys
-			// Stack: subject, key1, key2, ..., keyN, N
-			// (True from MATCH_MAPPING was already consumed by POP_JUMP_IF_FALSE)
-			keyCount := int(vm.pop().(*PyInt).Value)
-			keys := make([]Value, keyCount)
-			for i := keyCount - 1; i >= 0; i-- {
-				keys[i] = vm.pop()
-			}
-
-			subject := vm.top()
-			dict, ok := subject.(*PyDict)
-			if !ok {
-				vm.pop()
-				vm.push(False)
-				continue
-			}
-
-			// Check all keys exist and collect values
-			values := make([]Value, keyCount)
-			allPresent := true
-			for i, key := range keys {
-				found := false
-				for k, v := range dict.Items {
-					if vm.equal(k, key) {
-						values[i] = v
-						found = true
-						break
-					}
-				}
-				if !found {
-					allPresent = false
-					break
-				}
-			}
-
-			if !allPresent {
-				vm.pop() // remove subject
-				vm.push(False)
-			} else {
-				// Push values in reverse order (so values[0] is on top after True is popped)
-				// Stack after: [subject, valueN, ..., value2, value1, True]
-				// After PopJumpIfFalse: [subject, valueN, ..., value2, value1]
-				// Now value1 is on TOS for the first pattern
-				for i := len(values) - 1; i >= 0; i-- {
-					vm.push(values[i])
-				}
-				vm.push(True)
-			}
+			vm.opMatchKeys()
 
 		case OpCopyDict:
-			// Copy dict, optionally removing specified keys
-			// Stack: subject, key1, ..., keyN, N
-			// (True was already consumed by POP_JUMP_IF_FALSE)
-			keyCount := int(vm.pop().(*PyInt).Value)
-			keysToRemove := make([]Value, keyCount)
-			for i := keyCount - 1; i >= 0; i-- {
-				keysToRemove[i] = vm.pop()
-			}
-
-			subject := vm.top()
-			dict := subject.(*PyDict)
-
-			// Create a copy without the specified keys
-			newDict := &PyDict{Items: make(map[Value]Value)}
-			for k, v := range dict.Items {
-				shouldRemove := false
-				for _, removeKey := range keysToRemove {
-					if vm.equal(k, removeKey) {
-						shouldRemove = true
-						break
-					}
-				}
-				if !shouldRemove {
-					newDict.Items[k] = v
-				}
-			}
-			vm.push(newDict)
+			vm.opCopyDict()
 
 		case OpMatchClass:
-			// Match class pattern
-			// Stack: subject, class
-			// arg = number of positional patterns
-			cls := vm.pop()
-			subject := vm.top()
-			positionalCount := arg
-
-			// Check isinstance
-			isInstance := false
-			var matchedClass *PyClass
-			switch c := cls.(type) {
-			case *PyClass:
-				matchedClass = c
-				if inst, ok := subject.(*PyInstance); ok {
-					// Check if instance's class matches or is subclass
-					isInstance = vm.isInstanceOf(inst, c)
-				}
-			}
-
-			if !isInstance {
-				vm.pop() // remove subject
-				vm.push(False)
-				continue
-			}
-
-			// Get __match_args__ for positional pattern mapping
-			var matchArgs []string
-			if matchedClass != nil && positionalCount > 0 {
-				if maVal, ok := matchedClass.Dict["__match_args__"]; ok {
-					if maTuple, ok := maVal.(*PyTuple); ok {
-						for _, item := range maTuple.Items {
-							if s, ok := item.(*PyString); ok {
-								matchArgs = append(matchArgs, s.Value)
-							}
-						}
-					} else if maList, ok := maVal.(*PyList); ok {
-						for _, item := range maList.Items {
-							if s, ok := item.(*PyString); ok {
-								matchArgs = append(matchArgs, s.Value)
-							}
-						}
-					}
-				}
-			}
-
-			// Extract attributes based on positional patterns
-			if positionalCount > len(matchArgs) && matchedClass != nil {
-				vm.pop()
-				vm.push(False)
-				continue
-			}
-
-			// Get attribute values
-			attrs := make([]Value, positionalCount)
-			allFound := true
-			inst, isInst := subject.(*PyInstance)
-			for i := 0; i < positionalCount; i++ {
-				if i < len(matchArgs) {
-					attrName := matchArgs[i]
-					if isInst {
-						if val, ok := inst.Dict[attrName]; ok {
-							attrs[i] = val
-						} else {
-							allFound = false
-							break
-						}
-					} else {
-						allFound = false
-						break
-					}
-				} else {
-					allFound = false
-					break
-				}
-			}
-
-			if !allFound {
-				vm.pop()
-				vm.push(False)
-			} else {
-				// Push attrs in reverse order first
-				for i := len(attrs) - 1; i >= 0; i-- {
-					vm.push(attrs[i])
-				}
-				// Push True last so it's on top for POP_JUMP_IF_FALSE
-				vm.push(True)
-			}
+			vm.opMatchClass(arg)
 
 		case OpGetLen:
-			// Get length of TOS without consuming it (for pattern matching length checks)
-			subject := vm.top()
-			var length int64
-			switch s := subject.(type) {
-			case *PyList:
-				length = int64(len(s.Items))
-			case *PyTuple:
-				length = int64(len(s.Items))
-			case *PyString:
-				length = int64(utf8.RuneCountInString(s.Value))
-			case *PyDict:
-				length = int64(len(s.Items))
-			default:
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(subject))
+			if err := vm.opGetLen(); err != nil {
+				return nil, err
 			}
-			vm.push(MakeInt(length))
 
 		case OpLoadBuildClass:
 			vm.push(vm.builtins["__build_class__"])
@@ -2442,13 +2207,7 @@ func (vm *VM) run() (Value, error) {
 			vm.push(result)
 
 		case OpLoadLocals:
-			locals := &PyDict{Items: make(map[Value]Value)}
-			for i, name := range frame.Code.VarNames {
-				if frame.Locals[i] != nil {
-					locals.Items[&PyString{Value: name}] = frame.Locals[i]
-				}
-			}
-			vm.push(locals)
+			vm.push(vm.localsDict(frame.Code.VarNames, frame.Locals))
 
 		case OpSetupExcept:
 			// Push exception handler block onto block stack
@@ -2461,7 +2220,12 @@ func (vm *VM) run() (Value, error) {
 			frame.BlockStack = append(frame.BlockStack, block)
 
 		case OpSetupFinally:
-			// Push finally handler block onto block stack
+			// Push finally handler block onto block stack.
+			// Record excHandlerStack level so OpEndFinally can restore it,
+			// regardless of whether finally was entered via normal flow or
+			// exception flow (which pushes onto excHandlerStack).
+			fin := frame.finally()
+			fin.excLevels = append(fin.excLevels, len(vm.excHandlerStack))
 			block := Block{
 				Type:    BlockFinally,
 				Handler: arg,
@@ -2618,7 +2382,7 @@ func (vm *VM) run() (Value, error) {
 			case *PyGoFunc:
 				// Bound Go function (e.g., from UserData metatable)
 				// Already bound — pass exc args only
-				result, err = vm.callGoFunction(fn, []Value{excType, excVal, excTb})
+				result, err = vm.callGoFunction(fn, []Value{excType, excVal, excTb}, nil)
 			default:
 				return nil, fmt.Errorf("TypeError: __exit__ is not callable")
 			}
@@ -2632,14 +2396,52 @@ func (vm *VM) run() (Value, error) {
 			}
 
 		case OpEndFinally:
-			// End finally block - re-raise exception if one was active
-			// Pop the handler stack entry that was pushed when entering finally
-			if n := len(vm.excHandlerStack); n > 0 {
-				vm.excHandlerStack[n-1] = nil // Clear reference for GC
-				vm.excHandlerStack = vm.excHandlerStack[:n-1]
+			// End finally block — restore excHandlerStack to the level recorded
+			// at OpSetupFinally. Symmetric across normal and exception flow: in
+			// exception flow handleException pushed one entry; in normal flow
+			// nothing was pushed. The restore handles both correctly.
+			fin := frame.finally()
+			if n := len(fin.excLevels); n > 0 {
+				savedLevel := fin.excLevels[n-1]
+				fin.excLevels = fin.excLevels[:n-1]
+				for i := savedLevel; i < len(vm.excHandlerStack); i++ {
+					vm.excHandlerStack[i] = nil
+				}
+				if savedLevel < len(vm.excHandlerStack) {
+					vm.excHandlerStack = vm.excHandlerStack[:savedLevel]
+				}
 			}
 			if _, _, err := vm.checkCurrentException(); err != nil {
 				return nil, err
+			}
+			// Resume a return that was suspended to run this finally body.
+			if fin.hasPendingReturn {
+				fin.hasPendingReturn = false
+				result := fin.pendingReturn
+				fin.pendingReturn = nil
+				transferred, err := vm.unwindForReturn(frame, result)
+				if err != nil {
+					return nil, err
+				}
+				if transferred {
+					continue
+				}
+				if len(vm.frames) > 0 {
+					vm.frames[len(vm.frames)-1] = nil
+					vm.frames = vm.frames[:len(vm.frames)-1]
+					if len(vm.frames) > 0 {
+						vm.frame = vm.frames[len(vm.frames)-1]
+					}
+				}
+				return result, nil
+			}
+			// Resume a break/continue that was suspended to run this finally body.
+			if fin.hasPendingJump {
+				fin.hasPendingJump = false
+				target := fin.pendingJump
+				if _, err := vm.unwindForJump(frame, target); err != nil {
+					return nil, err
+				}
 			}
 
 		case OpExceptionMatch:
@@ -2689,8 +2491,12 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
-			// Build traceback
-			exc.Traceback = vm.buildTraceback()
+			// Build traceback only on a fresh raise — bare re-raise (arg==0)
+			// must preserve the original raise site, otherwise debug info is
+			// lost every time an except handler does `raise`.
+			if arg != 0 {
+				exc.Traceback = vm.buildTraceback()
+			}
 
 			// Try to find an exception handler
 			_, err = vm.handleException(exc)
@@ -2713,7 +2519,7 @@ func (vm *VM) run() (Value, error) {
 
 			// Get level as int
 			level := 0
-			if levelInt, ok := levelVal.(*PyInt); ok {
+			if levelInt, ok := levelVal.(*PyInt); ok && levelInt.BigValue == nil {
 				level = int(levelInt.Value)
 			}
 
@@ -2733,7 +2539,9 @@ func (vm *VM) run() (Value, error) {
 						if nameStr, ok := nameVal.(*PyString); ok {
 							// For a module like "pkg.sub.module", the package is "pkg.sub"
 							// For a package like "pkg.sub", the package is "pkg.sub" itself
-							packageName = nameStr.Value
+							if nameStr.Value != "__main__" { // the main script has no parent package
+								packageName = nameStr.Value
+							}
 						}
 					}
 				}

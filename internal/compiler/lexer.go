@@ -139,11 +139,12 @@ func (l *Lexer) NextToken() model.Token {
 
 	// Newlines
 	if ch == '\n' {
-		l.atLineStart = true
 		if l.bracketDepth > 0 {
-			// Inside brackets, skip newlines
+			// Inside brackets, newlines are insignificant (and don't start a
+			// logical line, so indentation isn't measured after them)
 			return l.NextToken()
 		}
+		l.atLineStart = true
 		return l.makeToken(model.TK_Newline)
 	}
 
@@ -182,38 +183,46 @@ func (l *Lexer) NextToken() model.Token {
 }
 
 func (l *Lexer) handleIndentation() *model.Token {
-	// Count leading whitespace
-	indent := 0
-	for !l.isAtEnd() {
-		ch := l.peek()
-		if ch == ' ' {
-			indent++
-			l.advance()
-		} else if ch == '\t' {
-			// Tabs align to 8-space boundaries
-			indent = (indent/8 + 1) * 8
-			l.advance()
-		} else {
+	// Measure the indentation of the next line that has code on it. Blank and
+	// comment-only lines are skipped entirely (no tokens), so like CPython
+	// their indentation never opens or closes a block.
+	var indent int
+	for {
+		indent = 0
+		for !l.isAtEnd() {
+			ch := l.peek()
+			if ch == ' ' {
+				indent++
+				l.advance()
+			} else if ch == '\t' {
+				// Tabs align to 8-space boundaries
+				indent = (indent/8 + 1) * 8
+				l.advance()
+			} else if ch == '\r' || ch == '\f' {
+				l.advance()
+			} else {
+				break
+			}
+		}
+		if l.isAtEnd() {
+			// EOF: remaining DEDENTs are emitted by NextToken
+			return nil
+		}
+		if l.peek() == '#' {
+			for !l.isAtEnd() && l.peek() != '\n' {
+				l.advance()
+			}
+			if l.isAtEnd() {
+				return nil
+			}
+		}
+		if l.peek() != '\n' {
 			break
 		}
+		l.advance() // blank or comment-only line
 	}
 
 	currentIndent := l.indentStack[len(l.indentStack)-1]
-
-	// For blank lines and comment-only lines, we still need to track indentation
-	// changes before skipping the line content. This ensures INDENT tokens are
-	// generated even when a block starts with a comment.
-	if l.peek() == '\n' || l.peek() == '#' || l.isAtEnd() {
-		// Still generate INDENT if needed
-		if indent > currentIndent {
-			l.indentStack = append(l.indentStack, indent)
-			tok := l.makeToken(model.TK_Indent)
-			return &tok
-		}
-		// Note: We don't generate DEDENT here for comment lines because the
-		// actual dedent should happen on the next real statement
-		return nil
-	}
 
 	if indent > currentIndent {
 		l.indentStack = append(l.indentStack, indent)

@@ -1131,33 +1131,15 @@ func wrapTimedelta(td *PyTimedelta) *runtime.PyUserData {
 
 // timedelta(days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0)
 func timedeltaNew(vm *runtime.VM) int {
-	var days, seconds, microseconds int64
-
-	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
-		days = vm.CheckInt(1)
-	}
-	if vm.GetTop() >= 2 && !runtime.IsNone(vm.Get(2)) {
-		seconds = vm.CheckInt(2)
-	}
-	if vm.GetTop() >= 3 && !runtime.IsNone(vm.Get(3)) {
-		microseconds = vm.CheckInt(3)
-	}
-	if vm.GetTop() >= 4 && !runtime.IsNone(vm.Get(4)) {
-		milliseconds := vm.CheckInt(4)
-		microseconds += milliseconds * 1000
-	}
-	if vm.GetTop() >= 5 && !runtime.IsNone(vm.Get(5)) {
-		minutes := vm.CheckInt(5)
-		seconds += minutes * 60
-	}
-	if vm.GetTop() >= 6 && !runtime.IsNone(vm.Get(6)) {
-		hours := vm.CheckInt(6)
-		seconds += hours * 3600
-	}
-	if vm.GetTop() >= 7 && !runtime.IsNone(vm.Get(7)) {
-		weeks := vm.CheckInt(7)
-		days += weeks * 7
-	}
+	// timedelta(days=0, seconds=0, microseconds=0, milliseconds=0,
+	//           minutes=0, hours=0, weeks=0) — all positional-or-keyword.
+	days := vm.OptionalIntArg(1, "days", 0)
+	seconds := vm.OptionalIntArg(2, "seconds", 0)
+	microseconds := vm.OptionalIntArg(3, "microseconds", 0)
+	microseconds += vm.OptionalIntArg(4, "milliseconds", 0) * 1000
+	seconds += vm.OptionalIntArg(5, "minutes", 0) * 60
+	seconds += vm.OptionalIntArg(6, "hours", 0) * 3600
+	days += vm.OptionalIntArg(7, "weeks", 0) * 7
 
 	// Normalize
 	seconds += microseconds / 1000000

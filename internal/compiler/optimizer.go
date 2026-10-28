@@ -7,6 +7,10 @@ import (
 // Optimizer performs various compile-time optimizations
 type Optimizer struct {
 	enabled bool
+
+	// Scratch buffers reused by computeJumpTargets.
+	jtOffsets []int
+	jtTargets []bool
 }
 
 // NewOptimizer creates a new optimizer

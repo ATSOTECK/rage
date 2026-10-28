@@ -117,24 +117,17 @@ func bisectFunc(vm *runtime.VM, args []runtime.Value, kwargs map[string]runtime.
 		return nil, err
 	}
 
-	// Apply key to x
-	xKey := x
-	if keyFn != nil && !runtime.IsNone(keyFn) {
-		xKey, err = vm.Call(keyFn, []runtime.Value{x}, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	idx, err := bisectSearch(vm, a, xKey, lo, hi, keyFn, left)
+	// Per CPython docs, key is not applied to x — pass x directly.
+	idx, err := bisectSearch(vm, a, x, lo, hi, keyFn, left)
 	if err != nil {
 		return nil, err
 	}
 	return runtime.MakeInt(int64(idx)), nil
 }
 
-// bisectSearch performs the binary search.
-func bisectSearch(vm *runtime.VM, a *runtime.PyList, xKey runtime.Value, lo, hi int, keyFn runtime.Value, left bool) (int, error) {
+// bisectSearch performs the binary search. The key function is applied to
+// elements of `a` only — `x` is compared raw, matching CPython semantics.
+func bisectSearch(vm *runtime.VM, a *runtime.PyList, x runtime.Value, lo, hi int, keyFn runtime.Value, left bool) (int, error) {
 	for lo < hi {
 		mid := (lo + hi) / 2
 		midVal := a.Items[mid]
@@ -149,15 +142,15 @@ func bisectSearch(vm *runtime.VM, a *runtime.PyList, xKey runtime.Value, lo, hi 
 
 		var cond bool
 		if left {
-			// bisect_left: find first position where midKey >= xKey (i.e., midKey < xKey means go right)
-			lt, err := heapLt(vm, midKey, xKey)
+			// bisect_left: first position where midKey >= x (midKey < x means go right)
+			lt, err := heapLt(vm, midKey, x)
 			if err != nil {
 				return 0, err
 			}
 			cond = lt
 		} else {
-			// bisect_right: find first position where midKey > xKey (i.e., xKey < midKey means go left)
-			lt, err := heapLt(vm, xKey, midKey)
+			// bisect_right: first position where midKey > x (x < midKey means go left)
+			lt, err := heapLt(vm, x, midKey)
 			if err != nil {
 				return 0, err
 			}
@@ -180,21 +173,21 @@ func insortFunc(vm *runtime.VM, args []runtime.Value, kwargs map[string]runtime.
 		return nil, err
 	}
 
-	// Apply key to x
-	xKey := x
+	// CPython insort applies key to x for the search step, then inserts the raw x.
+	searchKey := x
 	if keyFn != nil && !runtime.IsNone(keyFn) {
-		xKey, err = vm.Call(keyFn, []runtime.Value{x}, nil)
+		searchKey, err = vm.Call(keyFn, []runtime.Value{x}, nil)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	idx, err := bisectSearch(vm, a, xKey, lo, hi, keyFn, left)
+	idx, err := bisectSearch(vm, a, searchKey, lo, hi, keyFn, left)
 	if err != nil {
 		return nil, err
 	}
 
-	// Insert x at idx
+	// Insert raw x at idx
 	a.Items = append(a.Items, nil)
 	copy(a.Items[idx+1:], a.Items[idx:])
 	a.Items[idx] = x

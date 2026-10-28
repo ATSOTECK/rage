@@ -147,25 +147,26 @@ func (e *PyException) formatError() string {
 	typeName := e.Type()
 	var msg string
 
-	// If we have args, format with them
-	if e.Args != nil && len(e.Args.Items) > 0 {
+	// If we have args, format with them (like str(e))
+	if e.ExcType != nil && e.Message != typeName && classDefinesDunder(e.ExcType, "__str__") {
+		// Message holds the result of the class's own __str__
+		msg = typeName
+		if e.Message != "" {
+			msg = fmt.Sprintf("%s: %s", typeName, e.Message)
+		}
+	} else if e.Args != nil && len(e.Args.Items) > 0 {
 		if len(e.Args.Items) == 1 {
-			if s, ok := e.Args.Items[0].(*PyString); ok {
+			if e.isKeyError() {
+				// KeyError shows the repr of the missing key
+				msg = fmt.Sprintf("%s: %s", typeName, plainRepr(e.Args.Items[0]))
+			} else if s, ok := e.Args.Items[0].(*PyString); ok {
 				msg = fmt.Sprintf("%s: %s", typeName, s.Value)
 			} else {
 				msg = fmt.Sprintf("%s: %v", typeName, e.Args.Items[0])
 			}
 		} else {
-			// Multiple args
-			parts := make([]string, len(e.Args.Items))
-			for i, item := range e.Args.Items {
-				if s, ok := item.(*PyString); ok {
-					parts[i] = s.Value
-				} else {
-					parts[i] = fmt.Sprintf("%v", item)
-				}
-			}
-			msg = fmt.Sprintf("%s: (%s)", typeName, strings.Join(parts, ", "))
+			// Multiple args show as a tuple
+			msg = fmt.Sprintf("%s: %s", typeName, plainRepr(e.Args))
 		}
 	} else if e.Message != "" && e.Message != typeName {
 		// If we have a message that's different from just the type name
@@ -225,6 +226,41 @@ func (e *PyException) formatError() string {
 	return msg
 }
 
+// isKeyError reports whether the exception is a KeyError (or a subclass).
+func (e *PyException) isKeyError() bool {
+	if e.ExcType == nil {
+		return e.TypeName == "KeyError"
+	}
+	for _, cls := range e.ExcType.Mro {
+		if cls.Name == "KeyError" {
+			return true
+		}
+	}
+	return false
+}
+
+// plainRepr is a VM-free repr() for error messages, where user-defined
+// __repr__ methods cannot be called.
+func plainRepr(v Value) string {
+	switch x := v.(type) {
+	case *PyString:
+		return strRepr(x.Value)
+	case *PyTuple:
+		parts := make([]string, len(x.Items))
+		for i, item := range x.Items {
+			parts[i] = plainRepr(item)
+		}
+		if len(parts) == 1 {
+			return "(" + parts[0] + ",)"
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	case *PyInstance:
+		return fmt.Sprintf("<%s object>", x.Class.Name)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 // TracebackEntry represents a single frame in a traceback
 type TracebackEntry struct {
 	Filename string
@@ -245,6 +281,36 @@ type Frame struct {
 	Cells            []*PyCell        // Closure cells
 	BlockStack       []Block          // Block stack for try/except/finally
 	OrderedGlobalKeys []string        // Insertion-ordered global names (for class bodies)
+	Kwargs           map[string]Value // Keyword args, for stack-based Go builtins (PyGoFunc)
+
+	// try/finally bookkeeping, allocated by finally() on first use. It lives
+	// on the frame so a function called from a finally body, or a generator
+	// suspended inside one, can't disturb (or leak stale state into) another
+	// frame's pending control flow.
+	fin *frameFinally
+
+	// slots is the backing buffer shared by Locals and the initial Stack for
+	// frames created by createFunctionFrame. It is kept when the frame is
+	// recycled through the VM's frame pool (see releaseFrame).
+	slots []Value
+}
+
+// frameFinally is a frame's try/finally state.
+type frameFinally struct {
+	pendingReturn    Value // return value suspended while a finally body runs
+	hasPendingReturn bool
+	pendingJump      int // break/continue target suspended while a finally body runs
+	hasPendingJump   bool
+	pendingDepth     int   // len(BlockStack) when the pending return/jump was suspended
+	excLevels        []int // excHandlerStack level recorded at each SETUP_FINALLY
+}
+
+// finally returns the frame's try/finally state, creating it if needed.
+func (f *Frame) finally() *frameFinally {
+	if f.fin == nil {
+		f.fin = &frameFinally{}
+	}
+	return f.fin
 }
 
 // Block represents a control flow block
@@ -272,7 +338,13 @@ type PyRange struct {
 }
 
 func (r *PyRange) Type() string   { return "range" }
-func (r *PyRange) String() string { return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step) }
+func (r *PyRange) String() string {
+	// CPython omits a step of 1
+	if r.Step == 1 {
+		return fmt.Sprintf("range(%d, %d)", r.Start, r.Stop)
+	}
+	return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step)
+}
 
 // Len returns the number of elements in the range
 func (r *PyRange) Len() int64 {
@@ -317,17 +389,16 @@ type PySlice struct {
 
 func (s *PySlice) Type() string { return "slice" }
 func (s *PySlice) String() string {
-	start, stop, step := "None", "None", "None"
-	if s.Start != nil && s.Start != None {
-		start = fmt.Sprintf("%v", s.Start.(*PyInt).Value)
+	part := func(v Value) string {
+		switch p := v.(type) {
+		case nil:
+			return "None"
+		case *PyString:
+			return "'" + p.Value + "'"
+		}
+		return fmt.Sprintf("%v", v)
 	}
-	if s.Stop != nil && s.Stop != None {
-		stop = fmt.Sprintf("%v", s.Stop.(*PyInt).Value)
-	}
-	if s.Step != nil && s.Step != None {
-		step = fmt.Sprintf("%v", s.Step.(*PyInt).Value)
-	}
-	return fmt.Sprintf("slice(%s, %s, %s)", start, stop, step)
+	return fmt.Sprintf("slice(%s, %s, %s)", part(s.Start), part(s.Stop), part(s.Step))
 }
 
 // PyIterator wraps an iterator
@@ -362,10 +433,9 @@ type PyGenerator struct {
 	SavedCurrentException    *PyException
 	SavedLastException       *PyException
 	SavedExcHandlerStack     []*PyException
-	SavedPendingReturn       Value
-	SavedHasPendingReturn    bool
-	SavedPendingJump         int
-	SavedHasPendingJump      bool
+	// frames is a reusable call-stack buffer installed as vm.frames while
+	// the generator runs, so resuming it does not allocate a new slice.
+	frames []*Frame
 }
 
 func (g *PyGenerator) Type() string   { return "generator" }
@@ -383,10 +453,6 @@ type PyCoroutine struct {
 	SavedCurrentException *PyException
 	SavedLastException    *PyException
 	SavedExcHandlerStack  []*PyException
-	SavedPendingReturn    Value
-	SavedHasPendingReturn bool
-	SavedPendingJump      int
-	SavedHasPendingJump   bool
 }
 
 func (c *PyCoroutine) Type() string   { return "coroutine" }

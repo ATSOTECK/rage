@@ -138,16 +138,55 @@ func (l *Lexer) scanFString(quote rune, isRaw bool) model.Token {
 				builder.WriteString("{{")
 				continue
 			}
-			// For a complete implementation, we'd start tokenizing the expression here
+			// Copy the replacement field verbatim (the parser splits it into
+			// expression, conversion, and spec). String literals inside the
+			// expression are copied whole so their braces and quotes don't end
+			// the field or the f-string; after the spec's ':' quotes are plain
+			// characters and only nested {fields} count.
 			builder.WriteByte(ch)
-			braceDepth := 1
-			for !l.isAtEnd() && braceDepth > 0 {
-				c := l.advance()
+			depth, nesting, inSpec := 1, 0, false
+			for !l.isAtEnd() && depth > 0 {
+				c := l.peek()
+				if !triple && c == '\n' {
+					break
+				}
+				l.advance()
 				builder.WriteByte(c)
-				if c == '{' {
-					braceDepth++
-				} else if c == '}' {
-					braceDepth--
+				switch {
+				case !inSpec && (c == '\'' || c == '"'):
+					for !l.isAtEnd() {
+						d := l.peek()
+						if !triple && d == '\n' {
+							break
+						}
+						l.advance()
+						builder.WriteByte(d)
+						if d == '\\' && !l.isAtEnd() {
+							builder.WriteByte(l.advance())
+							continue
+						}
+						if d == c {
+							break
+						}
+					}
+				case !inSpec && (c == '(' || c == '['):
+					nesting++
+				case !inSpec && (c == ')' || c == ']'):
+					nesting--
+				case c == '{':
+					if inSpec {
+						depth++
+					} else {
+						nesting++
+					}
+				case c == '}':
+					if !inSpec && nesting > 0 {
+						nesting--
+					} else {
+						depth--
+					}
+				case c == ':' && !inSpec && nesting == 0:
+					inSpec = true
 				}
 			}
 			continue

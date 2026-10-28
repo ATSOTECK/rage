@@ -30,7 +30,7 @@ test("__import__ string module", test_import_string)
 def test_import_json():
     mod = __import__("json")
     result = mod.dumps([1, 2, 3])
-    expect(result).to_be("[1,2,3]")
+    expect(result).to_be("[1, 2, 3]")
 test("__import__ json module", test_import_json)
 
 # Test 6: __import__ returns same cached module

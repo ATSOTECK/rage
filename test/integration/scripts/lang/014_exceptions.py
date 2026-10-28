@@ -454,4 +454,254 @@ test("negate_unbound_raises", test_negate_unbound_raises)
 test("negate_normal", test_negate_normal)
 test("negate_float", test_negate_float)
 
+
+# === return inside try/finally must run the finally body ===
+# Regression: OpReturn in the main dispatch used to drop the block stack
+# and pop the frame without routing through BlockFinally, so the finally
+# clause was silently skipped on a `return` from inside the `try`.
+def test_return_runs_finally():
+    log = []
+    def f():
+        try:
+            return 1
+        finally:
+            log.append("f")
+    expect(f()).to_be(1)
+    expect(log).to_be(["f"])
+
+
+def test_return_runs_nested_finally_in_order():
+    log = []
+    def f():
+        try:
+            try:
+                return "inner"
+            finally:
+                log.append("f1")
+        finally:
+            log.append("f2")
+    expect(f()).to_be("inner")
+    expect(log).to_be(["f1", "f2"])
+
+
+def test_finally_return_overrides_try_return():
+    def f():
+        try:
+            return 1
+        finally:
+            return 2
+    expect(f()).to_be(2)
+
+
+def test_finally_exception_replaces_return():
+    def f():
+        try:
+            return 1
+        finally:
+            raise ValueError("boom")
+    caught = None
+    try:
+        f()
+    except ValueError as e:
+        caught = str(e)
+    expect(caught).to_be("boom")
+
+
+def test_return_through_with_inside_try_finally():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            log.append("exit")
+            return False
+
+    def f():
+        try:
+            with CM():
+                return "done"
+        finally:
+            log.append("f")
+
+    expect(f()).to_be("done")
+    # __exit__ first (innermost), then finally
+    expect(log).to_be(["exit", "f"])
+
+
+test("return_runs_finally", test_return_runs_finally)
+test("return_runs_nested_finally_in_order", test_return_runs_nested_finally_in_order)
+test("finally_return_overrides_try_return", test_finally_return_overrides_try_return)
+test("finally_exception_replaces_return", test_finally_exception_replaces_return)
+test("return_through_with_inside_try_finally", test_return_through_with_inside_try_finally)
+
+
+# === continue/break through try/finally must run the finally body ===
+# Regression: main dispatch's OpContinueLoop and `break` (OpJump) used to
+# skip the finally body and let BlockFinally entries accumulate across
+# iterations.
+def test_continue_runs_finally():
+    log = []
+    def f():
+        for i in range(3):
+            try:
+                if i == 1:
+                    continue
+                log.append(i)
+            finally:
+                log.append("f" + str(i))
+    f()
+    expect(log).to_be([0, "f0", "f1", 2, "f2"])
+
+
+def test_break_runs_finally():
+    log = []
+    def f():
+        for i in range(3):
+            try:
+                if i == 1:
+                    break
+                log.append(i)
+            finally:
+                log.append("f" + str(i))
+    f()
+    expect(log).to_be([0, "f0", "f1"])
+
+
+# === continue/break through `with` must call __exit__ ===
+def test_continue_runs_with_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(2):
+            with CM():
+                if i == 0:
+                    continue
+                log.append("body")
+    f()
+    expect(log).to_be(["exit", "body", "exit"])
+
+
+def test_break_runs_with_exit():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(3):
+            with CM():
+                log.append(i)
+                break
+    f()
+    expect(log).to_be([0, "exit"])
+
+
+# === continue inside try/finally inside with: finally then __exit__ ===
+def test_continue_through_finally_and_with():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(2):
+            with CM():
+                try:
+                    if i == 0:
+                        continue
+                    log.append("body")
+                finally:
+                    log.append("f")
+    f()
+    expect(log).to_be(["f", "exit", "body", "f", "exit"])
+
+
+# === break out of nested with blocks runs every __exit__ (LIFO) ===
+# Regression: break eagerly popped the for-iterator, which actually removed an
+# enclosing with's context manager and left the cleanup unwinder reading a
+# dead stack slot. Now the iterator is popped at a landing pad after cleanup.
+def test_break_runs_nested_with_exits():
+    log = []
+
+    class CM:
+        def __init__(self, name):
+            self.name = name
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit " + self.name)
+            return False
+
+    def f():
+        for i in range(5):
+            with CM("a"):
+                with CM("b"):
+                    log.append("body")
+                    break
+    f()
+    expect(log).to_be(["body", "exit b", "exit a"])
+
+
+# === break out of a for-loop skips the else clause ===
+def test_break_skips_for_else():
+    log = []
+
+    class CM:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            log.append("exit")
+            return False
+
+    def f():
+        for i in range(3):
+            with CM():
+                break
+        else:
+            log.append("else")
+    f()
+    expect(log).to_be(["exit"])
+
+
+# === unbounded recursion raises a catchable RecursionError ===
+# Regression: with no recursion limit this overflowed the Go stack and aborted
+# the whole process with an uncatchable fatal error. Now it raises a normal,
+# catchable RecursionError.
+def test_recursion_error_catchable():
+    def recurse(n):
+        return recurse(n + 1)
+
+    caught = False
+    try:
+        recurse(0)
+    except RecursionError:
+        caught = True
+    expect(caught).to_be(True)
+
+
+test("continue_runs_finally", test_continue_runs_finally)
+test("break_runs_finally", test_break_runs_finally)
+test("continue_runs_with_exit", test_continue_runs_with_exit)
+test("break_runs_with_exit", test_break_runs_with_exit)
+test("continue_through_finally_and_with", test_continue_through_finally_and_with)
+test("break_runs_nested_with_exits", test_break_runs_nested_with_exits)
+test("break_skips_for_else", test_break_skips_for_else)
+test("recursion_error_catchable", test_recursion_error_catchable)
+
 print("Exceptions tests completed")

@@ -73,9 +73,9 @@ func InitOperatorModule() {
 				case *runtime.PyString:
 					return runtime.MakeInt(int64(len(v.Value))), nil
 				case *runtime.PySet:
-					return runtime.MakeInt(int64(len(v.Items))), nil
+					return runtime.MakeInt(int64(v.Len())), nil
 				case *runtime.PyFrozenSet:
-					return runtime.MakeInt(int64(len(v.Items))), nil
+					return runtime.MakeInt(int64(v.Len())), nil
 				case *runtime.PyBytes:
 					return runtime.MakeInt(int64(len(v.Value))), nil
 				default:

@@ -300,6 +300,10 @@ func NewStateWithModules(opts ...StateOption) *State {
 	cfg := &stateConfig{
 		modules:  make(map[Module]bool),
 		builtins: make(map[Builtin]bool),
+		// Default to a bounded call stack so runaway recursion raises a catchable
+		// RecursionError rather than crashing the host process. WithMaxRecursionDepth(0)
+		// opts back into unlimited.
+		maxRecursionDepth: 1000,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -317,10 +321,9 @@ func NewStateWithModules(opts ...StateOption) *State {
 
 	vm := runtime.NewVM()
 
-	// Apply resource limits
-	if cfg.maxRecursionDepth > 0 {
-		vm.SetMaxRecursionDepth(cfg.maxRecursionDepth)
-	}
+	// Apply resource limits. maxRecursionDepth is always applied (0 = unlimited)
+	// so WithMaxRecursionDepth(0) can override the bounded default.
+	vm.SetMaxRecursionDepth(cfg.maxRecursionDepth)
 	if cfg.maxMemoryBytes > 0 {
 		vm.SetMaxMemoryBytes(cfg.maxMemoryBytes)
 	}

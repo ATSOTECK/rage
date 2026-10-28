@@ -985,9 +985,9 @@ func valueToCSVString(v runtime.Value) string {
 	case *runtime.PyString:
 		return val.Value
 	case *runtime.PyInt:
-		return fmt.Sprintf("%d", val.Value)
+		return val.String()
 	case *runtime.PyFloat:
-		return fmt.Sprintf("%g", val.Value)
+		return runtime.FloatRepr(val.Value)
 	case *runtime.PyBool:
 		if val.Value {
 			return "True"

@@ -68,7 +68,7 @@ func TestIsHashable(t *testing.T) {
 		{"bool", True, true},
 		{"None", None, true},
 		{"tuple", &PyTuple{Items: []Value{MakeInt(1)}}, true},
-		{"frozenset", &PyFrozenSet{Items: make(map[Value]struct{})}, true},
+		{"frozenset", &PyFrozenSet{}, true},
 		{"bytes", &PyBytes{Value: []byte{1}}, true},
 		{"complex", MakeComplex(1, 2), true},
 		{"list", &PyList{Items: []Value{}}, false},
@@ -327,7 +327,7 @@ func TestPyDictOperations(t *testing.T) {
 
 func TestPySetOperations(t *testing.T) {
 	vm := NewVM()
-	s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+	s := &PySet{}
 
 	s.SetAdd(MakeInt(1), vm)
 	s.SetAdd(MakeInt(2), vm)

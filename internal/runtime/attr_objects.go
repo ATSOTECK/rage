@@ -177,9 +177,31 @@ func (vm *VM) getAttrException(o *PyException, name string) (Value, error) {
 			},
 		}, nil
 	}
-	// Delegate to Instance for ExceptionGroup attributes (message, exceptions, subgroup, etc.)
+	// Delegate to Instance for user-defined attributes and ExceptionGroup
+	// attributes (message, exceptions, subgroup, etc.)
 	if o.Instance != nil {
-		return vm.getAttr(o.Instance, name)
+		if v, err := vm.getAttr(o.Instance, name); err == nil || name != "value" {
+			return v, err
+		}
+	}
+	// StopIteration.value / StopAsyncIteration.value: the first arg, or None.
+	// Internally raised StopIterations may carry only TypeName, not ExcType.
+	if name == "value" {
+		isStop := o.Type() == "StopIteration" || o.Type() == "StopAsyncIteration"
+		if !isStop && o.ExcType != nil {
+			for _, cls := range o.ExcType.Mro {
+				if cls.Name == "StopIteration" || cls.Name == "StopAsyncIteration" {
+					isStop = true
+					break
+				}
+			}
+		}
+		if isStop {
+			if o.Args != nil && len(o.Args.Items) > 0 {
+				return o.Args.Items[0], nil
+			}
+			return None, nil
+		}
 	}
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Type(), name)
 }
@@ -475,29 +497,48 @@ func (vm *VM) getAttrClass(o *PyClass, name string) (Value, error) {
 
 // getAttrFunction handles attribute access on *PyFunction values.
 func (vm *VM) getAttrFunction(o *PyFunction, name string) (Value, error) {
-	switch name {
-	case "__name__":
-		return &PyString{Value: o.Name}, nil
-	case "__doc__":
-		return None, nil
-	case "__isabstractmethod__":
-		return &PyBool{Value: o.IsAbstract}, nil
-	case "__wrapped__":
-		// Check if we have __wrapped__ stored in closure
-		if o.Closure != nil {
-			for _, cell := range o.Closure {
-				if cell != nil {
-					return cell, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '__wrapped__'")
-	}
-	// Check custom attributes
+	// Attributes set on the function (e.g. by functools.wraps: __wrapped__,
+	// __doc__, __qualname__) take precedence over the computed defaults.
 	if o.Dict != nil {
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
 		}
+	}
+	switch name {
+	case "__name__", "__qualname__":
+		return &PyString{Value: o.Name}, nil
+	case "__doc__":
+		return None, nil
+	case "__module__":
+		if mod, ok := o.Globals["__name__"]; ok {
+			return mod, nil
+		}
+		return None, nil
+	case "__isabstractmethod__":
+		return &PyBool{Value: o.IsAbstract}, nil
+	case "__defaults__":
+		if o.Defaults == nil || len(o.Defaults.Items) == 0 {
+			return None, nil
+		}
+		return o.Defaults, nil
+	case "__kwdefaults__":
+		if len(o.KwDefaults) == 0 {
+			return None, nil
+		}
+		d := &PyDict{Items: make(map[Value]Value)}
+		for _, k := range vm.kwargNames(o.KwDefaults) {
+			d.DictSet(&PyString{Value: k}, o.KwDefaults[k], vm)
+		}
+		return d, nil
+	case "__dict__":
+		if o.Dict == nil {
+			o.Dict = make(map[string]Value)
+		}
+		d := &PyDict{Items: make(map[Value]Value)}
+		for k, v := range o.Dict {
+			d.DictSet(&PyString{Value: k}, v, vm)
+		}
+		return d, nil
 	}
 	return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '%s'", name)
 }
@@ -535,6 +576,27 @@ func (vm *VM) getAttrBuiltinFunc(o *PyBuiltinFunc, name string) (Value, error) {
 			return strMaketransImpl(vm, args)
 		}}, nil
 	}
+	if o.Name == "bytes" && name == "fromhex" {
+		return &PyBuiltinFunc{Name: "bytes.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: fromhex() takes exactly one argument (%d given)", len(args))
+			}
+			s, ok := args[0].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: fromhex() argument must be str, not %s", vm.typeName(args[0]))
+			}
+			return bytesFromHex(s.Value)
+		}}, nil
+	}
+	if o.Name == "dict" && name == "fromkeys" {
+		return &PyBuiltinFunc{Name: "dict.fromkeys", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			m, err := vm.getAttrDict(&PyDict{}, "fromkeys")
+			if err != nil {
+				return nil, err
+			}
+			return vm.call(m, args, kwargs)
+		}}, nil
+	}
 	if o.Name == "float" && name == "fromhex" {
 		return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			return floatFromHexImpl(args)
@@ -547,7 +609,18 @@ func (vm *VM) getAttrBuiltinFunc(o *PyBuiltinFunc, name string) (Value, error) {
 	}
 	// Handle dunder attribute queries on builtin type constructors (e.g., hasattr(list, "__iter__"))
 	if builtinHasDunder(o.Name, name) {
-		return &PyBuiltinFunc{Name: o.Name + "." + name}, nil
+		// Unbound form: list.__getitem__(lst, i) calls lst.__getitem__(i)
+		typeName, dunder := o.Name, name
+		return &PyBuiltinFunc{Name: typeName + "." + dunder, Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) == 0 {
+				return nil, fmt.Errorf("TypeError: unbound method %s.%s() needs an argument", typeName, dunder)
+			}
+			m, err := vm.getAttr(args[0], dunder)
+			if err != nil {
+				return nil, err
+			}
+			return vm.call(m, args[1:], kwargs)
+		}}, nil
 	}
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(o), name)
 }
@@ -939,9 +1012,24 @@ func (vm *VM) getAttrBytes(b *PyBytes, name string) (Value, error) {
 		}}, nil
 	case "decode":
 		return &PyBuiltinFunc{Name: "bytes.decode", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			// Default encoding is utf-8
-			// We just convert bytes to string directly
-			return &PyString{Value: string(b.Value)}, nil
+			encoding, errors := "utf-8", "strict"
+			if len(args) > 0 {
+				encoding = vm.str(args[0])
+			}
+			if len(args) > 1 {
+				errors = vm.str(args[1])
+			}
+			if v, ok := kwargs["encoding"]; ok {
+				encoding = vm.str(v)
+			}
+			if v, ok := kwargs["errors"]; ok {
+				errors = vm.str(v)
+			}
+			s, err := decodeBytes(b.Value, encoding, errors)
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: s}, nil
 		}}, nil
 	case "isalpha":
 		return &PyBuiltinFunc{Name: "bytes.isalpha", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

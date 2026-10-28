@@ -36,8 +36,11 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.compileExpr(s.Value)
 			c.compileStore(s.Target)
 		}
-		// In class scope, store annotation in __annotations__ dict
-		if c.symbolTable.scopeType == ScopeClass {
+		// In class scope, store annotation in __annotations__ dict.
+		// Skip if the parser failed to produce an annotation expression
+		// (malformed source) — leaving the slot absent matches CPython's
+		// behavior of just not registering the bad annotation.
+		if c.symbolTable.scopeType == ScopeClass && s.Annotation != nil {
 			if ident, ok := s.Target.(*model.Identifier); ok {
 				// Stack order for STORE_SUBSCR: val, obj, index
 				c.compileExpr(s.Annotation)         // val: the annotation type
@@ -79,12 +82,17 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.error(s.StartPos, "'break' outside loop")
 			return
 		}
-		// Pop the iterator from stack if breaking from a for loop
-		loop := c.loopStack[len(c.loopStack)-1]
-		if loop.isForLoop {
-			c.emit(runtime.OpPop)
+		// The for-loop iterator (if any) is popped at the loop's break landing
+		// pad, AFTER any enclosing with/finally cleanup has run — see compileFor.
+		// Popping it eagerly here would mis-pop an enclosing with's context
+		// manager, which sits above the iterator on the operand stack.
+		op := runtime.OpJump
+		if c.finallyDepth > 0 || c.withDepth > 0 {
+			// Cleanup needed: run enclosing finally bodies and call __exit__
+			// on enclosing with blocks before reaching the break target.
+			op = runtime.OpContinueLoop
 		}
-		jump := c.emitJump(runtime.OpJump)
+		jump := c.emitJump(op)
 		c.loopStack[len(c.loopStack)-1].breakJumps = append(
 			c.loopStack[len(c.loopStack)-1].breakJumps, jump)
 
@@ -93,17 +101,13 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 			c.error(s.StartPos, "'continue' outside loop")
 			return
 		}
-		if c.finallyDepth > 0 {
-			// Inside a try/finally — use OpContinueLoop so the generator can
-			// run the finally block before jumping to the loop target
-			jump := c.emitJump(runtime.OpContinueLoop)
-			c.loopStack[len(c.loopStack)-1].continueJumps = append(
-				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
-		} else {
-			jump := c.emitJump(runtime.OpJump)
-			c.loopStack[len(c.loopStack)-1].continueJumps = append(
-				c.loopStack[len(c.loopStack)-1].continueJumps, jump)
+		op := runtime.OpJump
+		if c.finallyDepth > 0 || c.withDepth > 0 {
+			op = runtime.OpContinueLoop
 		}
+		jump := c.emitJump(op)
+		c.loopStack[len(c.loopStack)-1].continueJumps = append(
+			c.loopStack[len(c.loopStack)-1].continueJumps, jump)
 
 	case *model.Global:
 		for _, name := range s.Names {
@@ -220,44 +224,42 @@ func (c *Compiler) compileStmt(stmt model.Stmt) {
 }
 
 func (c *Compiler) compileAugAssign(s *model.AugAssign) {
-	// Track if this is a subscript (needs special handling to avoid double evaluation)
-	_, isSubscript := s.Target.(*model.Subscript)
-
-	// Load target
 	switch t := s.Target.(type) {
 	case *model.Identifier:
 		c.compileLoad(t.Name)
+		c.compileExpr(s.Value)
+		c.emitInplaceOp(s.Op)
+		c.compileStore(s.Target)
+
 	case *model.Attribute:
+		// Evaluate t.Value once: [obj]
 		c.compileExpr(t.Value)
-		c.emit(runtime.OpDup)
+		c.emit(runtime.OpDup) // [obj, obj]
 		idx := c.addName(t.Attr.Name)
-		c.emitArg(runtime.OpLoadAttr, idx)
+		c.emitArg(runtime.OpLoadAttr, idx) // [obj, val]
+		c.compileExpr(s.Value)             // [obj, val, rhs]
+		c.emitInplaceOp(s.Op)              // [obj, result]
+		c.emit(runtime.OpRot2)             // [result, obj]
+		c.emitArg(runtime.OpStoreAttr, idx) // pops obj then result
+
 	case *model.Subscript:
-		// For subscript: push object and index, duplicate both, then get value
-		// Stack sequence: [obj, idx] -> [obj, idx, obj, idx] -> [obj, idx, value]
+		// Evaluate obj+idx once: [obj, idx]
 		c.compileExpr(t.Value)
 		c.compileExpr(t.Slice)
-		c.emit(runtime.OpDup2) // Duplicate top two: [obj, idx, obj, idx]
-		c.emit(runtime.OpBinarySubscr) // Get value: [obj, idx, value]
+		c.emit(runtime.OpDup2)         // [obj, idx, obj, idx]
+		c.emit(runtime.OpBinarySubscr) // [obj, idx, val]
+		c.compileExpr(s.Value)         // [obj, idx, val, rhs]
+		c.emitInplaceOp(s.Op)          // [obj, idx, result]
+		c.emit(runtime.OpRot3)         // [result, obj, idx]
+		c.emit(runtime.OpStoreSubscr)
 	}
+}
 
-	// Compile the value
-	c.compileExpr(s.Value)
-
-	// Emit inplace operation
-	if binOp, ok := augAssignToOp[s.Op]; ok {
+func (c *Compiler) emitInplaceOp(op model.TokenKind) {
+	if binOp, ok := augAssignToOp[op]; ok {
 		if entry, ok := opMapping[binOp]; ok {
 			c.emit(entry.inplace)
 		}
-	}
-
-	// Store result
-	if isSubscript {
-		// For subscript: stack is [obj, idx, result], need [result, obj, idx] for StoreSubscr
-		c.emit(runtime.OpRot3)       // [obj, idx, result] -> [result, obj, idx]
-		c.emit(runtime.OpStoreSubscr) // Store and pop all three
-	} else {
-		c.compileStore(s.Target)
 	}
 }
 
@@ -349,10 +351,21 @@ func (c *Compiler) compileFor(s *model.For) {
 		}
 	}
 
-	// Patch break and continue jumps
+	// Break landing pad. A `break` out of a for-loop leaves the iterator on the
+	// operand stack (normal exhaustion pops it in OpForIter; the cleanup
+	// unwinder for enclosing with/finally only resets SP to just above it).
+	// Breaks jump here with the iterator still live, so pop it. The normal/else
+	// path — where the iterator is already gone — jumps over the pad.
 	loop := c.loopStack[len(c.loopStack)-1]
+	breakTarget := c.currentOffset()
+	if len(loop.breakJumps) > 0 {
+		skip := c.emitJump(runtime.OpJump)
+		breakTarget = c.currentOffset()
+		c.emit(runtime.OpPop) // discard the live for-loop iterator
+		c.patchJump(skip, c.currentOffset())
+	}
 	for _, jump := range loop.breakJumps {
-		c.patchJump(jump, c.currentOffset())
+		c.patchJump(jump, breakTarget)
 	}
 	for _, jump := range loop.continueJumps {
 		c.patchJump(jump, loopStart)
@@ -403,8 +416,9 @@ func (c *Compiler) compileTry(s *model.Try) {
 
 		for _, handler := range s.Handlers {
 			if handler.Type != nil {
-				// Check exception type using OpExceptionMatch
-				c.emit(runtime.OpDup)
+				// Check exception type using OpExceptionMatch. It peeks at the
+				// exception (leaving it on the stack) and pushes the match result,
+				// so no DUP is needed: [exc, type] -> [exc, bool].
 				c.compileExpr(handler.Type)
 				c.emit(runtime.OpExceptionMatch)
 				nextHandler := c.emitJump(runtime.OpPopJumpIfFalse)
@@ -426,10 +440,13 @@ func (c *Compiler) compileTry(s *model.Try) {
 					c.compileStmt(stmt)
 				}
 
-				// Clear exception variable after handler (Python 3 semantics)
+				// Unbind the exception variable after the handler (Python 3
+				// semantics): `e = None; del e`, so the delete can't fail even
+				// if the handler body already deleted e.
 				if handler.Name != nil {
 					c.emit(runtime.OpLoadNone)
 					c.compileStore(handler.Name)
+					c.compileDelete(handler.Name)
 				}
 
 				// Mark end of except handler (pops excHandlerStack)
@@ -615,7 +632,8 @@ func (c *Compiler) compileWithItem(items []*model.WithItem, idx int, body []mode
 	// block.Level = SP here, with cm at stack[SP-1]
 	cleanupJump := c.emitJump(runtime.OpSetupWith) // stack: [..., cm]
 
-	// Compile body (or next nested with item)
+	// Track depth so break/continue inside the body know cleanup is needed.
+	c.withDepth++
 	if idx < len(items)-1 {
 		c.compileWithItem(items, idx+1, body)
 	} else {
@@ -623,6 +641,7 @@ func (c *Compiler) compileWithItem(items []*model.WithItem, idx int, body []mode
 			c.compileStmt(stmt)
 		}
 	}
+	c.withDepth--
 
 	// Normal exit: pop the BlockWith block
 	c.emit(runtime.OpPopExcept) // stack: [..., cm]

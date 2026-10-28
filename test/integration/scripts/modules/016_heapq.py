@@ -293,3 +293,33 @@ def test_large_heap():
     expect(result).to_be([1, 2, 3, 4, 5])
 
 test("large heap pop first 5", test_large_heap)
+
+
+# === nlargest/nsmallest must propagate comparison errors raised during ===
+# === the heap-building phase (n > len(items)) — regression: the deco* ===
+# === helpers used to discard heapLt errors silently, producing wrong ===
+# === ordering instead of raising.
+def test_nsmallest_incomparable_keys_raises():
+    items = [(1, "a"), ("oops", "b"), (3, "c")]
+    raised = False
+    try:
+        # n > len(items) keeps everything in heap-building, so all comparisons
+        # go through the deco* path that used to swallow errors.
+        heapq.nsmallest(4, items, key=lambda x: x[0])
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+def test_nlargest_incomparable_keys_raises():
+    items = [(1, "a"), ("oops", "b"), (3, "c")]
+    raised = False
+    try:
+        heapq.nlargest(4, items, key=lambda x: x[0])
+    except TypeError:
+        raised = True
+    expect(raised).to_be(True)
+
+
+test("nsmallest raises on incomparable keys", test_nsmallest_incomparable_keys_raises)
+test("nlargest raises on incomparable keys", test_nlargest_incomparable_keys_raises)

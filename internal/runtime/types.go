@@ -35,6 +35,15 @@ func (n *PyNotImplementedType) String() string { return "NotImplemented" }
 // NotImplemented is the singleton NotImplemented value
 var NotImplemented = &PyNotImplementedType{}
 
+// PyEllipsisType represents Python's Ellipsis singleton (the `...` literal).
+type PyEllipsisType struct{}
+
+func (e *PyEllipsisType) Type() string   { return "ellipsis" }
+func (e *PyEllipsisType) String() string { return "Ellipsis" }
+
+// Ellipsis is the singleton Ellipsis value
+var Ellipsis = &PyEllipsisType{}
+
 // PyBool represents a Python boolean
 type PyBool struct {
 	Value bool
@@ -160,36 +169,131 @@ func InternString(s string) *PyString {
 	return interned
 }
 
-// intPow computes base^exp using binary exponentiation to avoid float precision loss
-func intPow(base, exp int64) int64 {
-	if exp == 0 {
-		return 1
-	}
-	result := int64(1)
-	for exp > 0 {
-		if exp&1 == 1 {
-			result *= base
-		}
-		base *= base
-		exp >>= 1
-	}
-	return result
-}
-
 // ptrValue returns a uintptr for a Value, used for cycle detection in equality
 func ptrValue(v Value) uintptr {
 	return reflect.ValueOf(v).Pointer()
 }
 
 // isHashable checks if a value can be used as a dict key or set member
-// In Python, mutable types (list, dict, set) are not hashable
+// In Python, mutable types (list, dict, set) are not hashable, a tuple is
+// hashable only if its items are, and an instance is unhashable when its
+// class sets __hash__ = None (implicitly so when it defines __eq__ alone).
 func isHashable(v Value) bool {
-	switch v.(type) {
+	switch val := v.(type) {
 	case *PyList, *PyDict, *PySet:
 		return false
+	case *PyTuple:
+		for _, item := range val.Items {
+			if !isHashable(item) {
+				return false
+			}
+		}
+		return true
+	case *PyInstance:
+		for _, cls := range val.Class.Mro {
+			if h, ok := cls.Dict["__hash__"]; ok {
+				return h != None
+			}
+		}
+		return true
 	default:
 		return true
 	}
+}
+
+// Constants from CPython's Include/cpython/pyhash.h. Numeric hashes follow
+// CPython exactly so that hash() results and set iteration order match.
+const (
+	pyHashBits    = 61
+	pyHashModulus = (uint64(1) << pyHashBits) - 1
+	pyHashInf     = 314159
+	pyHashImag    = 1000003
+	pyHashNone    = 0xFCA86420
+)
+
+// fixHash maps the reserved hash value -1 to -2, as CPython does.
+func fixHash(h int64) uint64 {
+	if h == -1 {
+		h = -2
+	}
+	return uint64(h)
+}
+
+// hashInt64 returns CPython's hash of an int: the value reduced modulo 2**61-1,
+// keeping its sign.
+func hashInt64(v int64) uint64 {
+	if v >= 0 {
+		return fixHash(int64(uint64(v) % pyHashModulus))
+	}
+	// uint64(-v) is the correct magnitude even for math.MinInt64
+	return fixHash(-int64(uint64(-v) % pyHashModulus))
+}
+
+// hashBigInt returns CPython's hash of an arbitrary-precision int.
+func hashBigInt(b *big.Int) uint64 {
+	m := new(big.Int).Abs(b)
+	m.Mod(m, new(big.Int).SetUint64(pyHashModulus))
+	h := int64(m.Uint64())
+	if b.Sign() < 0 {
+		h = -h
+	}
+	return fixHash(h)
+}
+
+// hashFloat returns CPython's hash of a finite or infinite float. NaN is
+// hashed by identity in CPython, so callers handle it separately.
+func hashFloat(v float64) uint64 {
+	if math.IsInf(v, 1) {
+		return pyHashInf
+	}
+	if math.IsInf(v, -1) {
+		return fixHash(-pyHashInf)
+	}
+	m, e := math.Frexp(v)
+	sign := int64(1)
+	if m < 0 {
+		sign = -1
+		m = -m
+	}
+	var x uint64
+	for m != 0 {
+		x = ((x << 28) & pyHashModulus) | x>>(pyHashBits-28)
+		m *= 268435456.0 // 2**28
+		e -= 28
+		y := uint64(m)
+		m -= float64(y)
+		x += y
+		if x >= pyHashModulus {
+			x -= pyHashModulus
+		}
+	}
+	if e >= 0 {
+		e = e % pyHashBits
+	} else {
+		e = pyHashBits - 1 - ((-1 - e) % pyHashBits)
+	}
+	x = ((x << uint(e)) & pyHashModulus) | x>>(pyHashBits-uint(e))
+	return fixHash(int64(x) * sign)
+}
+
+// hashTupleItems combines element hashes using CPython's xxHash-based tuple hash.
+func hashTupleItems(items []Value, hashItem func(Value) uint64) uint64 {
+	const (
+		prime1 = 11400714785074694791
+		prime2 = 14029467366897019727
+		prime5 = 2870177450012600261
+	)
+	acc := uint64(prime5)
+	for _, item := range items {
+		acc += hashItem(item) * prime2
+		acc = (acc << 31) | (acc >> 33)
+		acc *= prime1
+	}
+	acc += uint64(len(items)) ^ (prime5 ^ 3527539)
+	if acc == ^uint64(0) {
+		return 1546275796
+	}
+	return acc
 }
 
 // hashValue computes a hash for a Python value
@@ -197,60 +301,30 @@ func isHashable(v Value) bool {
 func hashValue(v Value) uint64 {
 	switch val := v.(type) {
 	case *PyNone:
-		return 0x9e3779b97f4a7c15 // FNV offset basis
+		return pyHashNone
 	case *PyBool:
 		// Bool hash must match int hash: hash(True) == hash(1), hash(False) == hash(0)
-		h := uint64(0)
 		if val.Value {
-			h = 1
+			return 1
 		}
-		h ^= h >> 33
-		h *= 0xff51afd7ed558ccd
-		h ^= h >> 33
-		h *= 0xc4ceb9fe1a85ec53
-		h ^= h >> 33
-		return h
+		return 0
 	case *PyInt:
-		// Use FNV-1a style hashing for integers
-		h := uint64(val.Value)
-		h ^= h >> 33
-		h *= 0xff51afd7ed558ccd
-		h ^= h >> 33
-		h *= 0xc4ceb9fe1a85ec53
-		h ^= h >> 33
-		return h
+		if val.BigValue != nil {
+			return hashBigInt(val.BigValue)
+		}
+		return hashInt64(val.Value)
 	case *PyFloat:
-		// If the float is a whole number, hash it the same as the equivalent int
-		// This ensures hash(1) == hash(1.0) as required by Python
-		if val.Value == math.Trunc(val.Value) && !math.IsInf(val.Value, 0) && !math.IsNaN(val.Value) {
-			intVal := int64(val.Value)
-			h := uint64(intVal)
-			h ^= h >> 33
-			h *= 0xff51afd7ed558ccd
-			h ^= h >> 33
-			h *= 0xc4ceb9fe1a85ec53
-			h ^= h >> 33
-			return h
+		if math.IsNaN(val.Value) {
+			return uint64(ptrValue(v))
 		}
-		// Hash the bit representation of the float
-		bits := math.Float64bits(val.Value)
-		h := bits
-		h ^= h >> 33
-		h *= 0xff51afd7ed558ccd
-		h ^= h >> 33
-		return h
+		return hashFloat(val.Value)
 	case *PyComplex:
-		// hash(complex(x, 0)) must equal hash(x) for real numbers
-		if val.Imag == 0 {
-			if val.Real == math.Trunc(val.Real) && !math.IsInf(val.Real, 0) && !math.IsNaN(val.Real) {
-				return hashValue(MakeInt(int64(val.Real)))
-			}
-			return hashValue(&PyFloat{Value: val.Real})
+		// hash(complex(x, 0)) == hash(x) falls out of the formula
+		if math.IsNaN(val.Real) || math.IsNaN(val.Imag) {
+			return uint64(ptrValue(v))
 		}
-		// Combine real and imag hashes
-		hr := hashValue(&PyFloat{Value: val.Real})
-		hi := hashValue(&PyFloat{Value: val.Imag})
-		return hr ^ (hi * 1000003)
+		h := hashFloat(val.Real) + pyHashImag*hashFloat(val.Imag)
+		return fixHash(int64(h))
 	case *PyString:
 		// FNV-1a hash for strings
 		h := uint64(0xcbf29ce484222325)
@@ -267,48 +341,28 @@ func hashValue(v Value) uint64 {
 		}
 		return h
 	case *PyTuple:
-		// Hash tuple by combining element hashes
-		h := uint64(0xcbf29ce484222325)
-		for _, item := range val.Items {
-			itemHash := hashValue(item)
-			h ^= itemHash
-			h *= 0x100000001b3
-		}
-		return h
-	case *PyClass:
-		// Classes hash by identity (pointer)
-		return uint64(ptrValue(v))
-	case *PyInstance:
-		// Instances hash by identity by default
-		// Note: __hash__ support is handled in hashValueVM method
-		return uint64(ptrValue(v))
-	case *PyFunction:
-		return uint64(ptrValue(v))
-	case *PyBuiltinFunc:
-		return uint64(ptrValue(v))
+		return hashTupleItems(val.Items, hashValue)
 	case *PyFrozenSet:
-		// Hash frozenset by XORing element hashes (order-independent)
-		h := uint64(0xcbf29ce484222325)
-		for item := range val.Items {
-			itemHash := hashValue(item)
-			h ^= itemHash
-		}
-		return h
+		return frozenSetHash(&val.setTable)
 	default:
-		// Default to pointer hash for other types
+		// Classes, functions, instances and other objects hash by identity
 		return uint64(ptrValue(v))
 	}
 }
 
 // hashValueVM computes a hash with VM context, supporting __hash__ dunder method
 func (vm *VM) hashValueVM(v Value) uint64 {
-	if inst, ok := v.(*PyInstance); ok {
+	switch val := v.(type) {
+	case *PyInstance:
 		// Check for __hash__ method
-		if result, found, err := vm.callDunder(inst, "__hash__"); found && err == nil {
+		if result, found, err := vm.callDunder(val, "__hash__"); found && err == nil {
 			if i, ok := result.(*PyInt); ok {
-				return uint64(i.Value)
+				// CPython reduces the returned int like any other int hash
+				return hashValue(i)
 			}
 		}
+	case *PyTuple:
+		return hashTupleItems(val.Items, vm.hashValueVM)
 	}
 	return hashValue(v)
 }
@@ -319,7 +373,7 @@ type PyFloat struct {
 }
 
 func (f *PyFloat) Type() string   { return "float" }
-func (f *PyFloat) String() string { return fmt.Sprintf("%g", f.Value) }
+func (f *PyFloat) String() string { return floatRepr(f.Value) }
 
 // PyComplex represents a Python complex number
 type PyComplex struct {
@@ -333,26 +387,6 @@ func (c *PyComplex) String() string { return formatComplex(c.Real, c.Imag) }
 // MakeComplex creates a PyComplex value
 func MakeComplex(real, imag float64) *PyComplex {
 	return &PyComplex{Real: real, Imag: imag}
-}
-
-// formatComplex formats a complex number matching CPython output
-func formatComplex(real, imag float64) string {
-	formatPart := func(v float64) string {
-		s := fmt.Sprintf("%g", v)
-		return s
-	}
-
-	if real == 0 && !math.Signbit(real) {
-		// Pure imaginary: just show the imaginary part
-		return formatPart(imag) + "j"
-	}
-	// Full form with parens: (real+imagj)
-	imagStr := formatPart(imag)
-	sign := "+"
-	if imag < 0 || math.IsNaN(imag) {
-		sign = ""
-	}
-	return "(" + formatPart(real) + sign + imagStr + "j)"
 }
 
 // PyString represents a Python string
@@ -369,4 +403,4 @@ type PyBytes struct {
 }
 
 func (b *PyBytes) Type() string   { return "bytes" }
-func (b *PyBytes) String() string { return fmt.Sprintf("b'%s'", string(b.Value)) }
+func (b *PyBytes) String() string { return bytesRepr(b.Value) }

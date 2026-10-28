@@ -296,4 +296,115 @@ def test_cause_has_attributes():
 
 test("cause_has_attributes", test_cause_has_attributes)
 
+
+# === __context__ survives a try/finally inside an except handler ===
+# Regression: OpEndFinally used to unconditionally pop excHandlerStack,
+# which lost the outer handler's tracked exception so a freshly raised
+# exception inside the except block had no __context__ set.
+def test_context_preserved_through_inner_finally():
+    def run():
+        try:
+            raise ValueError("first")
+        except ValueError:
+            try:
+                pass
+            finally:
+                pass
+            try:
+                raise TypeError("second")
+            except TypeError as e:
+                return e
+
+    e = run()
+    expect(e.__context__ is None).to_be(False)
+    expect(str(e.__context__)).to_be("first")
+
+test("context_preserved_through_inner_finally", test_context_preserved_through_inner_finally)
+
+
+# === bare re-raise must preserve the original traceback ===
+# Regression: OpRaiseVarargs used to rebuild .Traceback even on arg==0
+# (bare `raise`), so debug info from the original raise site was lost.
+def test_bare_reraise_preserves_traceback():
+    captured_first = None
+    captured_second = None
+
+    def inner():
+        raise ValueError("original")
+
+    try:
+        inner()
+    except ValueError as e:
+        captured_first = e.__traceback__
+        try:
+            raise  # bare re-raise
+        except ValueError as e2:
+            captured_second = e2.__traceback__
+
+    # The traceback object must be the same on bare re-raise (it identifies
+    # the original raise site, not the re-raise site).
+    expect(captured_first is captured_second).to_be(True)
+
+
+# === `raise X from Y` must not mutate Y (or X if X is already an instance) ===
+# Regression: createException used to set Cause and SuppressContext in place
+# on the input *PyException, which could rewrite shared exception state.
+def test_raise_from_does_not_mutate_existing_exception():
+    e = ValueError("original")
+    raised_cause = None
+    raised_suppress = None
+
+    try:
+        try:
+            raise TypeError("trigger")
+        except TypeError as t:
+            raise e from t
+    except ValueError as caught:
+        raised_cause = caught.__cause__
+        raised_suppress = caught.__suppress_context__
+
+    # The raised exception (a clone) carries the chained cause/suppress.
+    expect(type(raised_cause).__name__ != "NoneType").to_be(True)
+    expect(raised_suppress).to_be(True)
+
+    # But the original `e` object must NOT have been mutated. Pre-fix,
+    # `e.__cause__` was set on the shared object; post-fix, accessing
+    # `__cause__` on the original raises AttributeError because the
+    # clone took the cause, not `e`.
+    e_was_mutated = True
+    try:
+        _ = e.__cause__
+    except AttributeError:
+        e_was_mutated = False
+    expect(e_was_mutated).to_be(False)
+
+
+test("bare_reraise_preserves_traceback", test_bare_reraise_preserves_traceback)
+test("raise_from_does_not_mutate_existing_exception", test_raise_from_does_not_mutate_existing_exception)
+
+
+# === __context__ is chained when an exception comes back from a call ===
+# Regression: OpCall*'s error path bypassed the excHandlerStack-based context
+# chaining that tryHandleError does, so exceptions raised inside a called
+# function got no __context__ when caught inside an outer except handler.
+def test_context_chained_through_function_call():
+    def inner():
+        raise TypeError("from call")
+
+    captured_ctx = None
+    try:
+        raise ValueError("outer")
+    except ValueError:
+        try:
+            inner()
+        except TypeError as t:
+            captured_ctx = t.__context__
+
+    expect(captured_ctx is None).to_be(False)
+    expect(str(captured_ctx)).to_be("outer")
+    expect(type(captured_ctx) is ValueError).to_be(True)
+
+
+test("context_chained_through_function_call", test_context_chained_through_function_call)
+
 print("CPython exception chaining tests completed")
