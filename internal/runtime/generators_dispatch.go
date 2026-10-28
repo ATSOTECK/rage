@@ -1089,7 +1089,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		frame.BlockStack = append(frame.BlockStack, block)
 
 	case OpSetupFinally:
-		vm.finallyExcLevels = append(vm.finallyExcLevels, len(vm.excHandlerStack))
+		fin := frame.finally()
+		fin.excLevels = append(fin.excLevels, len(vm.excHandlerStack))
 		block := Block{
 			Type:    BlockFinally,
 			Handler: arg,
@@ -1174,9 +1175,10 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	case OpEndFinally:
 		// Restore excHandlerStack to the level recorded at OpSetupFinally.
-		if n := len(vm.finallyExcLevels); n > 0 {
-			savedLevel := vm.finallyExcLevels[n-1]
-			vm.finallyExcLevels = vm.finallyExcLevels[:n-1]
+		fin := frame.finally()
+		if n := len(fin.excLevels); n > 0 {
+			savedLevel := fin.excLevels[n-1]
+			fin.excLevels = fin.excLevels[:n-1]
 			for i := savedLevel; i < len(vm.excHandlerStack); i++ {
 				vm.excHandlerStack[i] = nil
 			}
@@ -1194,10 +1196,10 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		// Resume a return that was suspended to run this finally body.
 		// If outer with/finally blocks remain, continue unwinding into them.
-		if vm.generatorHasPendingReturn {
-			vm.generatorHasPendingReturn = false
-			result := vm.generatorPendingReturn
-			vm.generatorPendingReturn = nil
+		if fin.hasPendingReturn {
+			fin.hasPendingReturn = false
+			result := fin.pendingReturn
+			fin.pendingReturn = nil
 			transferred, err := vm.unwindForReturn(frame, result)
 			if err != nil {
 				return nil, err
@@ -1208,9 +1210,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			return result, nil
 		}
 		// Resume a break/continue suspended to run this finally body.
-		if vm.generatorHasPendingJump {
-			vm.generatorHasPendingJump = false
-			target := vm.generatorPendingJump
+		if fin.hasPendingJump {
+			fin.hasPendingJump = false
+			target := fin.pendingJump
 			if _, err := vm.unwindForJump(frame, target); err != nil {
 				return nil, err
 			}

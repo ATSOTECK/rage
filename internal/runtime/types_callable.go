@@ -283,10 +283,34 @@ type Frame struct {
 	OrderedGlobalKeys []string        // Insertion-ordered global names (for class bodies)
 	Kwargs           map[string]Value // Keyword args, for stack-based Go builtins (PyGoFunc)
 
+	// try/finally bookkeeping, allocated by finally() on first use. It lives
+	// on the frame so a function called from a finally body, or a generator
+	// suspended inside one, can't disturb (or leak stale state into) another
+	// frame's pending control flow.
+	fin *frameFinally
+
 	// slots is the backing buffer shared by Locals and the initial Stack for
 	// frames created by createFunctionFrame. It is kept when the frame is
 	// recycled through the VM's frame pool (see releaseFrame).
 	slots []Value
+}
+
+// frameFinally is a frame's try/finally state.
+type frameFinally struct {
+	pendingReturn    Value // return value suspended while a finally body runs
+	hasPendingReturn bool
+	pendingJump      int // break/continue target suspended while a finally body runs
+	hasPendingJump   bool
+	pendingDepth     int   // len(BlockStack) when the pending return/jump was suspended
+	excLevels        []int // excHandlerStack level recorded at each SETUP_FINALLY
+}
+
+// finally returns the frame's try/finally state, creating it if needed.
+func (f *Frame) finally() *frameFinally {
+	if f.fin == nil {
+		f.fin = &frameFinally{}
+	}
+	return f.fin
 }
 
 // Block represents a control flow block
@@ -409,12 +433,6 @@ type PyGenerator struct {
 	SavedCurrentException    *PyException
 	SavedLastException       *PyException
 	SavedExcHandlerStack     []*PyException
-	SavedFinallyExcLevels    []int
-	SavedPendingReturn       Value
-	SavedHasPendingReturn    bool
-	SavedPendingJump         int
-	SavedHasPendingJump      bool
-
 	// frames is a reusable call-stack buffer installed as vm.frames while
 	// the generator runs, so resuming it does not allocate a new slice.
 	frames []*Frame
@@ -435,11 +453,6 @@ type PyCoroutine struct {
 	SavedCurrentException *PyException
 	SavedLastException    *PyException
 	SavedExcHandlerStack  []*PyException
-	SavedFinallyExcLevels []int
-	SavedPendingReturn    Value
-	SavedHasPendingReturn bool
-	SavedPendingJump      int
-	SavedHasPendingJump   bool
 }
 
 func (c *PyCoroutine) Type() string   { return "coroutine" }

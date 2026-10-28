@@ -117,6 +117,70 @@ def test_raw_errors_caught_in_same_frame():
         caught.append("type")
     expect(caught).to_be(["name", "type"])
 
+def test_finally_state_is_per_frame():
+    def finally_return():
+        try:
+            return 1
+        finally:
+            return 2
+    def finally_break():
+        r = []
+        for i in range(3):
+            try:
+                if i == 1:
+                    break
+                r.append(i)
+            finally:
+                r.append("f%d" % i)
+        return r
+    # finally_return used to leave a stale pending return that the next
+    # unrelated finally block resumed
+    expect((finally_return(), finally_break())).to_be((2, [0, "f0", "f1"]))
+
+def test_call_inside_finally_keeps_callers_return():
+    def inner():
+        try:
+            return "inner"
+        finally:
+            pass
+    def outer():
+        try:
+            return "outer"
+        finally:
+            inner()
+    expect(outer()).to_be("outer")
+
+def test_pending_return_vs_exceptions():
+    def caught_inside_finally():
+        try:
+            return 1
+        finally:
+            try:
+                raise ValueError
+            except ValueError:
+                pass
+    def escaped_finally():
+        try:
+            try:
+                return 1
+            finally:
+                raise ValueError
+        except ValueError:
+            pass
+        try:
+            pass
+        finally:
+            pass
+        return 2
+    def break_cancels_return():
+        for i in range(3):
+            try:
+                return "ret"
+            finally:
+                break
+        return "after"
+    expect((caught_inside_finally(), escaped_finally(), break_cancels_return())).to_be((1, 2, "after"))
+
 def test_soft_keywords():
     import re
     match = re.match("a", "abc")
@@ -204,6 +268,9 @@ test("short_circuit_in_call_args", test_short_circuit_in_call_args)
 test("typed_except_inside_loop", test_typed_except_inside_loop)
 test("builtin_errors_have_python_types", test_builtin_errors_have_python_types)
 test("raw_errors_caught_in_same_frame", test_raw_errors_caught_in_same_frame)
+test("finally_state_is_per_frame", test_finally_state_is_per_frame)
+test("call_inside_finally_keeps_callers_return", test_call_inside_finally_keeps_callers_return)
+test("pending_return_vs_exceptions", test_pending_return_vs_exceptions)
 test("soft_keywords", test_soft_keywords)
 test("fstring_forms", test_fstring_forms)
 test("nested_with_outer_suppresses", test_nested_with_outer_suppresses)

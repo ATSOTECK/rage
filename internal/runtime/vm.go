@@ -22,16 +22,11 @@ type VM struct {
 	currentException *PyException   // Currently active exception being handled
 	lastException    *PyException   // Last raised exception (for bare raise)
 	excHandlerStack  []*PyException // Stack of exceptions being handled (for __context__)
-	finallyExcLevels []int          // excHandlerStack level recorded at each OpSetupFinally
 
 	// Generator exception injection
 	generatorThrow *PyException // Exception to throw into generator on resume
 
 	// Generator return/continue-through-finally state
-	generatorPendingReturn    Value // Return value pending while finally block executes
-	generatorHasPendingReturn bool  // Whether a return is pending
-	generatorPendingJump      int   // Jump target pending while finally block executes (continue/break)
-	generatorHasPendingJump   bool  // Whether a jump is pending
 
 	// except* state stack
 	exceptStarStack []ExceptStarState
@@ -411,8 +406,11 @@ func (vm *VM) unwindForReturn(frame *Frame, result Value) (bool, error) {
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 			frame.SP = block.Level
 			frame.IP = block.Handler
-			vm.generatorPendingReturn = result
-			vm.generatorHasPendingReturn = true
+			fin := frame.finally()
+			fin.pendingReturn = result
+			fin.hasPendingReturn = true
+			fin.hasPendingJump = false // a return abandons any pending break/continue
+			fin.pendingDepth = len(frame.BlockStack)
 			vm.push(None)
 			return true, nil
 		case BlockWith:
@@ -443,8 +441,11 @@ func (vm *VM) unwindForJump(frame *Frame, target int) (bool, error) {
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 			frame.SP = block.Level
 			frame.IP = block.Handler
-			vm.generatorPendingJump = target
-			vm.generatorHasPendingJump = true
+			fin := frame.finally()
+			fin.pendingJump = target
+			fin.hasPendingJump = true
+			fin.hasPendingReturn = false // break/continue abandons any pending return
+			fin.pendingDepth = len(frame.BlockStack)
 			return true, nil
 		case BlockWith:
 			frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]

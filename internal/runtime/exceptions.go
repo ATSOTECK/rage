@@ -216,6 +216,16 @@ func (vm *VM) handleException(exc *PyException) (Value, error) {
 		block := frame.BlockStack[len(frame.BlockStack)-1]
 		frame.BlockStack = frame.BlockStack[:len(frame.BlockStack)-1]
 
+		// A handler set up outside a running finally body means the exception
+		// escaped that body, abandoning the return or break/continue it was
+		// running for. Handlers inside the finally body leave it pending.
+		if fin := frame.fin; fin != nil && block.Type != BlockLoop && len(frame.BlockStack) < fin.pendingDepth {
+			fin.hasPendingReturn = false
+			fin.pendingReturn = nil
+			fin.hasPendingJump = false
+			fin.pendingDepth = 0
+		}
+
 		switch block.Type {
 		case BlockExcept:
 			// Found exception handler - restore stack and jump to handler

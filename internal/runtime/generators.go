@@ -39,11 +39,6 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldFinallyExcLevels := vm.finallyExcLevels
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
 	if gen.frames == nil {
@@ -55,11 +50,6 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	vm.currentException = gen.SavedCurrentException
 	vm.lastException = gen.SavedLastException
 	vm.excHandlerStack = gen.SavedExcHandlerStack
-	vm.finallyExcLevels = gen.SavedFinallyExcLevels
-	vm.generatorPendingReturn = gen.SavedPendingReturn
-	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
-	vm.generatorPendingJump = gen.SavedPendingJump
-	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// If resuming from yield, push the sent value onto the stack
 	if gen.Frame.IP > 0 {
@@ -78,11 +68,6 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	gen.SavedCurrentException = vm.currentException
 	gen.SavedLastException = vm.lastException
 	gen.SavedExcHandlerStack = vm.excHandlerStack
-	gen.SavedFinallyExcLevels = vm.finallyExcLevels
-	gen.SavedPendingReturn = vm.generatorPendingReturn
-	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	gen.SavedPendingJump = vm.generatorPendingJump
-	gen.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -90,11 +75,6 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.finallyExcLevels = oldFinallyExcLevels
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		gen.State = GenClosed
@@ -196,22 +176,12 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldFinallyExcLevels := vm.finallyExcLevels
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
 	vm.frames = []*Frame{gen.Frame}
 	vm.currentException = gen.SavedCurrentException
 	vm.lastException = gen.SavedLastException
 	vm.excHandlerStack = gen.SavedExcHandlerStack
-	vm.finallyExcLevels = gen.SavedFinallyExcLevels
-	vm.generatorPendingReturn = gen.SavedPendingReturn
-	vm.generatorHasPendingReturn = gen.SavedHasPendingReturn
-	vm.generatorPendingJump = gen.SavedPendingJump
-	vm.generatorHasPendingJump = gen.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
@@ -220,11 +190,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	gen.SavedCurrentException = vm.currentException
 	gen.SavedLastException = vm.lastException
 	gen.SavedExcHandlerStack = vm.excHandlerStack
-	gen.SavedFinallyExcLevels = vm.finallyExcLevels
-	gen.SavedPendingReturn = vm.generatorPendingReturn
-	gen.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	gen.SavedPendingJump = vm.generatorPendingJump
-	gen.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -232,11 +197,6 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.finallyExcLevels = oldFinallyExcLevels
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		gen.State = GenClosed
@@ -342,22 +302,12 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldFinallyExcLevels := vm.finallyExcLevels
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
 	vm.currentException = coro.SavedCurrentException
 	vm.lastException = coro.SavedLastException
 	vm.excHandlerStack = coro.SavedExcHandlerStack
-	vm.finallyExcLevels = coro.SavedFinallyExcLevels
-	vm.generatorPendingReturn = coro.SavedPendingReturn
-	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
-	vm.generatorPendingJump = coro.SavedPendingJump
-	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	if coro.Frame.IP > 0 {
 		vm.push(value)
@@ -369,11 +319,6 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	coro.SavedCurrentException = vm.currentException
 	coro.SavedLastException = vm.lastException
 	coro.SavedExcHandlerStack = vm.excHandlerStack
-	coro.SavedFinallyExcLevels = vm.finallyExcLevels
-	coro.SavedPendingReturn = vm.generatorPendingReturn
-	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	coro.SavedPendingJump = vm.generatorPendingJump
-	coro.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -381,11 +326,6 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.finallyExcLevels = oldFinallyExcLevels
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
@@ -475,22 +415,12 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	oldCurrentException := vm.currentException
 	oldLastException := vm.lastException
 	oldExcHandlerStack := vm.excHandlerStack
-	oldFinallyExcLevels := vm.finallyExcLevels
-	oldPendingReturn := vm.generatorPendingReturn
-	oldHasPendingReturn := vm.generatorHasPendingReturn
-	oldPendingJump := vm.generatorPendingJump
-	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = coro.Frame
 	vm.frames = []*Frame{coro.Frame}
 	vm.currentException = coro.SavedCurrentException
 	vm.lastException = coro.SavedLastException
 	vm.excHandlerStack = coro.SavedExcHandlerStack
-	vm.finallyExcLevels = coro.SavedFinallyExcLevels
-	vm.generatorPendingReturn = coro.SavedPendingReturn
-	vm.generatorHasPendingReturn = coro.SavedHasPendingReturn
-	vm.generatorPendingJump = coro.SavedPendingJump
-	vm.generatorHasPendingJump = coro.SavedHasPendingJump
 
 	// Run until yield or return (exception will be handled in runWithYieldSupport)
 	result, yielded, err := vm.runGenerator()
@@ -499,11 +429,6 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	coro.SavedCurrentException = vm.currentException
 	coro.SavedLastException = vm.lastException
 	coro.SavedExcHandlerStack = vm.excHandlerStack
-	coro.SavedFinallyExcLevels = vm.finallyExcLevels
-	coro.SavedPendingReturn = vm.generatorPendingReturn
-	coro.SavedHasPendingReturn = vm.generatorHasPendingReturn
-	coro.SavedPendingJump = vm.generatorPendingJump
-	coro.SavedHasPendingJump = vm.generatorHasPendingJump
 
 	// Restore caller's frame and VM state
 	vm.frame = oldFrame
@@ -511,11 +436,6 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 	vm.currentException = oldCurrentException
 	vm.lastException = oldLastException
 	vm.excHandlerStack = oldExcHandlerStack
-	vm.finallyExcLevels = oldFinallyExcLevels
-	vm.generatorPendingReturn = oldPendingReturn
-	vm.generatorHasPendingReturn = oldHasPendingReturn
-	vm.generatorPendingJump = oldPendingJump
-	vm.generatorHasPendingJump = oldHasPendingJump
 
 	if err != nil {
 		coro.State = GenClosed
