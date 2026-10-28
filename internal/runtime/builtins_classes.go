@@ -395,6 +395,14 @@ func (vm *VM) initBuiltinsClasses() {
 				}
 			}
 
+			// A class that defines __eq__ without __hash__ is unhashable:
+			// CPython sets its __hash__ to None.
+			if _, hasEq := class.Dict["__eq__"]; hasEq {
+				if _, hasHash := class.Dict["__hash__"]; !hasHash {
+					class.Dict["__hash__"] = None
+				}
+			}
+
 			// Call __set_name__ on descriptors in the class dict
 			if err := vm.callSetName(class); err != nil {
 				return nil, err
@@ -597,6 +605,18 @@ func (vm *VM) initBuiltinsClasses() {
 	}
 	objectClass.Mro = []*PyClass{objectClass}
 	vm.initObjectTextMethods(objectClass)
+
+	// object.__hash__(self) - the default identity-based hash, so a class
+	// can restore hashability with __hash__ = object.__hash__.
+	objectClass.Dict["__hash__"] = &PyBuiltinFunc{
+		Name: "object.__hash__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: object.__hash__() takes exactly one argument (%d given)", len(args))
+			}
+			return MakeInt(int64(hashValue(args[0]) >> 1)), nil
+		},
+	}
 
 	// object.__init__(self, ...) - no-op terminus for super().__init__() chains
 	// and explicit Base.__init__(self) calls. Extra arguments are accepted.

@@ -338,7 +338,7 @@ func (vm *VM) runDispatch() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(v.Value + 1)
+				frame.Locals[arg] = AddInts(v, MakeInt(1))
 			} else {
 				// Fallback for non-int
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
@@ -359,7 +359,7 @@ func (vm *VM) runDispatch() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(v.Value - 1)
+				frame.Locals[arg] = SubInts(v, MakeInt(1))
 			} else {
 				result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
 				if err != nil {
@@ -379,7 +379,7 @@ func (vm *VM) runDispatch() (Value, error) {
 				return nil, unboundLocalError(frame, arg)
 			}
 			if v, ok := frame.Locals[arg].(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(-v.Value)
+				frame.Locals[arg] = NegateInt(v)
 			} else if v, ok := frame.Locals[arg].(*PyFloat); ok {
 				frame.Locals[arg] = &PyFloat{Value: -v.Value}
 			} else {
@@ -403,9 +403,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			constIdx := (arg >> 8) & 0xFF
 			constVal := vm.constValue(frame.Code, constIdx)
 			localVal := frame.Locals[localIdx]
-			if li, ok := localVal.(*PyInt); ok {
-				if ci, ok := constVal.(*PyInt); ok {
-					frame.Locals[localIdx] = MakeInt(li.Value + ci.Value)
+			if li, ok := localVal.(*PyInt); ok && li.BigValue == nil {
+				if ci, ok := constVal.(*PyInt); ok && ci.BigValue == nil {
+					frame.Locals[localIdx] = AddInts(li, ci)
 					break
 				}
 			}
@@ -432,15 +432,15 @@ func (vm *VM) runDispatch() (Value, error) {
 					frame.Locals[arg] = &PyFloat{Value: lf.Value + af.Value}
 					break
 				}
-				if ai, ok := addend.(*PyInt); ok {
+				if ai, ok := addend.(*PyInt); ok && ai.BigValue == nil {
 					frame.Locals[arg] = &PyFloat{Value: lf.Value + float64(ai.Value)}
 					break
 				}
 			}
 			// Fast path for int accumulation
-			if li, ok := localVal.(*PyInt); ok {
-				if ai, ok := addend.(*PyInt); ok {
-					frame.Locals[arg] = MakeInt(li.Value + ai.Value)
+			if li, ok := localVal.(*PyInt); ok && li.BigValue == nil {
+				if ai, ok := addend.(*PyInt); ok && ai.BigValue == nil {
+					frame.Locals[arg] = AddInts(li, ai)
 					break
 				}
 				if af, ok := addend.(*PyFloat); ok {
@@ -511,9 +511,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = AddInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -536,9 +536,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = SubInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -560,9 +560,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = MulInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -586,8 +586,8 @@ func (vm *VM) runDispatch() (Value, error) {
 			frame.SP--
 			a := frame.Stack[frame.SP]
 			// Fast path for int/int division
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if bi.Value == 0 {
 						divErr := fmt.Errorf("ZeroDivisionError: division by zero")
 						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
@@ -615,7 +615,7 @@ func (vm *VM) runDispatch() (Value, error) {
 				}
 			}
 			if af, ok := a.(*PyFloat); ok {
-				if bi, ok := b.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if bi.Value == 0 {
 						divErr := fmt.Errorf("ZeroDivisionError: float division by zero")
 						if handled, handleErr := vm.tryHandleError(divErr, frame); handleErr != nil {
@@ -666,13 +666,13 @@ func (vm *VM) runDispatch() (Value, error) {
 					frame.SP++
 					break
 				}
-				if bi, ok := b.(*PyInt); ok {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					frame.Stack[frame.SP] = &PyFloat{Value: af.Value + float64(bi.Value)}
 					frame.SP++
 					break
 				}
 			}
-			if ai, ok := a.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
 				if bf, ok := b.(*PyFloat); ok {
 					frame.Stack[frame.SP] = &PyFloat{Value: float64(ai.Value) + bf.Value}
 					frame.SP++
@@ -697,8 +697,8 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					var cmp bool
 					switch op {
 					case OpCompareLtInt:
@@ -771,8 +771,8 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					var cmp bool
 					switch op {
 					case OpCompareLtJump:
@@ -833,8 +833,8 @@ func (vm *VM) runDispatch() (Value, error) {
 				return nil, unboundLocalError(frame, local2)
 			}
 			// Fast path for ints
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if ai.Value < bi.Value {
 						vm.push(True)
 					} else {
@@ -948,7 +948,7 @@ func (vm *VM) runDispatch() (Value, error) {
 						}
 						return nil, err
 					}
-					if i, ok := result.(*PyInt); ok {
+					if i, ok := result.(*PyInt); ok && i.BigValue == nil {
 						length = i.Value
 					} else {
 						lenErr := fmt.Errorf("__len__() should return an integer")
@@ -1204,9 +1204,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value + bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = AddInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1229,9 +1229,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value - bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = SubInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1253,9 +1253,9 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
-					frame.Stack[frame.SP] = MakeInt(ai.Value * bi.Value)
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+					frame.Stack[frame.SP] = MulInts(ai, bi)
 					frame.SP++
 					break
 				}
@@ -1307,7 +1307,7 @@ func (vm *VM) runDispatch() (Value, error) {
 					continue
 				}
 				if op == OpInplaceMultiply {
-					if n, ok := b.(*PyInt); ok {
+					if n, ok := b.(*PyInt); ok && n.BigValue == nil {
 						count := int(n.Value)
 						if count <= 0 {
 							lst.Items = []Value{}
@@ -1412,8 +1412,8 @@ func (vm *VM) runDispatch() (Value, error) {
 			b := frame.Stack[frame.SP]
 			frame.SP--
 			a := frame.Stack[frame.SP]
-			if ai, ok := a.(*PyInt); ok {
-				if bi, ok := b.(*PyInt); ok {
+			if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+				if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 					if ai.Value < bi.Value {
 						frame.Stack[frame.SP] = True
 					} else {
@@ -2519,7 +2519,7 @@ func (vm *VM) runDispatch() (Value, error) {
 
 			// Get level as int
 			level := 0
-			if levelInt, ok := levelVal.(*PyInt); ok {
+			if levelInt, ok := levelVal.(*PyInt); ok && levelInt.BigValue == nil {
 				level = int(levelInt.Value)
 			}
 

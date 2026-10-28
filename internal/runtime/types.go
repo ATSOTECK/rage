@@ -191,11 +191,27 @@ func ptrValue(v Value) uintptr {
 }
 
 // isHashable checks if a value can be used as a dict key or set member
-// In Python, mutable types (list, dict, set) are not hashable
+// In Python, mutable types (list, dict, set) are not hashable, a tuple is
+// hashable only if its items are, and an instance is unhashable when its
+// class sets __hash__ = None (implicitly so when it defines __eq__ alone).
 func isHashable(v Value) bool {
-	switch v.(type) {
+	switch val := v.(type) {
 	case *PyList, *PyDict, *PySet:
 		return false
+	case *PyTuple:
+		for _, item := range val.Items {
+			if !isHashable(item) {
+				return false
+			}
+		}
+		return true
+	case *PyInstance:
+		for _, cls := range val.Class.Mro {
+			if h, ok := cls.Dict["__hash__"]; ok {
+				return h != None
+			}
+		}
+		return true
 	default:
 		return true
 	}
