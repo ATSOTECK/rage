@@ -745,7 +745,7 @@ func (vm *VM) initBuiltinsClasses() {
 	}}
 
 	// object.__new__(cls) - create a new instance of cls
-	objectClass.Dict["__new__"] = &PyBuiltinFunc{
+	vm.objectNew = &PyBuiltinFunc{
 		Name: "object.__new__",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) < 1 {
@@ -767,6 +767,7 @@ func (vm *VM) initBuiltinsClasses() {
 			}, nil
 		},
 	}
+	objectClass.Dict["__new__"] = vm.objectNew
 
 	// type is a proper PyClass (the metaclass of all classes)
 	typeClass := &PyClass{

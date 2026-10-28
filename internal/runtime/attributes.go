@@ -32,14 +32,21 @@ func (vm *VM) callMethodValue(method Value, self Value, args ...Value) (Value, e
 // This is the logic behind object.__getattribute__: data descriptors -> instance dict -> class MRO.
 // It does NOT call __getattr__; the caller handles that fallback.
 func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
-	// Descriptor protocol: First check class MRO for data descriptors
+	// Descriptor protocol: First check class MRO for data descriptors.
+	// Also remember the first class attribute found, which is what the
+	// non-data-descriptor lookup below would find again.
+	var clsVal Value
+	clsFound := false
 	for _, cls := range o.Class.Mro {
 		if val, ok := cls.Dict[name]; ok {
+			if !clsFound {
+				clsVal, clsFound = val, true
+			}
 			if prop, ok := val.(*PyProperty); ok {
 				if prop.Fget == nil {
 					return nil, fmt.Errorf("property '%s' has no getter", name)
 				}
-				return vm.call(prop.Fget, []Value{o}, nil)
+				return vm.call1(prop.Fget, o)
 			}
 			if inst, ok := val.(*PyInstance); ok {
 				if vm.hasMethod(inst, "__set__") || vm.hasMethod(inst, "__delete__") {
@@ -73,49 +80,48 @@ func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
 	}
 
 	// Then check class MRO for methods/attributes (non-data descriptors)
-	for _, cls := range o.Class.Mro {
-		if val, ok := cls.Dict[name]; ok {
-			if cm, ok := val.(*PyClassMethod); ok {
-				if fn, ok := cm.Func.(*PyFunction); ok {
-					return &PyMethod{Func: fn, Instance: o.Class}, nil
-				}
-				return &PyBuiltinFunc{
-					Name: "bound_classmethod",
-					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-						newArgs := make([]Value, len(args)+1)
-						newArgs[0] = o.Class
-						copy(newArgs[1:], args)
-						return vm.call(cm.Func, newArgs, kwargs)
-					},
-				}, nil
+	if clsFound {
+		val := clsVal
+		if cm, ok := val.(*PyClassMethod); ok {
+			if fn, ok := cm.Func.(*PyFunction); ok {
+				return &PyMethod{Func: fn, Instance: o.Class}, nil
 			}
-			if sm, ok := val.(*PyStaticMethod); ok {
-				return sm.Func, nil
-			}
-			if fn, ok := val.(*PyFunction); ok {
-				return &PyMethod{Func: fn, Instance: o}, nil
-			}
-			if bf, ok := val.(*PyBuiltinFunc); ok {
-				boundInst := Value(o)
-				return &PyBuiltinFunc{
-					Name:  bf.Name,
-					Bound: true,
-					Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-						allArgs := append([]Value{boundInst}, args...)
-						return bf.Fn(allArgs, kwargs)
-					},
-				}, nil
-			}
-			if inst, ok := val.(*PyInstance); ok {
-				if getResult, found, err := vm.callDunder(inst, "__get__", o, o.Class); found {
-					if err != nil {
-						return nil, err
-					}
-					return getResult, nil
-				}
-			}
-			return val, nil
+			return &PyBuiltinFunc{
+				Name: "bound_classmethod",
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					newArgs := make([]Value, len(args)+1)
+					newArgs[0] = o.Class
+					copy(newArgs[1:], args)
+					return vm.call(cm.Func, newArgs, kwargs)
+				},
+			}, nil
 		}
+		if sm, ok := val.(*PyStaticMethod); ok {
+			return sm.Func, nil
+		}
+		if fn, ok := val.(*PyFunction); ok {
+			return &PyMethod{Func: fn, Instance: o}, nil
+		}
+		if bf, ok := val.(*PyBuiltinFunc); ok {
+			boundInst := Value(o)
+			return &PyBuiltinFunc{
+				Name:  bf.Name,
+				Bound: true,
+				Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+					allArgs := append([]Value{boundInst}, args...)
+					return bf.Fn(allArgs, kwargs)
+				},
+			}, nil
+		}
+		if inst, ok := val.(*PyInstance); ok {
+			if getResult, found, err := vm.callDunder(inst, "__get__", o, o.Class); found {
+				if err != nil {
+					return nil, err
+				}
+				return getResult, nil
+			}
+		}
+		return val, nil
 	}
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Class.Name, name)
 }
@@ -427,7 +433,7 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 	switch o := obj.(type) {
 	case *PyInstance:
 		// Check for user-defined __setattr__ (skip object base class)
-		objectClass := vm.builtinClass("object")
+		objectClass := vm.objectClass()
 		for _, cls := range o.Class.Mro {
 			if cls == objectClass {
 				break
@@ -519,7 +525,7 @@ func (vm *VM) delAttr(obj Value, name string) error {
 	switch o := obj.(type) {
 	case *PyInstance:
 		// Check for user-defined __delattr__ (skip object base class)
-		objectClass := vm.builtinClass("object")
+		objectClass := vm.objectClass()
 		for _, cls := range o.Class.Mro {
 			if cls == objectClass {
 				break

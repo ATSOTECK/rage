@@ -55,6 +55,16 @@ type VM struct {
 	// Call order of recent keyword-argument maps (Go maps are unordered)
 	kwargOrders    [8]kwargOrderRecord
 	kwargOrderNext int
+	// framePool holds finished function frames for reuse by
+	// createFunctionFrame, avoiding two allocations per Python call.
+	framePool []*Frame
+
+	// objectNew is the builtin object.__new__, which classCall can invoke
+	// without copying its arguments.
+	objectNew *PyBuiltinFunc
+
+	// objectCls caches the builtin object class (see objectClass).
+	objectCls *PyClass
 }
 
 // TimeoutError is returned when script execution exceeds the time limit
@@ -104,6 +114,15 @@ func NewVM() *VM {
 	}
 
 	return vm
+}
+
+// objectClass returns the builtin object class, caching the builtins lookup
+// for hot paths such as attribute assignment.
+func (vm *VM) objectClass() *PyClass {
+	if vm.objectCls == nil {
+		vm.objectCls = vm.builtinClass("object")
+	}
+	return vm.objectCls
 }
 
 // SetCheckInterval sets how often the VM checks for timeout/cancellation.

@@ -4,6 +4,30 @@ import "fmt"
 
 // Function calls
 
+// callFunctionWithSelf calls fn with self followed by args. callFunction
+// copies its arguments into the new frame without retaining the slice, so for
+// small arities the combined argument list is built on the Go stack instead
+// of the heap.
+func (vm *VM) callFunctionWithSelf(fn *PyFunction, self Value, args []Value, kwargs map[string]Value) (Value, error) {
+	if len(args) < 4 {
+		var buf [4]Value
+		buf[0] = self
+		n := copy(buf[1:], args)
+		return vm.callFunction(fn, buf[:n+1], kwargs)
+	}
+	return vm.callFunction(fn, prependArg(self, args), kwargs)
+}
+
+// call1 calls callable with a single positional argument, avoiding a heap
+// allocated argument slice when callable is a Python function.
+func (vm *VM) call1(callable Value, arg Value) (Value, error) {
+	if fn, ok := callable.(*PyFunction); ok {
+		args := [1]Value{arg}
+		return vm.callFunction(fn, args[:], nil)
+	}
+	return vm.call(callable, []Value{arg}, nil)
+}
+
 func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value, error) {
 	switch fn := callable.(type) {
 	case *PyBuiltinFunc:
@@ -18,30 +42,12 @@ func (vm *VM) call(callable Value, args []Value, kwargs map[string]Value) (Value
 
 	case *PyMethod:
 		// Prepend instance to args
-		allArgs := append([]Value{fn.Instance}, args...)
-		return vm.callFunction(fn.Func, allArgs, kwargs)
+		return vm.callFunctionWithSelf(fn.Func, fn.Instance, args, kwargs)
 
 	case *PyClass:
-		// Check for custom metaclass __call__ override
-		typeClass, _ := vm.builtins["type"].(*PyClass)
-		if fn.Metaclass != nil && fn.Metaclass != typeClass {
-			for _, cls := range fn.Metaclass.Mro {
-				if cls == typeClass {
-					break
-				}
-				if callMethod, ok := cls.Dict["__call__"]; ok {
-					mcArgs := append([]Value{fn}, args...)
-					switch cm := callMethod.(type) {
-					case *PyFunction:
-						return vm.callFunction(cm, mcArgs, kwargs)
-					case *PyBuiltinFunc:
-						return cm.Fn(mcArgs, kwargs)
-					}
-				}
-			}
-		}
-
-		return vm.defaultClassCall(fn, args, kwargs)
+		slotArgs := make([]Value, len(args)+1)
+		copy(slotArgs[1:], args)
+		return vm.callClass(fn, slotArgs, kwargs)
 
 	case *PyUserData:
 		// Check for __call__ method in metatable
@@ -222,12 +228,97 @@ func (vm *VM) callFunction(fn *PyFunction, args []Value, kwargs map[string]Value
 		vm.frame = oldFrame
 	}
 
+	// A frame that returned normally (RETURN_VALUE popped it off vm.frames)
+	// is no longer referenced by anything and can be recycled.
+	if err == nil && vm.frame != frame && (len(vm.frames) == 0 || vm.frames[len(vm.frames)-1] != frame) {
+		vm.releaseFrame(frame)
+	}
+
 	return result, err
+}
+
+// maxFramePool bounds the number of finished frames kept for reuse per VM.
+const maxFramePool = 64
+
+// newFrame returns a zeroed frame whose slots buffer holds n nil values,
+// reusing a frame recycled by releaseFrame when one is available.
+func (vm *VM) newFrame(n int) *Frame {
+	if last := len(vm.framePool) - 1; last >= 0 {
+		f := vm.framePool[last]
+		vm.framePool[last] = nil
+		vm.framePool = vm.framePool[:last]
+		if cap(f.slots) >= n {
+			f.slots = f.slots[:n] // cleared by releaseFrame
+		} else {
+			f.slots = make([]Value, n)
+		}
+		return f
+	}
+	return &Frame{slots: make([]Value, n)}
+}
+
+// releaseFrame resets a finished function frame and returns it to the pool.
+// The caller must guarantee nothing references the frame or its slots any
+// more: only frames that completed via RETURN_VALUE in callFunction qualify
+// (generator/coroutine frames and frames unwound by exceptions never do).
+func (vm *VM) releaseFrame(f *Frame) {
+	if len(vm.framePool) >= maxFramePool {
+		return
+	}
+	clear(f.slots)
+	*f = Frame{slots: f.slots, BlockStack: f.BlockStack[:0]}
+	vm.framePool = append(vm.framePool, f)
+}
+
+// prependArg returns a new slice holding first followed by args.
+func prependArg(first Value, args []Value) []Value {
+	all := make([]Value, len(args)+1)
+	all[0] = first
+	copy(all[1:], args)
+	return all
+}
+
+// callClass calls a class object. slotArgs[0] is scratch space that is
+// overwritten with the class or the new instance, and slotArgs[1:] holds the
+// positional arguments. slotArgs may alias the caller's operand stack, so it
+// is only passed on to callees that copy their arguments before running any
+// other code (Python functions and object.__new__); other callees get a copy.
+func (vm *VM) callClass(fn *PyClass, slotArgs []Value, kwargs map[string]Value) (Value, error) {
+	// Check for custom metaclass __call__ override
+	typeClass, _ := vm.builtins["type"].(*PyClass)
+	if fn.Metaclass != nil && fn.Metaclass != typeClass {
+		for _, cls := range fn.Metaclass.Mro {
+			if cls == typeClass {
+				break
+			}
+			if callMethod, ok := cls.Dict["__call__"]; ok {
+				switch cm := callMethod.(type) {
+				case *PyFunction:
+					slotArgs[0] = fn
+					return vm.callFunction(cm, slotArgs, kwargs)
+				case *PyBuiltinFunc:
+					return cm.Fn(prependArg(fn, slotArgs[1:]), kwargs)
+				}
+			}
+		}
+	}
+
+	return vm.classCall(fn, slotArgs, kwargs)
 }
 
 // defaultClassCall implements the default class instantiation logic:
 // abstract check → __new__ → __init__
 func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Value) (Value, error) {
+	slotArgs := make([]Value, len(args)+1)
+	copy(slotArgs[1:], args)
+	return vm.classCall(fn, slotArgs, kwargs)
+}
+
+// classCall is defaultClassCall with arguments in the slotArgs layout
+// described on callClass.
+func (vm *VM) classCall(fn *PyClass, slotArgs []Value, kwargs map[string]Value) (Value, error) {
+	args := slotArgs[1:]
+
 	// Check for abstract methods - prevent instantiation
 	if abstractMethods, ok := fn.Dict["__abstractmethods__"]; ok {
 		if absList, ok := abstractMethods.(*PyList); ok && len(absList.Items) > 0 {
@@ -266,16 +357,22 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 	newFound := false
 	for _, cls := range fn.Mro {
 		if newMethod, ok := cls.Dict["__new__"]; ok {
-			newArgs := append([]Value{fn}, args...)
 			var err error
 			switch nm := newMethod.(type) {
 			case *PyFunction:
-				instance, err = vm.callFunction(nm, newArgs, kwargs)
+				slotArgs[0] = fn
+				instance, err = vm.callFunction(nm, slotArgs, kwargs)
 			case *PyBuiltinFunc:
-				instance, err = nm.Fn(newArgs, kwargs)
+				if nm == vm.objectNew {
+					// object.__new__ only reads its class argument.
+					slotArgs[0] = fn
+					instance, err = nm.Fn(slotArgs, kwargs)
+				} else {
+					instance, err = nm.Fn(prependArg(fn, args), kwargs)
+				}
 			case *PyStaticMethod:
 				// __new__ may be explicitly decorated with @staticmethod
-				instance, err = vm.call(nm.Func, newArgs, kwargs)
+				instance, err = vm.call(nm.Func, prependArg(fn, args), kwargs)
 			}
 			if err != nil {
 				return nil, err
@@ -301,20 +398,20 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 		// Look for __init__ in class MRO
 		for _, cls := range fn.Mro {
 			if init, ok := cls.Dict["__init__"]; ok {
-				allArgs := append([]Value{inst}, args...)
 				switch initFn := init.(type) {
 				case *PyFunction:
-					_, err := vm.callFunction(initFn, allArgs, kwargs)
+					slotArgs[0] = inst
+					_, err := vm.callFunction(initFn, slotArgs, kwargs)
 					if err != nil {
 						return nil, err
 					}
 				case *PyBuiltinFunc:
-					_, err := initFn.Fn(allArgs, kwargs)
+					_, err := initFn.Fn(prependArg(inst, args), kwargs)
 					if err != nil {
 						return nil, err
 					}
 				case *PyStaticMethod:
-					_, err := vm.call(initFn.Func, allArgs, kwargs)
+					_, err := vm.call(initFn.Func, prependArg(inst, args), kwargs)
 					if err != nil {
 						return nil, err
 					}
@@ -331,16 +428,16 @@ func (vm *VM) defaultClassCall(fn *PyClass, args []Value, kwargs map[string]Valu
 func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[string]Value) (*Frame, error) {
 	code := fn.Code
 
-	// Create new frame
-	frame := &Frame{
-		Code:     code,
-		IP:       0,
-		Stack:    make([]Value, code.StackSize+16), // Pre-allocate
-		SP:       0,
-		Locals:   make([]Value, len(code.VarNames)),
-		Globals:  fn.Globals,
-		Builtins: vm.builtins,
-	}
+	// Create new frame. Locals and the operand stack share a single backing
+	// allocation (locals first, capacity-capped so they can never grow into
+	// the stack); the stack is replaced with a fresh slice if it ever grows.
+	numLocals := len(code.VarNames)
+	frame := vm.newFrame(numLocals + code.StackSize + 16) // Pre-allocate
+	frame.Code = code
+	frame.Stack = frame.slots[numLocals:]
+	frame.Locals = frame.slots[:numLocals:numLocals]
+	frame.Globals = fn.Globals
+	frame.Builtins = vm.builtins
 
 	// Set up closure cells
 	// Cells include CellVars (our variables captured by inner functions) and FreeVars (from closure)

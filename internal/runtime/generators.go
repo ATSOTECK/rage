@@ -46,7 +46,12 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 	oldHasPendingJump := vm.generatorHasPendingJump
 
 	vm.frame = gen.Frame
-	vm.frames = []*Frame{gen.Frame}
+	if gen.frames == nil {
+		gen.frames = make([]*Frame, 1, 4)
+	}
+	gen.frames = gen.frames[:1]
+	gen.frames[0] = gen.Frame
+	vm.frames = gen.frames
 	vm.currentException = gen.SavedCurrentException
 	vm.lastException = gen.SavedLastException
 	vm.excHandlerStack = gen.SavedExcHandlerStack
@@ -63,6 +68,11 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 
 	// Run until yield or return
 	result, yielded, err := vm.runGenerator()
+
+	// Keep the (possibly grown) call-stack buffer for the next resume,
+	// dropping any frame references so they can be collected.
+	clear(vm.frames[:cap(vm.frames)])
+	gen.frames = vm.frames[:0]
 
 	// Save generator's state
 	gen.SavedCurrentException = vm.currentException
@@ -664,7 +674,7 @@ func (vm *VM) runWithYieldSupport() (Value, bool, error) {
 			// Check if the top of stack is the sent value (not an iterator)
 			// This happens on resume: stack is [..., iterator, sent_value]
 			switch iter.(type) {
-			case *PyGenerator, *PyCoroutine, *PyIterator:
+			case *PyGenerator, *PyCoroutine, *PyIterator, lazyIterator:
 				// Top is already the iterator
 			default:
 				// Top is the sent value, pop it and get the iterator below

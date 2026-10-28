@@ -39,13 +39,12 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 		for _, cls := range instance.Class.Mro {
 			if method, ok := cls.Dict[name]; ok {
 				// Prepend instance as self
-				allArgs := append([]Value{instance}, args...)
 				switch fn := method.(type) {
 				case *PyFunction:
-					result, err := vm.callFunction(fn, allArgs, nil)
+					result, err := vm.callFunctionWithSelf(fn, instance, args, nil)
 					return result, true, err
 				case *PyBuiltinFunc:
-					result, err := fn.Fn(allArgs, nil)
+					result, err := fn.Fn(prependArg(instance, args), nil)
 					return result, true, err
 				}
 			}
@@ -53,13 +52,12 @@ func (vm *VM) callDunder(instance *PyInstance, name string, args ...Value) (Valu
 	} else {
 		// Fallback: check instance's class dict directly if MRO is empty
 		if method, ok := instance.Class.Dict[name]; ok {
-			allArgs := append([]Value{instance}, args...)
 			switch fn := method.(type) {
 			case *PyFunction:
-				result, err := vm.callFunction(fn, allArgs, nil)
+				result, err := vm.callFunctionWithSelf(fn, instance, args, nil)
 				return result, true, err
 			case *PyBuiltinFunc:
-				result, err := fn.Fn(allArgs, nil)
+				result, err := fn.Fn(prependArg(instance, args), nil)
 				return result, true, err
 			}
 		}

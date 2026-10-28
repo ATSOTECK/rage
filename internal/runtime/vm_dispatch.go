@@ -91,7 +91,7 @@ func (vm *VM) run() (Value, error) {
 			if frame.SP >= len(frame.Stack) {
 				vm.ensureStack(1)
 			}
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[arg])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, arg)
 			frame.SP++
 
 		case OpLoadName:
@@ -114,8 +114,10 @@ func (vm *VM) run() (Value, error) {
 
 		case OpStoreName:
 			name := frame.Code.Names[arg]
-			if _, exists := frame.Globals[name]; !exists && frame.OrderedGlobalKeys != nil {
-				frame.OrderedGlobalKeys = append(frame.OrderedGlobalKeys, name)
+			if frame.OrderedGlobalKeys != nil {
+				if _, exists := frame.Globals[name]; !exists {
+					frame.OrderedGlobalKeys = append(frame.OrderedGlobalKeys, name)
+				}
 			}
 			frame.Globals[name] = vm.pop()
 
@@ -365,7 +367,7 @@ func (vm *VM) run() (Value, error) {
 			// arg contains packed indices: low byte = local index, high byte = const index
 			localIdx := arg & 0xFF
 			constIdx := (arg >> 8) & 0xFF
-			constVal := vm.toValue(frame.Code.Constants[constIdx])
+			constVal := vm.constValue(frame.Code, constIdx)
 			localVal := frame.Locals[localIdx]
 			if li, ok := localVal.(*PyInt); ok {
 				if ci, ok := constVal.(*PyInt); ok {
@@ -453,7 +455,7 @@ func (vm *VM) run() (Value, error) {
 			vm.ensureStack(2) // Ensure space for two pushes
 			frame.Stack[frame.SP] = val
 			frame.SP++
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, constIdx)
 			frame.SP++
 
 		case OpStoreFastLoadFast:
@@ -978,7 +980,7 @@ func (vm *VM) run() (Value, error) {
 				return nil, unboundLocalError(frame, localIdx)
 			}
 			vm.ensureStack(2) // Ensure space for two pushes
-			frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[constIdx])
+			frame.Stack[frame.SP] = vm.constValue(frame.Code, constIdx)
 			frame.SP++
 			frame.Stack[frame.SP] = val
 			frame.SP++
@@ -1507,6 +1509,22 @@ func (vm *VM) run() (Value, error) {
 
 		case OpForIter:
 			iter := vm.top()
+			if r, ok := iter.(*rangeIterator); ok {
+				// Fast path for `for i in range(...)`
+				if r.remaining > 0 {
+					if frame.SP >= len(frame.Stack) {
+						vm.ensureStack(1)
+					}
+					frame.Stack[frame.SP] = MakeInt(r.next)
+					frame.SP++
+					r.remaining--
+					r.next += r.step
+				} else {
+					frame.SP-- // Pop iterator
+					frame.IP = arg
+				}
+				break
+			}
 			val, done, err := vm.iterNext(iter)
 			if err != nil {
 				vm.pop() // Pop iterator before handling error
@@ -1860,12 +1878,31 @@ func (vm *VM) run() (Value, error) {
 			vm.push(fn)
 
 		case OpCall:
-			args := make([]Value, arg)
-			for i := arg - 1; i >= 0; i-- {
-				args[i] = vm.pop()
+			if frame.SP < arg+1 {
+				panic("stack underflow: cannot pop from empty stack")
 			}
-			callable := vm.pop()
-			result, err := vm.call(callable, args, nil)
+			base := frame.SP - arg
+			callable := frame.Stack[base-1]
+			frame.SP = base - 1
+			var result Value
+			switch fn := callable.(type) {
+			case *PyFunction:
+				// Python functions copy their arguments into the new frame's
+				// locals before running, so pass a view of the operand stack
+				// instead of allocating an argument slice.
+				result, err = vm.callFunction(fn, frame.Stack[base:base+arg:base+arg], nil)
+			case *PyMethod:
+				// Same as above, reusing the callable's slot for self.
+				frame.Stack[base-1] = fn.Instance
+				result, err = vm.callFunction(fn.Func, frame.Stack[base-1:base+arg:base+arg], nil)
+			case *PyClass:
+				// The callable's slot becomes scratch space for cls/self.
+				result, err = vm.callClass(fn, frame.Stack[base-1:base+arg:base+arg], nil)
+			default:
+				args := make([]Value, arg)
+				copy(args, frame.Stack[base:base+arg])
+				result, err = vm.call(callable, args, nil)
+			}
 			if err != nil {
 				// tryHandleError chains __context__ from the active except
 				// handler (so exceptions raised inside a called function

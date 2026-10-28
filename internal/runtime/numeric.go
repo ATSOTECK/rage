@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/big"
 	"math/cmplx"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -413,39 +412,56 @@ func complexProd(a, b complex128) complex128 {
 	return complex(float64(ar*br)-float64(ai*bi), float64(ar*bi)+float64(ai*br))
 }
 
-// sumValues adds items to start like CPython's sum(): ints are added exactly,
-// and once the running total is a float, float and int items are accumulated
-// with Neumaier compensated summation (so sum([0.1] * 10) == 1.0).
-func (vm *VM) sumValues(start Value, items []Value) (Value, error) {
+// sumValues adds the items produced by next to start the way CPython's sum()
+// does: exactly while everything is an int, with compensated summation once
+// the total is a float, and with + otherwise. Items are pulled one at a time
+// so summing a generator or a range never materializes it.
+func (vm *VM) sumValues(start Value, next func() (Value, bool, error)) (Value, error) {
 	result := start
-	i := 0
+	var item Value
+	more := func() (bool, error) {
+		v, done, err := next()
+		if err != nil || done {
+			return false, err
+		}
+		item = v
+		return true, nil
+	}
+	ok, err := more()
+	if err != nil {
+		return nil, err
+	}
 	// Exact int phase
 	if _, isInt := result.(*PyInt); isInt {
-		for ; i < len(items); i++ {
-			ri := result.(*PyInt)
-			var item *PyInt
-			switch v := items[i].(type) {
+		for ok {
+			var it *PyInt
+			switch v := item.(type) {
 			case *PyInt:
-				item = v
+				it = v
 			case *PyBool:
-				item = boolToInt(v)
+				it = boolToInt(v)
 			}
-			if item == nil {
+			if it == nil {
 				break
 			}
-			r, _, err := vm.intBinaryOp(OpBinaryAdd, ri, item)
+			r, _, err := vm.intBinaryOp(OpBinaryAdd, result.(*PyInt), it)
 			if err != nil {
 				return nil, err
 			}
 			result = r
+			if ok, err = more(); err != nil {
+				return nil, err
+			}
 		}
-		if i < len(items) {
-			r, err := vm.binaryOp(OpBinaryAdd, result, items[i])
+		if ok {
+			r, err := vm.binaryOp(OpBinaryAdd, result, item)
 			if err != nil {
 				return nil, err
 			}
 			result = r
-			i++
+			if ok, err = more(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// Compensated float phase
@@ -460,16 +476,17 @@ func (vm *VM) sumValues(start Value, items []Value) (Value, error) {
 			}
 			f = t
 		}
-		for ; i < len(items); i++ {
-			if v, ok := items[i].(*PyFloat); ok {
+		for ok {
+			if v, isF := item.(*PyFloat); isF {
 				add(v.Value)
-				continue
-			}
-			if v, ok := items[i].(*PyInt); ok && v.BigValue == nil {
+			} else if v, isI := item.(*PyInt); isI && v.BigValue == nil {
 				add(float64(v.Value))
-				continue
+			} else {
+				break
 			}
-			break
+			if ok, err = more(); err != nil {
+				return nil, err
+			}
 		}
 		if c != 0 && !math.IsInf(c, 0) && !math.IsNaN(c) {
 			f += c
@@ -477,12 +494,15 @@ func (vm *VM) sumValues(start Value, items []Value) (Value, error) {
 		result = &PyFloat{Value: f}
 	}
 	// Generic phase
-	for ; i < len(items); i++ {
-		r, err := vm.binaryOp(OpBinaryAdd, result, items[i])
+	for ok {
+		r, err := vm.binaryOp(OpBinaryAdd, result, item)
 		if err != nil {
 			return nil, err
 		}
 		result = r
+		if ok, err = more(); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
@@ -868,55 +888,6 @@ func (vm *VM) parseIntString(s string, base int64) (*PyInt, error) {
 	return result, nil
 }
 
-// sortValues sorts items in place like list.sort(key=keyFn, reverse=reverse):
-// the key function is called exactly once per item, the sort is stable, and
-// with reverse=True equal items keep their original order.
-func (vm *VM) sortValues(items []Value, keyFn Value, reverse bool) error {
-	keys := items
-	if keyFn != nil {
-		keys = make([]Value, len(items))
-		for i, item := range items {
-			k, err := vm.call(keyFn, []Value{item}, nil)
-			if err != nil {
-				return err
-			}
-			keys[i] = k
-		}
-	}
-	order := make([]int, len(items))
-	for i := range order {
-		order[i] = i
-	}
-	var sortErr error
-	sort.SliceStable(order, func(i, j int) bool {
-		if sortErr != nil {
-			return false
-		}
-		a, b := keys[order[i]], keys[order[j]]
-		if reverse {
-			a, b = b, a
-		}
-		r := vm.compareOp(OpCompareLt, a, b)
-		if r == nil {
-			if vm.currentException != nil {
-				sortErr = vm.currentException
-				vm.currentException = nil
-			}
-			return false
-		}
-		return vm.truthy(r)
-	})
-	if sortErr != nil {
-		return sortErr
-	}
-	sorted := make([]Value, len(items))
-	for i, idx := range order {
-		sorted[i] = items[idx]
-	}
-	copy(items, sorted)
-	return nil
-}
-
 // sortKwargs reads the key= and reverse= keyword arguments of sort/sorted.
 func (vm *VM) sortKwargs(name string, kwargs map[string]Value) (Value, bool, error) {
 	var keyFn Value
@@ -977,7 +948,7 @@ func (vm *VM) minMax(name string, args []Value, kwargs map[string]Value) (Value,
 	best := items[0]
 	bestKey := best
 	if keyFn != nil {
-		k, err := vm.call(keyFn, []Value{best}, nil)
+		k, err := vm.call1(keyFn, best)
 		if err != nil {
 			return nil, err
 		}
@@ -986,7 +957,7 @@ func (vm *VM) minMax(name string, args []Value, kwargs map[string]Value) (Value,
 	for _, item := range items[1:] {
 		key := item
 		if keyFn != nil {
-			k, err := vm.call(keyFn, []Value{item}, nil)
+			k, err := vm.call1(keyFn, item)
 			if err != nil {
 				return nil, err
 			}

@@ -413,11 +413,14 @@ func (vm *VM) initBuiltinsFunctions() {
 			case *PyBytes:
 				return nil, fmt.Errorf("TypeError: sum() can't sum bytes [use b''.join(seq) instead]")
 			}
-			items, err := vm.toList(args[0])
+			iter, err := vm.getIter(args[0])
 			if err != nil {
 				return nil, err
 			}
-			return vm.sumValues(start, items)
+			return vm.sumValues(start, func() (Value, bool, error) {
+				v, done, err := vm.iterNext(iter)
+				return v, done, err
+			})
 		},
 	}
 
@@ -579,11 +582,17 @@ func (vm *VM) initBuiltinsFunctions() {
 			// Apply function to each set of items
 			result := make([]Value, minLen)
 			for i := 0; i < minLen; i++ {
-				fnArgs := make([]Value, len(lists))
-				for j, list := range lists {
-					fnArgs[j] = list[i]
+				var val Value
+				var err error
+				if len(lists) == 1 {
+					val, err = vm.call1(fn, lists[0][i])
+				} else {
+					fnArgs := make([]Value, len(lists))
+					for j, list := range lists {
+						fnArgs[j] = list[i]
+					}
+					val, err = vm.call(fn, fnArgs, nil)
 				}
-				val, err := vm.call(fn, fnArgs, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -612,7 +621,7 @@ func (vm *VM) initBuiltinsFunctions() {
 					// If function is None, filter by truthiness
 					keep = vm.truthy(item)
 				} else {
-					val, err := vm.call(fn, []Value{item}, nil)
+					val, err := vm.call1(fn, item)
 					if err != nil {
 						return nil, err
 					}
@@ -1015,6 +1024,18 @@ func (vm *VM) initBuiltinsFunctions() {
 					return nil, &PyException{TypeName: "StopIteration", Message: ""}
 				}
 				return val, nil
+			case lazyIterator:
+				val, ok, err := it.advance(vm)
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					if hasDefault {
+						return args[1], nil
+					}
+					return nil, &PyException{TypeName: "StopIteration", Message: ""}
+				}
+				return val, nil
 			case *PyIterator:
 				items := it.Items
 				if it.Source != nil {
@@ -1194,4 +1215,114 @@ func (vm *VM) initBuiltinsFunctions() {
 			return checkTarget(args[0], args[1])
 		},
 	}
+}
+
+// sortValues sorts items in place by Python "<" ordering. The sort is stable.
+// When keyFn is non-nil it is called exactly once per item (as in CPython) and
+// the resulting keys are compared instead of the items themselves. When
+// reverse is true the order is descending, with equal elements keeping their
+// original relative order.
+func (vm *VM) sortValues(items []Value, keyFn Value, reverse bool) error {
+	n := len(items)
+	keys := items
+	if keyFn != nil {
+		keys = make([]Value, n)
+		for i, item := range items {
+			k, err := vm.call1(keyFn, item)
+			if err != nil {
+				return err
+			}
+			keys[i] = k
+		}
+	}
+	if n < 2 {
+		return nil
+	}
+
+	var sortErr error
+	less := func(i, j int) bool {
+		if sortErr != nil {
+			return false
+		}
+		// For reverse sort, compare b < a instead of a < b to maintain stability.
+		// Using !less would break stability because equal elements (less=false)
+		// would return true, swapping their order.
+		a, b := keys[i], keys[j]
+		if reverse {
+			a, b = b, a
+		}
+		result := vm.compareOp(OpCompareLt, a, b)
+		if result == nil {
+			// compareOp set vm.currentException (e.g. TypeError for incompatible types)
+			if vm.currentException != nil {
+				sortErr = vm.currentException
+				vm.currentException = nil
+			}
+			return false
+		}
+		return vm.truthy(result)
+	}
+
+	perm := make([]int, n)
+	for i := range perm {
+		perm[i] = i
+	}
+	mergeSortIndices(perm, make([]int, n/2+1), less)
+	if sortErr != nil {
+		return sortErr
+	}
+
+	sorted := make([]Value, n)
+	for i, p := range perm {
+		sorted[i] = items[p]
+	}
+	copy(items, sorted)
+	return nil
+}
+
+// mergeSortIndices stably sorts a using less, which compares the elements the
+// indices refer to. buf must have room for at least half of a. Merge sort keeps
+// the number of comparisons (each potentially a Python-level __lt__ call) close
+// to n*log2(n), and is linear for input that is already sorted.
+func mergeSortIndices(a, buf []int, less func(i, j int) bool) {
+	n := len(a)
+	if n <= 8 {
+		// Binary insertion sort; equal elements are inserted after existing
+		// ones, keeping the sort stable.
+		for i := 1; i < n; i++ {
+			x := a[i]
+			lo, hi := 0, i
+			for lo < hi {
+				mid := int(uint(lo+hi) >> 1)
+				if less(x, a[mid]) {
+					hi = mid
+				} else {
+					lo = mid + 1
+				}
+			}
+			copy(a[lo+1:i+1], a[lo:i])
+			a[lo] = x
+		}
+		return
+	}
+	mid := n / 2
+	mergeSortIndices(a[:mid], buf, less)
+	mergeSortIndices(a[mid:], buf, less)
+	if !less(a[mid], a[mid-1]) {
+		return // Halves are already in order
+	}
+	left := buf[:mid]
+	copy(left, a[:mid])
+	i, j, k := 0, mid, 0
+	for i < mid && j < n {
+		if less(a[j], left[i]) {
+			a[k] = a[j]
+			j++
+		} else {
+			a[k] = left[i]
+			i++
+		}
+		k++
+	}
+	copy(a[k:], left[i:])
 }

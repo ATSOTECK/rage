@@ -288,7 +288,22 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 		if val.Source != nil {
 			items = val.Source.Items
 		}
-		return items[val.Index:], nil
+		// Copy: Items may be shared with the iterated list or tuple.
+		result := make([]Value, len(items)-val.Index)
+		copy(result, items[val.Index:])
+		return result, nil
+	case lazyIterator:
+		var items []Value
+		for {
+			item, ok, err := val.advance(vm)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return items, nil
+			}
+			items = append(items, item)
+		}
 	case *PyGenerator:
 		var items []Value
 		for {
@@ -493,6 +508,12 @@ func (vm *VM) typeName(v Value) string {
 		return val.Type()
 	case *PyIterator:
 		return "iterator"
+	case *rangeIterator:
+		return val.Type()
+	case *strIterator:
+		return val.Type()
+	case *dictKeyIterator:
+		return val.Type()
 	case *PyUserData:
 		if val.Metatable != nil {
 			// Find __type__ key in metatable (iterate because Value keys use pointers)

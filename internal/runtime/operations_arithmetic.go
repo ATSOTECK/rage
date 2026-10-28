@@ -115,6 +115,40 @@ func (vm *VM) inplaceOp(op Opcode, a, b Value) (Value, error) {
 	return vm.binaryOp(op-OpInplaceAdd+OpBinaryAdd, a, b)
 }
 
+// binaryOpDunders returns the forward and reflected dunder method names for a
+// binary opcode. ok is false for opcodes that have no dunder protocol.
+func binaryOpDunders(op Opcode) (forward, reverse string, ok bool) {
+	switch op {
+	case OpBinaryAdd:
+		return "__add__", "__radd__", true
+	case OpBinarySubtract:
+		return "__sub__", "__rsub__", true
+	case OpBinaryMultiply:
+		return "__mul__", "__rmul__", true
+	case OpBinaryDivide:
+		return "__truediv__", "__rtruediv__", true
+	case OpBinaryFloorDiv:
+		return "__floordiv__", "__rfloordiv__", true
+	case OpBinaryModulo:
+		return "__mod__", "__rmod__", true
+	case OpBinaryPower:
+		return "__pow__", "__rpow__", true
+	case OpBinaryMatMul:
+		return "__matmul__", "__rmatmul__", true
+	case OpBinaryAnd:
+		return "__and__", "__rand__", true
+	case OpBinaryOr:
+		return "__or__", "__ror__", true
+	case OpBinaryXor:
+		return "__xor__", "__rxor__", true
+	case OpBinaryLShift:
+		return "__lshift__", "__rlshift__", true
+	case OpBinaryRShift:
+		return "__rshift__", "__rrshift__", true
+	}
+	return "", "", false
+}
+
 func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 	// Bool is a subclass of int in Python - coerce bools to ints for arithmetic
 	if ab, ok := a.(*PyBool); ok {
@@ -133,37 +167,25 @@ func (vm *VM) binaryOp(op Opcode, a, b Value) (Value, error) {
 	}
 
 	// Check for dunder methods on instances first
-	dunders := map[Opcode]struct{ forward, reverse string }{
-		OpBinaryAdd:      {"__add__", "__radd__"},
-		OpBinarySubtract: {"__sub__", "__rsub__"},
-		OpBinaryMultiply: {"__mul__", "__rmul__"},
-		OpBinaryDivide:   {"__truediv__", "__rtruediv__"},
-		OpBinaryFloorDiv: {"__floordiv__", "__rfloordiv__"},
-		OpBinaryModulo:   {"__mod__", "__rmod__"},
-		OpBinaryPower:    {"__pow__", "__rpow__"},
-		OpBinaryMatMul:   {"__matmul__", "__rmatmul__"},
-		OpBinaryAnd:      {"__and__", "__rand__"},
-		OpBinaryOr:       {"__or__", "__ror__"},
-		OpBinaryXor:      {"__xor__", "__rxor__"},
-		OpBinaryLShift:   {"__lshift__", "__rlshift__"},
-		OpBinaryRShift:   {"__rshift__", "__rrshift__"},
-	}
-
-	if dunder, ok := dunders[op]; ok {
-		// Try forward method on left operand
-		if inst, ok := a.(*PyInstance); ok {
-			if result, found, err := vm.callDunder(inst, dunder.forward, b); found {
-				// Check for NotImplemented sentinel (we return nil in that case)
-				if result != nil {
-					return result, err
+	instA, aIsInst := a.(*PyInstance)
+	instB, bIsInst := b.(*PyInstance)
+	if aIsInst || bIsInst {
+		if forward, reverse, ok := binaryOpDunders(op); ok {
+			// Try forward method on left operand
+			if aIsInst {
+				if result, found, err := vm.callDunder(instA, forward, b); found {
+					// Check for NotImplemented sentinel (we return nil in that case)
+					if result != nil {
+						return result, err
+					}
 				}
 			}
-		}
-		// Try reverse method on right operand
-		if inst, ok := b.(*PyInstance); ok {
-			if result, found, err := vm.callDunder(inst, dunder.reverse, a); found {
-				if result != nil {
-					return result, err
+			// Try reverse method on right operand
+			if bIsInst {
+				if result, found, err := vm.callDunder(instB, reverse, a); found {
+					if result != nil {
+						return result, err
+					}
 				}
 			}
 		}

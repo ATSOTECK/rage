@@ -31,7 +31,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if frame.SP >= len(frame.Stack) {
 			vm.ensureStack(1)
 		}
-		frame.Stack[frame.SP] = vm.toValue(frame.Code.Constants[arg])
+		frame.Stack[frame.SP] = vm.constValue(frame.Code, arg)
 		frame.SP++
 	case OpLoadName:
 		name := frame.Code.Names[arg]
@@ -229,12 +229,32 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	// Function calls
 	case OpCall:
-		args := make([]Value, arg)
-		for i := arg - 1; i >= 0; i-- {
-			args[i] = vm.pop()
+		if frame.SP < arg+1 {
+			panic("stack underflow: cannot pop from empty stack")
 		}
-		callable := vm.pop()
-		result, err := vm.call(callable, args, nil)
+		base := frame.SP - arg
+		callable := frame.Stack[base-1]
+		frame.SP = base - 1
+		var result Value
+		var err error
+		switch fn := callable.(type) {
+		case *PyFunction:
+			// Python functions copy their arguments into the new frame's
+			// locals before running, so pass a view of the operand stack
+			// instead of allocating an argument slice.
+			result, err = vm.callFunction(fn, frame.Stack[base:base+arg:base+arg], nil)
+		case *PyMethod:
+			// Same as above, reusing the callable's slot for self.
+			frame.Stack[base-1] = fn.Instance
+			result, err = vm.callFunction(fn.Func, frame.Stack[base-1:base+arg:base+arg], nil)
+		case *PyClass:
+			// The callable's slot becomes scratch space for cls/self.
+			result, err = vm.callClass(fn, frame.Stack[base-1:base+arg:base+arg], nil)
+		default:
+			args := make([]Value, arg)
+			copy(args, frame.Stack[base:base+arg])
+			result, err = vm.call(callable, args, nil)
+		}
 		if err != nil {
 			// Check if exception was already handled in an outer frame
 			if err == errExceptionHandledInOuterFrame {
@@ -708,7 +728,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpAddConstFast:
 		localIdx := arg & 0xFF
 		constIdx := (arg >> 8) & 0xFF
-		constVal := vm.toValue(frame.Code.Constants[constIdx])
+		constVal := vm.constValue(frame.Code, constIdx)
 		if v, ok := frame.Locals[localIdx].(*PyInt); ok && v.BigValue == nil {
 			if cv, ok := constVal.(*PyInt); ok && cv.BigValue == nil {
 				frame.Locals[localIdx] = AddInts(v, cv)
@@ -770,7 +790,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			return nil, unboundLocalError(frame, localIdx)
 		}
 		vm.push(val)
-		vm.push(vm.toValue(frame.Code.Constants[constIdx]))
+		vm.push(vm.constValue(frame.Code, constIdx))
 
 	case OpStoreFastLoadFast:
 		storeIdx := arg & 0xFF
@@ -789,7 +809,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if val == nil {
 			return nil, unboundLocalError(frame, localIdx)
 		}
-		vm.push(vm.toValue(frame.Code.Constants[constIdx]))
+		vm.push(vm.constValue(frame.Code, constIdx))
 		vm.push(val)
 
 	case OpLoadGlobalLoadFast:

@@ -1,6 +1,9 @@
 package runtime
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // Opcode represents a single bytecode instruction
 type Opcode byte
@@ -540,6 +543,26 @@ type CodeObject struct {
 	Flags          CodeFlags   // Code flags
 	StackSize      int         // Maximum stack size needed
 	LineNoTab      []LineEntry // Line number table
+
+	// constValues caches Constants converted to runtime Values so that
+	// LOAD_CONST does not allocate a new object on every execution. It is
+	// built lazily on first use (see constValue) and is safe to share between
+	// VMs because constant values are immutable.
+	constValues atomic.Pointer[[]Value]
+}
+
+// constValue returns the runtime Value for constant idx, converting the
+// compiler's Go representation at most once per code object.
+func (vm *VM) constValue(co *CodeObject, idx int) Value {
+	if cv := co.constValues.Load(); cv != nil && len(*cv) == len(co.Constants) {
+		return (*cv)[idx]
+	}
+	values := make([]Value, len(co.Constants))
+	for i, c := range co.Constants {
+		values[i] = vm.toValue(c)
+	}
+	co.constValues.Store(&values)
+	return values[idx]
 }
 
 // CodeFlags represents flags for code objects

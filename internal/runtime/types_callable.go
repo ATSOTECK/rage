@@ -282,6 +282,11 @@ type Frame struct {
 	BlockStack       []Block          // Block stack for try/except/finally
 	OrderedGlobalKeys []string        // Insertion-ordered global names (for class bodies)
 	Kwargs           map[string]Value // Keyword args, for stack-based Go builtins (PyGoFunc)
+
+	// slots is the backing buffer shared by Locals and the initial Stack for
+	// frames created by createFunctionFrame. It is kept when the frame is
+	// recycled through the VM's frame pool (see releaseFrame).
+	slots []Value
 }
 
 // Block represents a control flow block
@@ -409,6 +414,10 @@ type PyGenerator struct {
 	SavedHasPendingReturn    bool
 	SavedPendingJump         int
 	SavedHasPendingJump      bool
+
+	// frames is a reusable call-stack buffer installed as vm.frames while
+	// the generator runs, so resuming it does not allocate a new slice.
+	frames []*Frame
 }
 
 func (g *PyGenerator) Type() string   { return "generator" }
