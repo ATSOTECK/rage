@@ -148,10 +148,22 @@ func (p *Parser) parseLambdaParameters() *model.Arguments {
 
 	seenStar := false
 
+	// Lambda parameters can't carry annotations, so names are parsed with
+	// parseSimpleArg: parseArg would read `**kw: body` as an annotation.
 	for !p.check(model.TK_Colon) && !p.isAtEnd() {
+		if p.match(model.TK_Slash) {
+			// Positional-only parameters marker
+			args.PosOnlyArgs = args.Args
+			args.Args = nil
+			if !p.match(model.TK_Comma) {
+				break
+			}
+			continue
+		}
+
 		if p.match(model.TK_Star) {
 			if p.check(model.TK_Identifier) {
-				args.VarArg = p.parseArg()
+				args.VarArg = p.parseSimpleArg()
 			}
 			seenStar = true
 			if !p.match(model.TK_Comma) {
@@ -161,7 +173,7 @@ func (p *Parser) parseLambdaParameters() *model.Arguments {
 		}
 
 		if p.match(model.TK_DoubleStar) {
-			args.KwArg = p.parseArg()
+			args.KwArg = p.parseSimpleArg()
 			break
 		}
 
@@ -380,22 +392,9 @@ func (p *Parser) parseFStringLit() model.Expr {
 		}
 
 		// Find matching closing brace
-		depth := 1
 		exprStart := braceIdx + 1
-		exprEnd := exprStart
-		for exprEnd < len(content) && depth > 0 {
-			ch := content[exprEnd]
-			if ch == '{' {
-				depth++
-			} else if ch == '}' {
-				depth--
-			}
-			if depth > 0 {
-				exprEnd++
-			}
-		}
-
-		if depth != 0 {
+		exprEnd := findFStringFieldEnd(content, exprStart)
+		if exprEnd < 0 {
 			p.addError("unmatched '{' in f-string")
 			return &model.StringLit{Value: content, StartPos: tok.Pos, EndPos: tok.EndPos}
 		}
@@ -413,14 +412,26 @@ func (p *Parser) parseFStringLit() model.Expr {
 
 		// Check for conversion (!r, !s, !a) at end of expression
 		var conversion byte
-		exprText = strings.TrimSpace(exprText)
-		if len(exprText) >= 2 {
-			suffix := exprText[len(exprText)-2:]
+		if trimmed := strings.TrimRight(exprText, " \t"); len(trimmed) >= 2 {
+			suffix := trimmed[len(trimmed)-2:]
 			if suffix == "!r" || suffix == "!s" || suffix == "!a" {
 				conversion = suffix[1]
-				exprText = strings.TrimSpace(exprText[:len(exprText)-2])
+				exprText = trimmed[:len(trimmed)-2]
 			}
 		}
+
+		// Self-documenting expression: f"{x=}" renders as "x=" + repr(x). The
+		// expression's source text (whitespace included) becomes a literal
+		// prefix; repr is the default unless a conversion or spec is given.
+		if trimmed := strings.TrimRight(exprText, " \t"); strings.HasSuffix(trimmed, "=") &&
+			(len(trimmed) < 2 || !strings.ContainsRune("=!<>", rune(trimmed[len(trimmed)-2]))) {
+			parts = append(parts, model.FStringPart{IsExpr: false, Value: exprText})
+			exprText = trimmed[:len(trimmed)-1]
+			if conversion == 0 && formatSpec == "" {
+				conversion = 'r'
+			}
+		}
+		exprText = strings.TrimSpace(exprText)
 
 		// Parse the expression
 		if exprText != "" {
@@ -468,11 +479,13 @@ func (p *Parser) unescapeFStringBraces(s string) string {
 }
 
 // findFormatSpecColon finds the colon that separates expression from format spec
-// It must not be inside nested brackets, parens, or braces
+// It must not be inside nested brackets, parens, braces, or string literals
 func (p *Parser) findFormatSpecColon(s string) int {
 	depth := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
+		case '\'', '"':
+			i = skipQuoted(s, i) - 1
 		case '(', '[', '{':
 			depth++
 		case ')', ']', '}':
@@ -484,6 +497,67 @@ func (p *Parser) findFormatSpecColon(s string) int {
 		}
 	}
 	return -1
+}
+
+// findFStringFieldEnd returns the index of the '}' closing the replacement
+// field whose expression starts at s[start], or -1 if it is unclosed. String
+// literals in the expression are skipped (so f"{'}'}" works); once the
+// format spec begins, quotes are ordinary characters (f"{x:'>5}") and only
+// nested {fields} affect the brace depth.
+func findFStringFieldEnd(s string, start int) int {
+	depth := 1   // replacement-field braces
+	nesting := 0 // (), [] and {} inside the expression
+	inSpec := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case !inSpec && (ch == '\'' || ch == '"'):
+			i = skipQuoted(s, i) - 1
+		case !inSpec && (ch == '(' || ch == '['):
+			nesting++
+		case !inSpec && (ch == ')' || ch == ']'):
+			nesting--
+		case ch == '{':
+			if inSpec {
+				depth++
+			} else {
+				nesting++
+			}
+		case ch == '}':
+			if !inSpec && nesting > 0 {
+				nesting--
+			} else if depth--; depth == 0 {
+				return i
+			}
+		case ch == ':' && !inSpec && nesting == 0:
+			inSpec = true
+		}
+	}
+	return -1
+}
+
+// skipQuoted returns the index just past the string literal (single, double,
+// or triple quoted) that starts at s[i].
+func skipQuoted(s string, i int) int {
+	q := s[i]
+	if i+2 < len(s) && s[i+1] == q && s[i+2] == q {
+		for j := i + 3; j+2 < len(s); j++ {
+			if s[j] == '\\' {
+				j++
+			} else if s[j] == q && s[j+1] == q && s[j+2] == q {
+				return j + 3
+			}
+		}
+		return len(s)
+	}
+	for j := i + 1; j < len(s); j++ {
+		if s[j] == '\\' {
+			j++
+		} else if s[j] == q {
+			return j + 1
+		}
+	}
+	return len(s)
 }
 
 func (p *Parser) parseBytesLit() model.Expr {
@@ -649,9 +723,14 @@ func (p *Parser) parseDictOrSetExpr() model.Expr {
 		}
 	}
 
-	// Check for dict unpacking
-	if p.check(model.TK_DoubleStar) {
-		return p.parseDictExpr(startPos, nil, nil)
+	// Dict display starting with **mapping
+	if p.match(model.TK_DoubleStar) {
+		mapping := p.parseExpression()
+		if mapping == nil {
+			p.expect(model.TK_RBrace)
+			return &model.Dict{StartPos: startPos, EndPos: startPos}
+		}
+		return p.parseDictExpr(startPos, nil, mapping)
 	}
 
 	first := p.parseExpression()

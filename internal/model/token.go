@@ -237,7 +237,9 @@ func (tk TokenKind) String() string {
 	return fmt.Sprintf("TokenKind(%d)", tk)
 }
 
-// Keywords maps Python keywords to their token kinds.
+// Keywords maps Python keywords to their token kinds. The soft keywords
+// match and case are lexed as identifiers; the parser recognizes them by
+// context so they remain usable as names (re.match, a variable named case).
 var Keywords = map[string]TokenKind{
 	"False":    TK_False,
 	"None":     TK_None,
@@ -248,7 +250,6 @@ var Keywords = map[string]TokenKind{
 	"async":    TK_Async,
 	"await":    TK_Await,
 	"break":    TK_Break,
-	"case":     TK_Case,
 	"class":    TK_Class,
 	"continue": TK_Continue,
 	"def":      TK_Def,
@@ -265,7 +266,6 @@ var Keywords = map[string]TokenKind{
 	"in":       TK_In,
 	"is":       TK_Is,
 	"lambda":   TK_Lambda,
-	"match":    TK_Match,
 	"nonlocal": TK_Nonlocal,
 	"not":      TK_Not,
 	"or":       TK_Or,

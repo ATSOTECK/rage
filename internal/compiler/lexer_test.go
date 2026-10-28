@@ -67,7 +67,8 @@ func TestLexerKeywords(t *testing.T) {
 		model.TK_Raise, model.TK_With, model.TK_As, model.TK_Async, model.TK_Await,
 		model.TK_Break, model.TK_Continue, model.TK_Pass, model.TK_Import, model.TK_From,
 		model.TK_Global, model.TK_Nonlocal, model.TK_Yield, model.TK_Assert, model.TK_Del,
-		model.TK_Match, model.TK_Case, model.TK_EOF,
+		// match and case are soft keywords: lexed as identifiers, recognized by the parser
+		model.TK_Identifier, model.TK_Identifier, model.TK_EOF,
 	}
 
 	lexer := NewLexer(input)
