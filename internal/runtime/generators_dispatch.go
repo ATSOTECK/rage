@@ -1522,6 +1522,29 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		dict := vm.peek(arg).(*PyDict)
 		dict.DictSet(key, val, vm)
 
+	case OpListExtend:
+		if err := vm.opListExtend(arg); err != nil {
+			return nil, err
+		}
+
+	case OpSetUpdate:
+		if err := vm.opSetUpdate(arg); err != nil {
+			return nil, err
+		}
+
+	case OpDictUpdate:
+		if err := vm.opDictUpdate(arg); err != nil {
+			return nil, err
+		}
+
+	case OpDictMerge:
+		if err := vm.opDictMerge(arg); err != nil {
+			return nil, err
+		}
+
+	case OpListToTuple:
+		vm.opListToTuple()
+
 	case OpCopyDict:
 		keyCount := int(vm.pop().(*PyInt).Value)
 		keysToRemove := make([]Value, keyCount)

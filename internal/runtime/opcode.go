@@ -264,6 +264,13 @@ const (
 
 	// Annotations
 	OpSetupAnnotations // Ensure __annotations__ dict exists in current namespace
+
+	// Incremental builds for unpacking in displays and calls
+	OpListExtend  // Pop iterable, extend list at peek(arg)
+	OpSetUpdate   // Pop iterable, add its items to set at peek(arg)
+	OpDictUpdate  // Pop mapping, update dict at peek(arg)
+	OpDictMerge   // Pop mapping, merge into kwargs dict at peek(arg); duplicate keys are an error
+	OpListToTuple // Replace list on TOS with a tuple
 )
 
 // OpcodeNames maps opcodes to their string names for debugging
@@ -452,6 +459,11 @@ var OpcodeNames = map[Opcode]string{
 	OpLoadConstLoadFast:  "LOAD_CONST_LOAD_FAST",
 	OpLoadGlobalLoadFast: "LOAD_GLOBAL_LOAD_FAST",
 	OpSetupAnnotations:   "SETUP_ANNOTATIONS",
+	OpListExtend:         "LIST_EXTEND",
+	OpSetUpdate:          "SET_UPDATE",
+	OpDictUpdate:         "DICT_UPDATE",
+	OpDictMerge:          "DICT_MERGE",
+	OpListToTuple:        "LIST_TO_TUPLE",
 }
 
 func (op Opcode) String() string {
@@ -507,6 +519,7 @@ func init() {
 		OpLenList, OpLenString, OpLenTuple, OpLenDict, OpLenGeneric,
 		// Annotations
 		OpSetupAnnotations,
+		OpListToTuple,
 	}
 	for _, op := range noArgOpcodes {
 		hasArgTable[op] = false

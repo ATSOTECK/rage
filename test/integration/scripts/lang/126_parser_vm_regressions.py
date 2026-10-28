@@ -66,6 +66,27 @@ def test_semicolons():
     a = 1; b = 2; c = a + b
     expect((a, b, c)).to_be((1, 2, 3))
 
+def test_unpacking_displays():
+    a = [1, 2]
+    d = {"x": 1}
+    expect([*a, *a, 3]).to_be([1, 2, 1, 2, 3])
+    expect((*a, 3)).to_be((1, 2, 3))
+    expect({*a, 5}).to_be({1, 2, 5})
+    expect({**d, "y": 2}).to_be({"x": 1, "y": 2})
+    expect({**d, **{"x": 9}}).to_be({"x": 9})
+
+def test_call_unpacking():
+    def f(*args, **kw):
+        return args, kw
+    expect(f(1, *[2, 3], 4, z=5, **{"y": 6})).to_be(((1, 2, 3, 4), {"z": 5, "y": 6}))
+    expect(f(**{"a": 1}, **{"b": 2})).to_be(((), {"a": 1, "b": 2}))
+    caught = None
+    try:
+        f(a=1, **{"a": 2})
+    except TypeError:
+        caught = "TypeError"
+    expect(caught).to_be("TypeError")
+
 def test_lambda_signatures():
     f = lambda a, *b, c=3, **d: (a, b, c, d)
     expect(f(1, 2, c=4, e=5)).to_be((1, (2,), 4, {"e": 5}))
@@ -354,6 +375,8 @@ test("elif_chain_no_else", test_elif_chain_no_else)
 test("single_line_suites", test_single_line_suites)
 test("comments_in_odd_places", test_comments_in_odd_places)
 test("semicolons", test_semicolons)
+test("unpacking_displays", test_unpacking_displays)
+test("call_unpacking", test_call_unpacking)
 test("lambda_signatures", test_lambda_signatures)
 test("positional_only_params", test_positional_only_params)
 test("kwargs_keep_call_order", test_kwargs_keep_call_order)

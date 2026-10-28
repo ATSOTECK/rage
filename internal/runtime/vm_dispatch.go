@@ -2106,6 +2106,29 @@ func (vm *VM) runDispatch() (Value, error) {
 			vm.push(anext)
 
 		// Pattern matching opcodes
+		case OpListExtend:
+			if err := vm.opListExtend(arg); err != nil {
+				return nil, err
+			}
+
+		case OpSetUpdate:
+			if err := vm.opSetUpdate(arg); err != nil {
+				return nil, err
+			}
+
+		case OpDictUpdate:
+			if err := vm.opDictUpdate(arg); err != nil {
+				return nil, err
+			}
+
+		case OpDictMerge:
+			if err := vm.opDictMerge(arg); err != nil {
+				return nil, err
+			}
+
+		case OpListToTuple:
+			vm.opListToTuple()
+
 		case OpMatchSequence:
 			// Check if TOS is a sequence with the expected length
 			// arg = expected length (-1 means any length is ok)

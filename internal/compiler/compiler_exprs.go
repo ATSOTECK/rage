@@ -141,34 +141,56 @@ func (c *Compiler) compileExpr(expr model.Expr) {
 		c.emitArg(runtime.OpCall, 3)
 
 	case *model.List:
-		for _, elt := range e.Elts {
-			c.compileExpr(elt)
-		}
-		c.emitArg(runtime.OpBuildList, len(e.Elts))
+		c.compileStarredList(e.Elts)
 
 	case *model.Tuple:
+		if hasStarred(e.Elts) {
+			c.compileStarredList(e.Elts)
+			c.emit(runtime.OpListToTuple)
+			break
+		}
 		for _, elt := range e.Elts {
 			c.compileExpr(elt)
 		}
 		c.emitArg(runtime.OpBuildTuple, len(e.Elts))
 
 	case *model.Dict:
-		for i := range e.Keys {
-			if e.Keys[i] != nil {
+		// Leading key/value pairs go into BUILD_MAP; once a **mapping appears,
+		// the rest are added in order with DICT_UPDATE / MAP_ADD.
+		n := 0
+		for n < len(e.Keys) && e.Keys[n] != nil {
+			c.compileExpr(e.Keys[n])
+			c.compileExpr(e.Values[n])
+			n++
+		}
+		c.emitArg(runtime.OpBuildMap, n)
+		for i := n; i < len(e.Keys); i++ {
+			if e.Keys[i] == nil {
+				c.compileExpr(e.Values[i])
+				c.emitArg(runtime.OpDictUpdate, 0)
+			} else {
 				c.compileExpr(e.Keys[i])
 				c.compileExpr(e.Values[i])
-			} else {
-				// **unpacking
-				c.compileExpr(e.Values[i])
+				c.emitArg(runtime.OpMapAdd, 0)
 			}
 		}
-		c.emitArg(runtime.OpBuildMap, len(e.Keys))
 
 	case *model.Set:
-		for _, elt := range e.Elts {
-			c.compileExpr(elt)
+		n := 0
+		for n < len(e.Elts) && !isStarred(e.Elts[n]) {
+			c.compileExpr(e.Elts[n])
+			n++
 		}
-		c.emitArg(runtime.OpBuildSet, len(e.Elts))
+		c.emitArg(runtime.OpBuildSet, n)
+		for _, elt := range e.Elts[n:] {
+			if starred, ok := elt.(*model.Starred); ok {
+				c.compileExpr(starred.Value)
+				c.emitArg(runtime.OpSetUpdate, 0)
+			} else {
+				c.compileExpr(elt)
+				c.emitArg(runtime.OpSetAdd, 0)
+			}
+		}
 
 	case *model.IfExpr:
 		c.compileExpr(e.Test)
@@ -392,78 +414,37 @@ func (c *Compiler) compileCall(e *model.Call) {
 	}
 
 	if hasStar || hasDoubleStar {
-		// Extended call: build args tuple and optional kwargs dict, use OpCallEx
+		// Extended call: build the positional args tuple (unpacking *iterables)
+		// and, if there are keywords, a kwargs dict (merging **mappings, where
+		// a repeated keyword is a TypeError), then CALL_EX.
 		c.compileExpr(e.Func)
+		c.compileStarredList(e.Args)
+		c.emit(runtime.OpListToTuple)
 
-		// Build the args tuple by concatenating normal args and *starred args
-		// Strategy: collect segments, then concatenate
-		// Each segment is either a tuple of normal args or the unpacked iterable
-		segments := 0
-		normalCount := 0
-		for _, arg := range e.Args {
-			if starred, ok := arg.(*model.Starred); ok {
-				// Flush any accumulated normal args as a tuple
-				if normalCount > 0 {
-					c.emitArg(runtime.OpBuildTuple, normalCount)
-					segments++
-					normalCount = 0
-				}
-				// Compile the starred expression (should be an iterable)
-				c.compileExpr(starred.Value)
-				// Convert to tuple if needed
-				starIdx := c.addName("tuple")
-				c.emitArg(runtime.OpLoadGlobal, starIdx)
-				c.emit(runtime.OpRot2)
-				c.emitArg(runtime.OpCall, 1)
-				segments++
-			} else {
-				c.compileExpr(arg)
-				normalCount++
-			}
-		}
-		// Flush remaining normal args
-		if normalCount > 0 {
-			c.emitArg(runtime.OpBuildTuple, normalCount)
-			segments++
-		}
-		if segments == 0 {
-			// No positional args at all
-			c.emitArg(runtime.OpBuildTuple, 0)
-		} else if segments > 1 {
-			// Concatenate all tuple segments: use binary add
-			for i := 1; i < segments; i++ {
-				c.emit(runtime.OpBinaryAdd)
-			}
-		}
-
-		// Build kwargs dict if needed
 		flags := 0
 		if len(e.Keywords) > 0 {
 			flags = 1
-			kwCount := 0
+			c.emitArg(runtime.OpBuildMap, 0)
+			named := 0
+			flushNamed := func() {
+				if named > 0 {
+					c.emitArg(runtime.OpBuildMap, named)
+					c.emitArg(runtime.OpDictMerge, 0)
+					named = 0
+				}
+			}
 			for _, kw := range e.Keywords {
 				if kw.Arg == nil {
-					// **kwargs unpacking - merge into dict
-					if kwCount > 0 {
-						c.emitArg(runtime.OpBuildMap, kwCount)
-						// Merge with the unpacked dict
-						c.compileExpr(kw.Value)
-						// Use dict merge (build empty + update + update pattern)
-						// Simple approach: build our map, then update with unpacked
-						c.emit(runtime.OpCopyDict)
-						kwCount = 0
-					} else {
-						c.compileExpr(kw.Value)
-					}
+					flushNamed()
+					c.compileExpr(kw.Value)
+					c.emitArg(runtime.OpDictMerge, 0)
 				} else {
 					c.emitLoadConst(kw.Arg.Name)
 					c.compileExpr(kw.Value)
-					kwCount++
+					named++
 				}
 			}
-			if kwCount > 0 {
-				c.emitArg(runtime.OpBuildMap, kwCount)
-			}
+			flushNamed()
 		}
 
 		c.emitArg(runtime.OpCallEx, flags)
@@ -636,5 +617,42 @@ func (c *Compiler) compileDelete(target model.Expr) {
 		c.compileExpr(t.Value)
 		c.compileExpr(t.Slice)
 		c.emit(runtime.OpDeleteSubscr)
+	}
+}
+
+// isStarred reports whether e is a *starred element.
+func isStarred(e model.Expr) bool {
+	_, ok := e.(*model.Starred)
+	return ok
+}
+
+// hasStarred reports whether any element is a *starred element.
+func hasStarred(elts []model.Expr) bool {
+	for _, e := range elts {
+		if isStarred(e) {
+			return true
+		}
+	}
+	return false
+}
+
+// compileStarredList pushes a list of elts, unpacking *starred elements in
+// place: leading plain elements go into BUILD_LIST, and the rest are added in
+// order with LIST_EXTEND / LIST_APPEND.
+func (c *Compiler) compileStarredList(elts []model.Expr) {
+	n := 0
+	for n < len(elts) && !isStarred(elts[n]) {
+		c.compileExpr(elts[n])
+		n++
+	}
+	c.emitArg(runtime.OpBuildList, n)
+	for _, elt := range elts[n:] {
+		if starred, ok := elt.(*model.Starred); ok {
+			c.compileExpr(starred.Value)
+			c.emitArg(runtime.OpListExtend, 0)
+		} else {
+			c.compileExpr(elt)
+			c.emitArg(runtime.OpListAppend, 0)
+		}
 	}
 }
