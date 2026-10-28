@@ -169,22 +169,6 @@ func InternString(s string) *PyString {
 	return interned
 }
 
-// intPow computes base^exp using binary exponentiation to avoid float precision loss
-func intPow(base, exp int64) int64 {
-	if exp == 0 {
-		return 1
-	}
-	result := int64(1)
-	for exp > 0 {
-		if exp&1 == 1 {
-			result *= base
-		}
-		base *= base
-		exp >>= 1
-	}
-	return result
-}
-
 // ptrValue returns a uintptr for a Value, used for cycle detection in equality
 func ptrValue(v Value) uintptr {
 	return reflect.ValueOf(v).Pointer()

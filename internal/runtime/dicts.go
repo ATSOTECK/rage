@@ -294,26 +294,6 @@ func (vm *VM) dictUpdate(d *PyDict, src Value) error {
 	return nil
 }
 
-// copyDictWithout returns a copy of d, in order, minus the given keys (the
-// **rest capture of a mapping pattern).
-func (vm *VM) copyDictWithout(d *PyDict, remove []Value) *PyDict {
-	result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
-	for _, k := range d.Keys(vm) {
-		skip := false
-		for _, r := range remove {
-			if vm.equal(k, r) {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			v, _ := d.DictGet(k, vm)
-			result.DictSet(k, v, vm)
-		}
-	}
-	return result
-}
-
 // localsDict builds a dict of the bound local variables, in definition order.
 func (vm *VM) localsDict(names []string, locals []Value) *PyDict {
 	result := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
