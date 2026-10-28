@@ -18,6 +18,18 @@ def test_elif_chain():
             return "other"
     expect([classify(i) for i in range(5)]).to_be(["other", "one", "two", "three", "other"])
 
+def test_elif_chain_no_else():
+    def classify(x):
+        r = "none"
+        if x < 0:
+            r = "neg"
+        elif x == 0:
+            r = "zero"
+        elif x < 10:
+            r = "small"
+        return r
+    expect([classify(v) for v in (-1, 0, 5, 50)]).to_be(["neg", "zero", "small", "none"])
+
 def test_single_line_suites():
     def f(): return 1
     out = []
@@ -54,6 +66,16 @@ def test_semicolons():
     a = 1; b = 2; c = a + b
     expect((a, b, c)).to_be((1, 2, 3))
 
+# === Compiler / peephole optimizer ===
+
+def test_short_circuit_in_call_args():
+    def g(*args):
+        return args
+    def f(a, b, c):
+        return g(a and b, c), g(a or b, c)
+    expect(f(0, 2, 3)).to_be(((0, 3), (2, 3)))
+    expect(f(1, 2, 3)).to_be(((2, 3), (1, 3)))
+
 def test_soft_keywords():
     import re
     match = re.match("a", "abc")
@@ -77,9 +99,11 @@ def test_fstring_forms():
     expect((f"{'{'}", f"{'}'}", f"{d['a:b']}", f"{x:'>5}", f"{x:{w}}|")).to_be(("{", "}", "5", "''''1", "     1|"))
 
 test("elif_chain", test_elif_chain)
+test("elif_chain_no_else", test_elif_chain_no_else)
 test("single_line_suites", test_single_line_suites)
 test("comments_in_odd_places", test_comments_in_odd_places)
 test("semicolons", test_semicolons)
+test("short_circuit_in_call_args", test_short_circuit_in_call_args)
 test("soft_keywords", test_soft_keywords)
 test("fstring_forms", test_fstring_forms)
 
