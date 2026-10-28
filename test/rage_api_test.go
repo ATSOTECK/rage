@@ -1181,7 +1181,7 @@ func TestRuntimeErrorTypes(t *testing.T) {
 	}{
 		{"ZeroDivisionError", `x = 1 / 0`, "ZeroDivisionError"},
 		{"NameError", `x = undefined_var`, "not defined"},
-		{"TypeError", `x = "a" + 1`, "unsupported operand"},
+		{"TypeError", `x = "a" + 1`, "can only concatenate str"},
 		{"IndexError", `x = [1, 2][5]`, "IndexError"},
 		{"KeyError", `x = {}["missing"]`, "KeyError"},
 		{"ValueError", `x = int("abc")`, "ValueError"},

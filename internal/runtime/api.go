@@ -755,7 +755,7 @@ func IsTrue(v Value) bool {
 	case *PyBool:
 		return val.Value
 	case *PyInt:
-		return val.Value != 0
+		return val.Value != 0 || val.BigValue != nil
 	case *PyFloat:
 		return val.Value != 0.0
 	case *PyString:
@@ -767,7 +767,7 @@ func IsTrue(v Value) bool {
 	case *PyDict:
 		return len(val.Items) > 0 || val.DictLen() > 0
 	case *PySet:
-		return len(val.Items) > 0
+		return val.Len() > 0
 	default:
 		return v != nil
 	}
@@ -899,6 +899,17 @@ func (vm *VM) CallDunderWithError(inst *PyInstance, name string, args ...Value) 
 // TypeNameOf returns the Python type name for a value.
 func (vm *VM) TypeNameOf(v Value) string {
 	return vm.typeName(v)
+}
+
+// BinaryOp applies a binary operator (e.g. OpBinaryMultiply) to two values
+// with full Python semantics, for use by stdlib packages.
+func (vm *VM) BinaryOp(op Opcode, a, b Value) (Value, error) {
+	return vm.binaryOp(op, a, b)
+}
+
+// IndexInt converts a value to an arbitrary-precision int via __index__.
+func (vm *VM) IndexInt(v Value) (*PyInt, error) {
+	return vm.indexInt(v)
 }
 
 // GetIntIndex exports getIntIndex for use by stdlib packages.

@@ -6,6 +6,31 @@ import (
 	"unicode/utf8"
 )
 
+// lenOf returns len(v) for values without a dedicated fast path.
+func (vm *VM) lenOf(v Value) (int64, error) {
+	switch o := v.(type) {
+	case *PyString:
+		return int64(utf8.RuneCountInString(o.Value)), nil
+	case *PyList:
+		return int64(len(o.Items)), nil
+	case *PyTuple:
+		return int64(len(o.Items)), nil
+	case *PyDict:
+		return int64(o.DictLen()), nil
+	case *PySet:
+		return int64(o.Len()), nil
+	case *PyFrozenSet:
+		return int64(o.Len()), nil
+	case *PyBytes:
+		return int64(len(o.Value)), nil
+	case *PyRange:
+		return rangeLen(o), nil
+	case *PyDictView:
+		return int64(o.Dict.DictLen()), nil
+	}
+	return 0, fmt.Errorf("TypeError: object of type '%s' has no len()", vm.typeName(v))
+}
+
 // initBuiltinsTypes registers type constructors: int, float, complex, str, bool,
 // list, tuple, dict, bytes, set, frozenset, slice, and len.
 func (vm *VM) initBuiltinsTypes() {
@@ -25,9 +50,9 @@ func (vm *VM) initBuiltinsTypes() {
 			case *PyDict:
 				return MakeInt(int64(len(v.Items))), nil
 			case *PySet:
-				return MakeInt(int64(len(v.Items))), nil
+				return MakeInt(int64(v.Len())), nil
 			case *PyFrozenSet:
-				return MakeInt(int64(len(v.Items))), nil
+				return MakeInt(int64(v.Len())), nil
 			case *PyBytes:
 				return MakeInt(int64(len(v.Value))), nil
 			case *PyRange:
@@ -45,7 +70,11 @@ func (vm *VM) initBuiltinsTypes() {
 				}
 				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(v))
 			default:
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(v))
+				n, err := vm.lenOf(v)
+				if err != nil {
+					return nil, err
+				}
+				return MakeInt(n), nil
 			}
 		},
 	}
@@ -324,42 +353,17 @@ func (vm *VM) initBuiltinsTypes() {
 	vm.builtins["dict"] = &PyBuiltinFunc{
 		Name: "dict",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) > 1 {
+				return nil, fmt.Errorf("TypeError: dict expected at most 1 argument, got %d", len(args))
+			}
 			d := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 			if len(args) > 0 {
-				switch src := args[0].(type) {
-				case *PyDict:
-					if vm.maxCollectionSize > 0 && int64(len(src.Items)) > vm.maxCollectionSize {
-						return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
-					}
-					for k, v := range src.Items {
-						d.DictSet(k, v, vm)
-					}
-				default:
-					// Iterable of (key, value) pairs
-					items, err := vm.toList(args[0])
-					if err != nil {
-						return nil, err
-					}
-					if vm.maxCollectionSize > 0 && int64(len(items)) > vm.maxCollectionSize {
-						return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
-					}
-					for _, item := range items {
-						pair, err := vm.toList(item)
-						if err != nil {
-							return nil, fmt.Errorf("TypeError: cannot convert dictionary update sequence element to a sequence")
-						}
-						if len(pair) != 2 {
-							return nil, fmt.Errorf("ValueError: dictionary update sequence element has length %d; 2 is required", len(pair))
-						}
-						d.DictSet(pair[0], pair[1], vm)
-					}
+				if err := vm.dictUpdate(d, args[0]); err != nil {
+					return nil, err
 				}
 			}
-			for k, v := range kwargs {
-				d.DictSet(&PyString{Value: k}, v, vm)
-			}
-			if vm.maxCollectionSize > 0 && int64(d.DictLen()) > vm.maxCollectionSize {
-				return nil, fmt.Errorf("MemoryError: dict size limit exceeded (limit is %d)", vm.maxCollectionSize)
+			if err := vm.dictUpdateKwargs(d, kwargs); err != nil {
+				return nil, err
 			}
 			return d, nil
 		},
@@ -470,23 +474,16 @@ func (vm *VM) initBuiltinsTypes() {
 	vm.builtins["set"] = &PyBuiltinFunc{
 		Name: "set",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+			if len(kwargs) > 0 {
+				return nil, fmt.Errorf("TypeError: set() takes no keyword arguments")
+			}
+			if len(args) > 1 {
+				return nil, fmt.Errorf("TypeError: set expected at most 1 argument, got %d", len(args))
+			}
+			s := &PySet{}
 			if len(args) > 0 {
-				items, err := vm.toList(args[0])
-				if err != nil {
+				if err := vm.setUpdate(&s.setTable, args[0]); err != nil {
 					return nil, err
-				}
-				for _, item := range items {
-					if !isHashable(item) {
-						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
-					}
-					if !s.SetContains(item, vm) {
-						if err := vm.checkCollectionSize(int64(s.SetLen()), "set"); err != nil {
-							return nil, err
-						}
-					}
-					// Use hash-based storage for O(1) lookup
-					s.SetAdd(item, vm)
 				}
 			}
 			return s, nil
@@ -496,20 +493,22 @@ func (vm *VM) initBuiltinsTypes() {
 	vm.builtins["frozenset"] = &PyBuiltinFunc{
 		Name: "frozenset",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			fs := &PyFrozenSet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
+			if len(kwargs) > 0 {
+				return nil, fmt.Errorf("TypeError: frozenset() takes no keyword arguments")
+			}
+			if len(args) > 1 {
+				return nil, fmt.Errorf("TypeError: frozenset expected at most 1 argument, got %d", len(args))
+			}
 			if len(args) > 0 {
-				items, err := vm.toList(args[0])
-				if err != nil {
-					return nil, err
+				// frozenset(fs) returns fs itself, as in CPython
+				if fs, ok := args[0].(*PyFrozenSet); ok {
+					return fs, nil
 				}
-				for _, item := range items {
-					if !isHashable(item) {
-						return nil, fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(item))
-					}
-					if vm.maxCollectionSize > 0 && int64(len(fs.Items)) >= vm.maxCollectionSize {
-						return nil, fmt.Errorf("MemoryError: frozenset size limit exceeded (limit is %d)", vm.maxCollectionSize)
-					}
-					fs.FrozenSetAdd(item, vm)
+			}
+			fs := &PyFrozenSet{}
+			if len(args) > 0 {
+				if err := vm.setUpdate(&fs.setTable, args[0]); err != nil {
+					return nil, err
 				}
 			}
 			return fs, nil

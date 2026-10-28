@@ -874,14 +874,16 @@ func collectionsOrderedDict(vm *runtime.VM) int {
 
 	if vm.GetTop() >= 1 && !runtime.IsNone(vm.Get(1)) {
 		arg := vm.Get(1)
+		// Insert in order so the dict keeps the source ordering
 		if d, ok := arg.(*runtime.PyDict); ok {
-			for k, v := range d.Items {
-				dict.Items[k] = v
+			for _, k := range d.Keys(vm) {
+				v, _ := d.DictGet(k, vm)
+				dict.DictSet(k, v, vm)
 			}
 		} else if l, ok := arg.(*runtime.PyList); ok {
 			for _, item := range l.Items {
 				if tuple, ok := item.(*runtime.PyTuple); ok && len(tuple.Items) >= 2 {
-					dict.Items[tuple.Items[0]] = tuple.Items[1]
+					dict.DictSet(tuple.Items[0], tuple.Items[1], vm)
 				}
 			}
 		}

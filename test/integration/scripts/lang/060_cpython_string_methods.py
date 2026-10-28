@@ -54,8 +54,8 @@ def test_center_edge_cases():
     expect("hello".center(3)).to_be("hello")
     expect("hello".center(5)).to_be("hello")
     # Odd padding
-    expect("hi".center(7)).to_be("  hi   ")
-    expect("hi".center(7, "*")).to_be("**hi***")
+    expect("hi".center(7)).to_be("   hi  ")
+    expect("hi".center(7, "*")).to_be("***hi**")
     expect("x".center(4, "-")).to_be("-x--")
 
 def test_ljust_rjust_edge():

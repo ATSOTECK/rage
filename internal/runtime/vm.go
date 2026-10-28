@@ -52,6 +52,9 @@ type VM struct {
 	// Text conversion state (see conversions_repr.go)
 	reprActive map[Value]struct{} // containers currently being repr'd, for cycle detection
 	reprDepth  int                // nesting budget used by repr()/str() conversions
+	// Call order of recent keyword-argument maps (Go maps are unordered)
+	kwargOrders    [8]kwargOrderRecord
+	kwargOrderNext int
 }
 
 // TimeoutError is returned when script execution exceeds the time limit

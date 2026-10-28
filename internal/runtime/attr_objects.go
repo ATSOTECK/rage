@@ -535,6 +535,27 @@ func (vm *VM) getAttrBuiltinFunc(o *PyBuiltinFunc, name string) (Value, error) {
 			return strMaketransImpl(vm, args)
 		}}, nil
 	}
+	if o.Name == "bytes" && name == "fromhex" {
+		return &PyBuiltinFunc{Name: "bytes.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("TypeError: fromhex() takes exactly one argument (%d given)", len(args))
+			}
+			s, ok := args[0].(*PyString)
+			if !ok {
+				return nil, fmt.Errorf("TypeError: fromhex() argument must be str, not %s", vm.typeName(args[0]))
+			}
+			return bytesFromHex(s.Value)
+		}}, nil
+	}
+	if o.Name == "dict" && name == "fromkeys" {
+		return &PyBuiltinFunc{Name: "dict.fromkeys", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			m, err := vm.getAttrDict(&PyDict{}, "fromkeys")
+			if err != nil {
+				return nil, err
+			}
+			return vm.call(m, args, kwargs)
+		}}, nil
+	}
 	if o.Name == "float" && name == "fromhex" {
 		return &PyBuiltinFunc{Name: "float.fromhex", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			return floatFromHexImpl(args)
@@ -547,7 +568,18 @@ func (vm *VM) getAttrBuiltinFunc(o *PyBuiltinFunc, name string) (Value, error) {
 	}
 	// Handle dunder attribute queries on builtin type constructors (e.g., hasattr(list, "__iter__"))
 	if builtinHasDunder(o.Name, name) {
-		return &PyBuiltinFunc{Name: o.Name + "." + name}, nil
+		// Unbound form: list.__getitem__(lst, i) calls lst.__getitem__(i)
+		typeName, dunder := o.Name, name
+		return &PyBuiltinFunc{Name: typeName + "." + dunder, Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) == 0 {
+				return nil, fmt.Errorf("TypeError: unbound method %s.%s() needs an argument", typeName, dunder)
+			}
+			m, err := vm.getAttr(args[0], dunder)
+			if err != nil {
+				return nil, err
+			}
+			return vm.call(m, args[1:], kwargs)
+		}}, nil
 	}
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", vm.typeName(o), name)
 }
@@ -939,9 +971,24 @@ func (vm *VM) getAttrBytes(b *PyBytes, name string) (Value, error) {
 		}}, nil
 	case "decode":
 		return &PyBuiltinFunc{Name: "bytes.decode", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
-			// Default encoding is utf-8
-			// We just convert bytes to string directly
-			return &PyString{Value: string(b.Value)}, nil
+			encoding, errors := "utf-8", "strict"
+			if len(args) > 0 {
+				encoding = vm.str(args[0])
+			}
+			if len(args) > 1 {
+				errors = vm.str(args[1])
+			}
+			if v, ok := kwargs["encoding"]; ok {
+				encoding = vm.str(v)
+			}
+			if v, ok := kwargs["errors"]; ok {
+				errors = vm.str(v)
+			}
+			s, err := decodeBytes(b.Value, encoding, errors)
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: s}, nil
 		}}, nil
 	case "isalpha":
 		return &PyBuiltinFunc{Name: "bytes.isalpha", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {

@@ -913,9 +913,9 @@ func (vm *VM) run() (Value, error) {
 			case *PyDict:
 				length = int64(len(v.Items))
 			case *PySet:
-				length = int64(len(v.Items))
+				length = int64(v.Len())
 			case *PyFrozenSet:
-				length = int64(len(v.Items))
+				length = int64(v.Len())
 			case *PyBytes:
 				length = int64(len(v.Value))
 			case *PyInstance:
@@ -950,7 +950,11 @@ func (vm *VM) run() (Value, error) {
 					return nil, lenErr
 				}
 			default:
-				lenErr := fmt.Errorf("object of type '%s' has no len()", vm.typeName(obj))
+				n, lenErr := vm.lenOf(obj)
+				if lenErr == nil {
+					length = n
+					break
+				}
 				if handled, handleErr := vm.tryHandleError(lenErr, frame); handleErr != nil {
 					return nil, handleErr
 				} else if handled {
@@ -1378,9 +1382,8 @@ func (vm *VM) run() (Value, error) {
 				}
 			}
 
-			// Fall back to regular binary op
-			binOp := op - OpInplaceAdd + OpBinaryAdd
-			result, err = vm.binaryOp(binOp, a, b)
+			// In-place update for built-in containers, else the regular binary op
+			result, err = vm.inplaceOp(op, a, b)
 			if err != nil {
 				if handled, handleErr := vm.tryHandleError(err, frame); handleErr != nil {
 					return nil, handleErr
@@ -1552,17 +1555,11 @@ func (vm *VM) run() (Value, error) {
 					continue
 				}
 			}
-			s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-			var buildSetErr error
-			for i := 0; i < arg; i++ {
-				val := vm.pop()
-				if !isHashable(val) {
-					buildSetErr = fmt.Errorf("TypeError: unhashable type: '%s'", vm.typeName(val))
-					break
-				}
-				// Use hash-based storage for O(1) lookup
-				s.SetAdd(val, vm)
+			setItems := make([]Value, arg)
+			for i := arg - 1; i >= 0; i-- {
+				setItems[i] = vm.pop()
 			}
+			s, buildSetErr := vm.buildSet(setItems)
 			if buildSetErr != nil {
 				if handled, handleErr := vm.tryHandleError(buildSetErr, frame); handleErr != nil {
 					return nil, handleErr

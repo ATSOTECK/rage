@@ -527,7 +527,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			return nil, err
 		}
 		if len(items) != arg {
-			return nil, fmt.Errorf("not enough values to unpack (expected %d, got %d)", arg, len(items))
+			return nil, unpackCountError(arg, len(items))
 		}
 		for i := len(items) - 1; i >= 0; i-- {
 			vm.push(items[i])
@@ -667,8 +667,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if frame.Locals[arg] == nil {
 			return nil, unboundLocalError(frame, arg)
 		}
-		if v, ok := frame.Locals[arg].(*PyInt); ok {
-			frame.Locals[arg] = MakeInt(v.Value + 1)
+		if v, ok := frame.Locals[arg].(*PyInt); ok && v.BigValue == nil {
+			frame.Locals[arg] = AddInts(v, MakeInt(1))
 		} else {
 			result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], MakeInt(1))
 			if err != nil {
@@ -681,8 +681,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if frame.Locals[arg] == nil {
 			return nil, unboundLocalError(frame, arg)
 		}
-		if v, ok := frame.Locals[arg].(*PyInt); ok {
-			frame.Locals[arg] = MakeInt(v.Value - 1)
+		if v, ok := frame.Locals[arg].(*PyInt); ok && v.BigValue == nil {
+			frame.Locals[arg] = SubInts(v, MakeInt(1))
 		} else {
 			result, err := vm.binaryOp(OpBinarySubtract, frame.Locals[arg], MakeInt(1))
 			if err != nil {
@@ -695,8 +695,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		if frame.Locals[arg] == nil {
 			return nil, unboundLocalError(frame, arg)
 		}
-		if v, ok := frame.Locals[arg].(*PyInt); ok {
-			frame.Locals[arg] = MakeInt(-v.Value)
+		if v, ok := frame.Locals[arg].(*PyInt); ok && v.BigValue == nil {
+			frame.Locals[arg] = NegateInt(v)
 		} else {
 			result, err := vm.unaryOp(OpUnaryNegative, frame.Locals[arg])
 			if err != nil {
@@ -709,9 +709,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		localIdx := arg & 0xFF
 		constIdx := (arg >> 8) & 0xFF
 		constVal := vm.toValue(frame.Code.Constants[constIdx])
-		if v, ok := frame.Locals[localIdx].(*PyInt); ok {
-			if cv, ok := constVal.(*PyInt); ok {
-				frame.Locals[localIdx] = MakeInt(v.Value + cv.Value)
+		if v, ok := frame.Locals[localIdx].(*PyInt); ok && v.BigValue == nil {
+			if cv, ok := constVal.(*PyInt); ok && cv.BigValue == nil {
+				frame.Locals[localIdx] = AddInts(v, cv)
 			} else {
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[localIdx], constVal)
 				if err != nil {
@@ -729,9 +729,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 
 	case OpAccumulateFast:
 		val := vm.pop()
-		if v, ok := frame.Locals[arg].(*PyInt); ok {
-			if av, ok := val.(*PyInt); ok {
-				frame.Locals[arg] = MakeInt(v.Value + av.Value)
+		if v, ok := frame.Locals[arg].(*PyInt); ok && v.BigValue == nil {
+			if av, ok := val.(*PyInt); ok && av.BigValue == nil {
+				frame.Locals[arg] = AddInts(v, av)
 			} else {
 				result, err := vm.binaryOp(OpBinaryAdd, frame.Locals[arg], val)
 				if err != nil {
@@ -822,7 +822,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		a := vm.pop()
 		if ai, ok := a.(*PyInt); ok {
 			if bi, ok := b.(*PyInt); ok {
-				vm.push(MakeInt(ai.Value + bi.Value))
+				vm.push(AddInts(ai, bi))
 				break
 			}
 		}
@@ -837,7 +837,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		a := vm.pop()
 		if ai, ok := a.(*PyInt); ok {
 			if bi, ok := b.(*PyInt); ok {
-				vm.push(MakeInt(ai.Value - bi.Value))
+				vm.push(SubInts(ai, bi))
 				break
 			}
 		}
@@ -852,7 +852,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		a := vm.pop()
 		if ai, ok := a.(*PyInt); ok {
 			if bi, ok := b.(*PyInt); ok {
-				vm.push(MakeInt(ai.Value * bi.Value))
+				vm.push(MulInts(ai, bi))
 				break
 			}
 		}
@@ -867,20 +867,21 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		a := vm.pop()
 		if ai, ok := a.(*PyInt); ok {
 			if bi, ok := b.(*PyInt); ok {
+				c := CompareInts(ai, bi)
 				var truth bool
 				switch op {
 				case OpCompareLtInt:
-					truth = ai.Value < bi.Value
+					truth = c < 0
 				case OpCompareLeInt:
-					truth = ai.Value <= bi.Value
+					truth = c <= 0
 				case OpCompareGtInt:
-					truth = ai.Value > bi.Value
+					truth = c > 0
 				case OpCompareGeInt:
-					truth = ai.Value >= bi.Value
+					truth = c >= 0
 				case OpCompareEqInt:
-					truth = ai.Value == bi.Value
+					truth = c == 0
 				case OpCompareNeInt:
-					truth = ai.Value != bi.Value
+					truth = c != 0
 				}
 				if truth {
 					vm.push(True)
@@ -923,9 +924,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		b := vm.pop()
 		a := vm.pop()
 		result := false
-		if ai, ok := a.(*PyInt); ok {
-			if bi, ok := b.(*PyInt); ok {
-				result = ai.Value < bi.Value
+		if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+				result = CompareInts(ai, bi) < 0
 			} else {
 				result = vm.truthy(vm.compareOp(OpCompareLt, a, b))
 			}
@@ -940,9 +941,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		b := vm.pop()
 		a := vm.pop()
 		result := false
-		if ai, ok := a.(*PyInt); ok {
-			if bi, ok := b.(*PyInt); ok {
-				result = ai.Value <= bi.Value
+		if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+				result = CompareInts(ai, bi) <= 0
 			} else {
 				result = vm.truthy(vm.compareOp(OpCompareLe, a, b))
 			}
@@ -957,9 +958,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		b := vm.pop()
 		a := vm.pop()
 		result := false
-		if ai, ok := a.(*PyInt); ok {
-			if bi, ok := b.(*PyInt); ok {
-				result = ai.Value > bi.Value
+		if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+				result = CompareInts(ai, bi) > 0
 			} else {
 				result = vm.truthy(vm.compareOp(OpCompareGt, a, b))
 			}
@@ -974,9 +975,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		b := vm.pop()
 		a := vm.pop()
 		result := false
-		if ai, ok := a.(*PyInt); ok {
-			if bi, ok := b.(*PyInt); ok {
-				result = ai.Value >= bi.Value
+		if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+			if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
+				result = CompareInts(ai, bi) >= 0
 			} else {
 				result = vm.truthy(vm.compareOp(OpCompareGe, a, b))
 			}
@@ -1234,9 +1235,8 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			}
 		}
 
-		// Fall back to regular binary op
-		binOp := op - OpInplaceAdd + OpBinaryAdd
-		result, err = vm.binaryOp(binOp, a, b)
+		// In-place update for built-in containers, else the regular binary op
+		result, err = vm.inplaceOp(op, a, b)
 		if err != nil {
 			return nil, err
 		}
@@ -1268,9 +1268,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		case *PyDict:
 			length = int64(len(v.Items))
 		case *PySet:
-			length = int64(len(v.Items))
+			length = int64(v.Len())
 		case *PyFrozenSet:
-			length = int64(len(v.Items))
+			length = int64(v.Len())
 		case *PyBytes:
 			length = int64(len(v.Value))
 		case *PyInstance:
@@ -1278,7 +1278,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 				if err != nil {
 					return nil, err
 				}
-				if i, ok := result.(*PyInt); ok {
+				if i, ok := result.(*PyInt); ok && i.BigValue == nil {
 					length = i.Value
 				} else {
 					return nil, fmt.Errorf("__len__() should return an integer")
@@ -1376,6 +1376,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			kwargs[name] = vm.pop()
 			totalArgs--
 		}
+		vm.RecordKwargNames(kwargs, kwNames)
 		args := make([]Value, totalArgs)
 		for i := totalArgs - 1; i >= 0; i-- {
 			args[i] = vm.pop()
@@ -1394,12 +1395,15 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			kwargsVal := vm.pop()
 			if kwargsDict, ok := kwargsVal.(*PyDict); ok {
 				kwargs = make(map[string]Value)
+				var names []string
 				for _, key := range kwargsDict.Keys(vm) {
 					if ks, ok := key.(*PyString); ok {
 						val, _ := kwargsDict.DictGet(key, vm)
 						kwargs[ks.Value] = val
+						names = append(names, ks.Value)
 					}
 				}
+				vm.RecordKwargOrder(kwargs, names)
 			}
 		}
 		argsTuple := vm.pop()
@@ -1420,10 +1424,13 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		vm.push(result)
 
 	case OpBuildSet:
-		s := &PySet{Items: make(map[Value]struct{}), buckets: make(map[uint64][]setEntry)}
-		for i := 0; i < arg; i++ {
-			val := vm.pop()
-			s.SetAdd(val, vm)
+		setItems := make([]Value, arg)
+		for i := arg - 1; i >= 0; i-- {
+			setItems[i] = vm.pop()
+		}
+		s, err := vm.buildSet(setItems)
+		if err != nil {
+			return nil, err
 		}
 		vm.push(s)
 
@@ -1446,20 +1453,7 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 		subject := vm.top()
 		dict := subject.(*PyDict)
-		newDict := &PyDict{Items: make(map[Value]Value)}
-		for k, v := range dict.Items {
-			shouldRemove := false
-			for _, removeKey := range keysToRemove {
-				if vm.equal(k, removeKey) {
-					shouldRemove = true
-					break
-				}
-			}
-			if !shouldRemove {
-				newDict.Items[k] = v
-			}
-		}
-		vm.push(newDict)
+		vm.push(vm.copyDictWithout(dict, keysToRemove))
 
 	case OpLoadBuildClass:
 		vm.push(vm.builtins["__build_class__"])
@@ -1472,20 +1466,14 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 		}
 
 	case OpLoadLocals:
-		locals := &PyDict{Items: make(map[Value]Value)}
-		for i, name := range frame.Code.VarNames {
-			if frame.Locals[i] != nil {
-				locals.Items[&PyString{Value: name}] = frame.Locals[i]
-			}
-		}
-		vm.push(locals)
+		vm.push(vm.localsDict(frame.Code.VarNames, frame.Locals))
 
 	case OpImportName:
 		name := frame.Code.Names[arg]
 		fromlist := vm.pop()
 		levelVal := vm.pop()
 		level := 0
-		if levelInt, ok := levelVal.(*PyInt); ok {
+		if levelInt, ok := levelVal.(*PyInt); ok && levelInt.BigValue == nil {
 			level = int(levelInt.Value)
 		}
 		moduleName := name

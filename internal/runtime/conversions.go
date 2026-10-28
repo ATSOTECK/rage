@@ -115,25 +115,15 @@ func (vm *VM) tryToIntValue(v Value) (Value, error) {
 	case *PyInt:
 		return val, nil
 	case *PyString:
-		s := strings.TrimSpace(val.Value)
-		if s == "" {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
-		}
-		s = strings.ReplaceAll(s, "_", "")
-		i, err := strconv.ParseInt(s, 10, 64)
+		return vm.intFromStringBase(val.Value, 10)
+	case *PyBool:
+		return boolToInt(val), nil
+	case *PyFloat:
+		r, err := floatToInt(val.Value)
 		if err != nil {
-			if len(s) > maxIntStringDigits {
-				return nil, fmt.Errorf("ValueError: Exceeds the limit (%d digits) for integer string conversion: value has %d digits", maxIntStringDigits, len(s))
-			}
-			// Try big.Int for overflow
-			bi := new(big.Int)
-			_, ok := bi.SetString(s, 10)
-			if !ok {
-				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
-			}
-			return MakeBigInt(bi), nil
+			return nil, err
 		}
-		return MakeInt(i), nil
+		return r, nil
 	default:
 		i, err := vm.tryToInt(v)
 		if err != nil {
@@ -173,91 +163,11 @@ func (vm *VM) getIntIndex(v Value) (int64, error) {
 
 // intFromStringBase converts a string to int with a given base
 func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: ''", base)
-	}
-
-	// Validate base range
-	if base != 0 && (base < 2 || base > 36) {
-		return nil, fmt.Errorf("ValueError: int() base must be >= 2 and <= 36, or 0")
-	}
-
-	// Remove underscores
-	s = strings.ReplaceAll(s, "_", "")
-
-	// Handle sign
-	negative := false
-	if len(s) > 0 && (s[0] == '+' || s[0] == '-') {
-		negative = s[0] == '-'
-		s = s[1:]
-		if s == "" {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %s", base, strRepr(s))
-		}
-	}
-
-	// Handle base 0 (auto-detect)
-	if base == 0 {
-		if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
-			base = 16
-			s = s[2:]
-		} else if strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O") {
-			base = 8
-			s = s[2:]
-		} else if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
-			base = 2
-			s = s[2:]
-		} else if len(s) > 1 && s[0] == '0' {
-			// Leading zeros in base 0 are not allowed (except "0" itself)
-			allZeros := true
-			for _, c := range s {
-				if c != '0' {
-					allZeros = false
-					break
-				}
-			}
-			if !allZeros {
-				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 0: '0%s'", s[1:])
-			}
-			base = 10
-		} else {
-			base = 10
-		}
-	} else {
-		// Strip prefix if it matches the base
-		if base == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
-			s = s[2:]
-		} else if base == 8 && (strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O")) {
-			s = s[2:]
-		} else if base == 2 && (strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B")) {
-			s = s[2:]
-		}
-	}
-
-	if s == "" {
-		return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: ''", base)
-	}
-
-	i, err := strconv.ParseInt(s, int(base), 64)
+	r, err := vm.parseIntString(s, base)
 	if err != nil {
-		if len(s) > maxIntStringDigits {
-			return nil, fmt.Errorf("ValueError: Exceeds the limit (%d digits) for integer string conversion: value has %d digits", maxIntStringDigits, len(s))
-		}
-		// Try big.Int for overflow
-		bi := new(big.Int)
-		_, ok := bi.SetString(s, int(base))
-		if !ok {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %s", base, strRepr(s))
-		}
-		if negative {
-			bi.Neg(bi)
-		}
-		return MakeBigInt(bi), nil
+		return nil, err
 	}
-	if negative {
-		i = -i
-	}
-	return MakeInt(i), nil
+	return r, nil
 }
 
 func (vm *VM) toFloat(v Value) float64 {
@@ -270,11 +180,7 @@ func (vm *VM) toFloat(v Value) float64 {
 func (vm *VM) tryToFloat(v Value) (float64, error) {
 	switch val := v.(type) {
 	case *PyInt:
-		if val.BigValue != nil {
-			f, _ := new(big.Float).SetInt(val.BigValue).Float64()
-			return f, nil
-		}
-		return float64(val.Value), nil
+		return intToFloat(val)
 	case *PyComplex:
 		_ = val
 		return 0, fmt.Errorf("TypeError: float() argument must be a string or a real number, not 'complex'")
@@ -300,7 +206,16 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 		case "nan", "+nan", "-nan":
 			return math.NaN(), nil
 		}
-		// Remove underscores (Python numeric literal syntax)
+		invalid := fmt.Errorf("ValueError: could not convert string to float: %s", vm.repr(val))
+		// Underscores are allowed only between digits; Go's hex floats are not Python syntax
+		for i := 0; i < len(s); i++ {
+			if s[i] == '_' && (i == 0 || i == len(s)-1 || s[i-1] < '0' || s[i-1] > '9' || s[i+1] < '0' || s[i+1] > '9') {
+				return 0, invalid
+			}
+			if s[i] == 'x' || s[i] == 'X' || s[i] == 'p' || s[i] == 'P' {
+				return 0, invalid
+			}
+		}
 		s = strings.ReplaceAll(s, "_", "")
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil {
@@ -308,7 +223,7 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 			if math.IsInf(f, 0) {
 				return f, nil
 			}
-			return 0, fmt.Errorf("ValueError: could not convert string to float: %s", strRepr(val.Value))
+			return 0, invalid
 		}
 		return f, nil
 	case *PyInstance:
@@ -358,17 +273,11 @@ func (vm *VM) toList(v Value) ([]Value, error) {
 		}
 		return items, nil
 	case *PySet:
-		var items []Value
-		for k := range val.Items {
-			items = append(items, k)
-		}
-		return items, nil
+		return val.Values(), nil
 	case *PyFrozenSet:
-		var items []Value
-		for k := range val.Items {
-			items = append(items, k)
-		}
-		return items, nil
+		return val.Values(), nil
+	case *PyDictView:
+		return val.Items(), nil
 	case *PyDict:
 		keys := val.Keys(vm)
 		items := make([]Value, len(keys))
@@ -455,7 +364,7 @@ func (vm *VM) truthy(v Value) bool {
 	case *PyBool:
 		return val.Value
 	case *PyInt:
-		return val.Value != 0
+		return val.Value != 0 || val.BigValue != nil
 	case *PyFloat:
 		return val.Value != 0.0
 	case *PyComplex:
@@ -469,9 +378,11 @@ func (vm *VM) truthy(v Value) bool {
 	case *PyDict:
 		return len(val.Items) > 0
 	case *PySet:
-		return len(val.Items) > 0
+		return val.Len() > 0
 	case *PyFrozenSet:
-		return len(val.Items) > 0
+		return val.Len() > 0
+	case *PyDictView:
+		return val.Dict.DictLen() > 0
 	case *PyRange:
 		return rangeLen(val) > 0
 	case *PyBytes:
@@ -578,6 +489,8 @@ func (vm *VM) typeName(v Value) string {
 		return "ellipsis"
 	case *PyRange:
 		return "range"
+	case *PyDictView:
+		return val.Type()
 	case *PyIterator:
 		return "iterator"
 	case *PyUserData:

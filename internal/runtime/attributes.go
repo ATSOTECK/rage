@@ -263,6 +263,17 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 			return m, nil
 		}
 	}
+	v, err := vm.getAttrBase(obj, name)
+	if err != nil && len(name) > 4 && name[:2] == "__" {
+		// Fall back to generic special methods of built-in values
+		if m := vm.builtinDunder(obj, name); m != nil {
+			return m, nil
+		}
+	}
+	return v, err
+}
+
+func (vm *VM) getAttrBase(obj Value, name string) (Value, error) {
 	switch o := obj.(type) {
 	case *PyGenerator:
 		return vm.getAttrGenerator(o, name)
@@ -396,6 +407,13 @@ func (vm *VM) getAttr(obj Value, name string) (Value, error) {
 		return vm.getAttrBytes(o, name)
 	case *PyRange:
 		return vm.getAttrRange(o, name)
+	case *PySlice:
+		return vm.getAttrSlice(o, name)
+	case *PyDictView:
+		if m := vm.dictViewMethod(o, name); m != nil {
+			return m, nil
+		}
+		return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Type(), name)
 	case *PyFunction:
 		return vm.getAttrFunction(o, name)
 	case *PyBuiltinFunc:

@@ -215,8 +215,8 @@ result = fib(1000)
 `
 	vm := runCode(t, source)
 	result := vm.GetGlobal("result").(*runtime.PyInt)
-	// Just check it's a big number
-	assert.True(t, result.Value > 0)
+	// fib(1000) needs arbitrary precision; just check it's a big number
+	assert.True(t, result.IsBig() || result.Value > 0)
 }
 
 func TestPrimeComputation(t *testing.T) {

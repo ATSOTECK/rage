@@ -506,7 +506,7 @@ func TestComputeSliceIndices(t *testing.T) {
 		{"basic [1:3]", MakeInt(1), MakeInt(3), nil, 5, 1, 3, 1, false},
 		{"full [::]", nil, nil, nil, 5, 0, 5, 1, false},
 		{"step 2", nil, nil, MakeInt(2), 5, 0, 5, 2, false},
-		{"negative step", nil, nil, MakeInt(-1), 5, 4, -6, -1, false},
+		{"negative step", nil, nil, MakeInt(-1), 5, 4, -1, -1, false},
 		{"negative index start", MakeInt(-2), nil, nil, 5, 3, 5, 1, false},
 		{"negative index stop", nil, MakeInt(-1), nil, 5, 0, 4, 1, false},
 		{"step zero", nil, nil, MakeInt(0), 5, 0, 0, 0, true},

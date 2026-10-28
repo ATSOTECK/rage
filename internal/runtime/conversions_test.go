@@ -243,7 +243,7 @@ func TestTruthy(t *testing.T) {
 		{"empty tuple", &PyTuple{Items: []Value{}}, false},
 		{"non-empty tuple", &PyTuple{Items: []Value{MakeInt(1)}}, true},
 		{"empty dict", &PyDict{Items: make(map[Value]Value)}, false},
-		{"empty set", &PySet{Items: make(map[Value]struct{})}, false},
+		{"empty set", &PySet{}, false},
 		{"empty bytes", &PyBytes{Value: []byte{}}, false},
 		{"non-empty bytes", &PyBytes{Value: []byte{1}}, true},
 		{"range empty", &PyRange{Start: 0, Stop: 0, Step: 1}, false},

@@ -425,7 +425,9 @@ func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[strin
 		if kwArgsIdx < len(frame.Locals) {
 			kwargsDict := &PyDict{Items: make(map[Value]Value), buckets: make(map[uint64][]dictEntry)}
 			if kwargs != nil {
-				for name, val := range kwargs {
+				// Keep the call order of the keyword arguments
+				for _, name := range vm.kwargNames(kwargs) {
+					val := kwargs[name]
 					// Check if this kwarg matches a named parameter
 					isNamedParam := false
 					for i := 0; i < code.ArgCount+code.KwOnlyArgCount && i < len(code.VarNames); i++ {

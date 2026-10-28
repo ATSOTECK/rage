@@ -309,7 +309,13 @@ type PyRange struct {
 }
 
 func (r *PyRange) Type() string   { return "range" }
-func (r *PyRange) String() string { return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step) }
+func (r *PyRange) String() string {
+	// CPython omits a step of 1
+	if r.Step == 1 {
+		return fmt.Sprintf("range(%d, %d)", r.Start, r.Stop)
+	}
+	return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step)
+}
 
 // Len returns the number of elements in the range
 func (r *PyRange) Len() int64 {
@@ -354,17 +360,16 @@ type PySlice struct {
 
 func (s *PySlice) Type() string { return "slice" }
 func (s *PySlice) String() string {
-	start, stop, step := "None", "None", "None"
-	if s.Start != nil && s.Start != None {
-		start = fmt.Sprintf("%v", s.Start.(*PyInt).Value)
+	part := func(v Value) string {
+		switch p := v.(type) {
+		case nil:
+			return "None"
+		case *PyString:
+			return "'" + p.Value + "'"
+		}
+		return fmt.Sprintf("%v", v)
 	}
-	if s.Stop != nil && s.Stop != None {
-		stop = fmt.Sprintf("%v", s.Stop.(*PyInt).Value)
-	}
-	if s.Step != nil && s.Step != None {
-		step = fmt.Sprintf("%v", s.Step.(*PyInt).Value)
-	}
-	return fmt.Sprintf("slice(%s, %s, %s)", start, stop, step)
+	return fmt.Sprintf("slice(%s, %s, %s)", part(s.Start), part(s.Stop), part(s.Step))
 }
 
 // PyIterator wraps an iterator

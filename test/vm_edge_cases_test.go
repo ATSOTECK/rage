@@ -1652,7 +1652,7 @@ func TestListIndexNegativeStartNotFound(t *testing.T) {
 	runCodeExpectError(t, `
 lst = [1, 2, 3, 2, 1]
 lst.index(5, -3)
-`, "is not in list")
+`, "not in list")
 }
 
 func TestTupleIndexNegativeStart(t *testing.T) {

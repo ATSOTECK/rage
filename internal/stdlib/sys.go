@@ -243,7 +243,7 @@ func sysGetSizeof(vm *gopherpy.VM) int {
 	case *gopherpy.PyDict:
 		size = 64 + int64(len(v.Items)*24)
 	case *gopherpy.PySet:
-		size = 64 + int64(len(v.Items)*16)
+		size = 64 + int64(v.Len()*16)
 	default:
 		size = 64
 	}

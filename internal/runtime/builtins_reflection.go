@@ -233,11 +233,8 @@ func BuiltinLocals(vm *VM) int {
 	// Find the caller's frame (skip the builtin's temporary frame)
 	callerFrame := vm.getCallerFrame()
 	if callerFrame != nil && callerFrame.Code != nil {
-		for i, name := range callerFrame.Code.VarNames {
-			if i < len(callerFrame.Locals) && callerFrame.Locals[i] != nil {
-				locals.Items[NewString(name)] = callerFrame.Locals[i]
-			}
-		}
+		// Keep the variables in definition order
+		locals = vm.localsDict(callerFrame.Code.VarNames, callerFrame.Locals)
 	}
 
 	vm.Push(locals)

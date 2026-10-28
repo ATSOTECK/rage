@@ -83,11 +83,7 @@ func shallowCopy(vm *runtime.VM, val runtime.Value) (runtime.Value, error) {
 		return d, nil
 
 	case *runtime.PySet:
-		s := &runtime.PySet{Items: make(map[runtime.Value]struct{}, len(v.Items))}
-		for k := range v.Items {
-			s.Items[k] = struct{}{}
-		}
-		return s, nil
+		return v.Copy(), nil
 
 	case *runtime.PyTuple:
 		// Tuples are immutable — return the same object
@@ -184,11 +180,9 @@ func deepCopy(vm *runtime.VM, val runtime.Value, memo map[uintptr]runtime.Value)
 		return d, nil
 
 	case *runtime.PySet:
-		s := &runtime.PySet{Items: make(map[runtime.Value]struct{}, len(v.Items))}
+		// Set elements are hashable (immutable), so a shallow copy suffices
+		s := v.Copy()
 		memo[ptrOf(v)] = s
-		for k := range v.Items {
-			s.Items[k] = struct{}{}
-		}
 		return s, nil
 
 	case *runtime.PyTuple:

@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"math"
 	"math/big"
 	"strings"
 )
@@ -72,8 +73,8 @@ func (vm *VM) tryRichCompare(a, b Value, dunder, reflected string) (Value, bool)
 
 func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 	// Fast path: int vs int comparisons (most common case)
-	if ai, ok := a.(*PyInt); ok {
-		if bi, ok := b.(*PyInt); ok {
+	if ai, ok := a.(*PyInt); ok && ai.BigValue == nil {
+		if bi, ok := b.(*PyInt); ok && bi.BigValue == nil {
 			switch op {
 			case OpCompareEq:
 				if ai.Value == bi.Value {
@@ -110,55 +111,34 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 	}
 
 	// Set comparison operators: <=, <, >=, > mean subset/superset
-	if as, aOk := a.(*PySet); aOk {
-		if bs, bOk := b.(*PySet); bOk {
-			switch op {
-			case OpCompareEq:
-				if vm.equal(a, b) {
-					return True
-				}
-				return False
-			case OpCompareNe:
-				if !vm.equal(a, b) {
-					return True
-				}
-				return False
-			case OpCompareLt: // proper subset
-				if len(as.Items) >= len(bs.Items) {
-					return False
-				}
-				for k := range as.Items {
-					if !bs.SetContains(k, vm) {
-						return False
-					}
-				}
-				return True
-			case OpCompareLe: // subset
-				for k := range as.Items {
-					if !bs.SetContains(k, vm) {
-						return False
-					}
-				}
-				return True
-			case OpCompareGt: // proper superset
-				if len(as.Items) <= len(bs.Items) {
-					return False
-				}
-				for k := range bs.Items {
-					if !as.SetContains(k, vm) {
-						return False
-					}
-				}
-				return True
-			case OpCompareGe: // superset
-				for k := range bs.Items {
-					if !as.SetContains(k, vm) {
-						return False
-					}
-				}
-				return True
-			}
+	if op >= OpCompareEq && op <= OpCompareGe && (isSetLikeView(a) || isSetLikeView(b)) {
+		// Keys and items views compare like sets against any set-like operand
+		as, aErr := vm.setTableOf(a)
+		bs, bErr := vm.setTableOf(b)
+		if aErr == nil && bErr == nil && as != nil && bs != nil {
+			a, b = as.asValue(), bs.asValue()
 		}
+	}
+	if as, bs := asSetTable(a), asSetTable(b); as != nil && bs != nil && op >= OpCompareEq && op <= OpCompareGe {
+		var r bool
+		switch op {
+		case OpCompareEq:
+			r = setTablesEqual(as, bs, vm)
+		case OpCompareNe:
+			r = !setTablesEqual(as, bs, vm)
+		case OpCompareLt: // proper subset
+			r = as.used < bs.used && setTableSubset(as, bs, vm)
+		case OpCompareLe: // subset
+			r = setTableSubset(as, bs, vm)
+		case OpCompareGt: // proper superset
+			r = as.used > bs.used && setTableSubset(bs, as, vm)
+		case OpCompareGe: // superset
+			r = setTableSubset(bs, as, vm)
+		}
+		if r {
+			return True
+		}
+		return False
 	}
 
 	// Complex numbers support == and != but not ordering
@@ -255,6 +235,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'<' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
 		}
+		if isNaNPair(a, b) {
+			return False
+		}
 		cmp := vm.compare(a, b)
 		if vm.currentException != nil {
 			return nil
@@ -270,6 +253,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		if aIsComplex || bIsComplex || !vm.areBuiltinOrderable(a, b) {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'<=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
+		}
+		if isNaNPair(a, b) {
+			return False
 		}
 		cmp := vm.compare(a, b)
 		if vm.currentException != nil {
@@ -287,6 +273,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'>' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
 		}
+		if isNaNPair(a, b) {
+			return False
+		}
 		cmp := vm.compare(a, b)
 		if vm.currentException != nil {
 			return nil
@@ -302,6 +291,9 @@ func (vm *VM) compareOp(op Opcode, a, b Value) Value {
 		if aIsComplex || bIsComplex || !vm.areBuiltinOrderable(a, b) {
 			vm.currentException = &PyException{TypeName: "TypeError", Message: "'>=' not supported between instances of '" + vm.typeName(a) + "' and '" + vm.typeName(b) + "'"}
 			return nil
+		}
+		if isNaNPair(a, b) {
+			return False
 		}
 		cmp := vm.compare(a, b)
 		if vm.currentException != nil {
@@ -339,6 +331,59 @@ func (vm *VM) equal(a, b Value) bool {
 	return vm.equalWithCycleDetection(a, b, make(map[uintptr]map[uintptr]bool))
 }
 
+// intEqualsFloat compares an int and a float exactly, as CPython does, rather
+// than rounding the int to a float first.
+func intEqualsFloat(i *PyInt, f float64) bool {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return false
+	}
+	if i.BigValue == nil && i.Value > -(1<<53) && i.Value < 1<<53 {
+		return float64(i.Value) == f
+	}
+	return new(big.Float).SetInt(i.BigIntValue()).Cmp(big.NewFloat(f)) == 0
+}
+
+// compareIntFloat compares an int with a (non-NaN) float exactly, returning
+// -1, 0 or 1.
+func compareIntFloat(i *PyInt, f float64) int {
+	if math.IsInf(f, 1) {
+		return -1
+	}
+	if math.IsInf(f, -1) {
+		return 1
+	}
+	if i.BigValue == nil && i.Value > -(1<<53) && i.Value < 1<<53 {
+		x := float64(i.Value)
+		if x < f {
+			return -1
+		} else if x > f {
+			return 1
+		}
+		return 0
+	}
+	return new(big.Float).SetInt(i.BigIntValue()).Cmp(big.NewFloat(f))
+}
+
+// isNaNPair reports whether an ordering comparison of a and b involves a
+// float NaN, which makes every ordering comparison false.
+func isNaNPair(a, b Value) bool {
+	if f, ok := a.(*PyFloat); ok && math.IsNaN(f.Value) {
+		return true
+	}
+	if f, ok := b.(*PyFloat); ok && math.IsNaN(f.Value) {
+		return true
+	}
+	return false
+}
+
+// boolToInt converts a bool to its int value.
+func boolToInt(b *PyBool) *PyInt {
+	if b.Value {
+		return MakeInt(1)
+	}
+	return MakeInt(0)
+}
+
 // equalWithCycleDetection compares values with cycle detection to prevent stack overflow
 func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]bool) bool {
 	switch av := a.(type) {
@@ -346,21 +391,13 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 		_, ok := b.(*PyNone)
 		return ok
 	case *PyBool:
-		switch bv := b.(type) {
-		case *PyBool:
+		if bv, ok := b.(*PyBool); ok {
 			return av.Value == bv.Value
-		case *PyInt:
-			ai := int64(0)
-			if av.Value {
-				ai = 1
-			}
-			return ai == bv.Value
-		case *PyFloat:
-			ai := 0.0
-			if av.Value {
-				ai = 1.0
-			}
-			return ai == bv.Value
+		}
+		switch b.(type) {
+		case *PyInt, *PyFloat, *PyComplex:
+			// bool compares as the int 0 or 1
+			return vm.equalWithCycleDetection(boolToInt(av), b, seen)
 		}
 	case *PyInt:
 		switch bv := b.(type) {
@@ -370,26 +407,20 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 			}
 			return av.Value == bv.Value
 		case *PyFloat:
-			if av.BigValue != nil {
-				bf := new(big.Float).SetInt(av.BigIntValue())
-				return bf.Cmp(big.NewFloat(bv.Value)) == 0
-			}
-			return float64(av.Value) == bv.Value
+			return intEqualsFloat(av, bv.Value)
 		case *PyBool:
-			bi := int64(0)
-			if bv.Value {
-				bi = 1
-			}
-			return av.Value == bi
+			return vm.equalWithCycleDetection(av, boolToInt(bv), seen)
 		case *PyComplex:
-			return bv.Imag == 0 && float64(av.Value) == bv.Real
+			return bv.Imag == 0 && intEqualsFloat(av, bv.Real)
 		}
 	case *PyFloat:
 		switch bv := b.(type) {
 		case *PyFloat:
 			return av.Value == bv.Value
 		case *PyInt:
-			return av.Value == float64(bv.Value)
+			return intEqualsFloat(bv, av.Value)
+		case *PyBool:
+			return intEqualsFloat(boolToInt(bv), av.Value)
 		case *PyComplex:
 			return bv.Imag == 0 && av.Value == bv.Real
 		}
@@ -398,15 +429,11 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 		case *PyComplex:
 			return av.Real == bv.Real && av.Imag == bv.Imag
 		case *PyInt:
-			return av.Imag == 0 && av.Real == float64(bv.Value)
+			return av.Imag == 0 && intEqualsFloat(bv, av.Real)
 		case *PyFloat:
 			return av.Imag == 0 && av.Real == bv.Value
 		case *PyBool:
-			bi := int64(0)
-			if bv.Value {
-				bi = 1
-			}
-			return av.Imag == 0 && av.Real == float64(bi)
+			return av.Imag == 0 && intEqualsFloat(boolToInt(bv), av.Real)
 		}
 	case *PyString:
 		if bv, ok := b.(*PyString); ok {
@@ -460,7 +487,7 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 		}
 	case *PyDict:
 		if bv, ok := b.(*PyDict); ok {
-			if len(av.Items) != len(bv.Items) {
+			if av.DictLen() != bv.DictLen() {
 				return false
 			}
 			// Cycle detection for dicts
@@ -473,70 +500,32 @@ func (vm *VM) equalWithCycleDetection(a, b Value, seen map[uintptr]map[uintptr]b
 				seen[ptrA] = make(map[uintptr]bool)
 			}
 			seen[ptrA][ptrB] = true
-			for k, v := range av.Items {
-				found := false
-				for k2, v2 := range bv.Items {
-					if vm.equalWithCycleDetection(k, k2, seen) {
-						if vm.equalWithCycleDetection(v, v2, seen) {
-							found = true
-							break
-						}
-					}
-				}
-				if !found {
+			// Look each key up by hash rather than comparing all pairs
+			for _, k := range av.Keys(vm) {
+				v, _ := av.DictGet(k, vm)
+				v2, found := bv.DictGet(k, vm)
+				if !found || (v != v2 && !vm.equalWithCycleDetection(v, v2, seen)) {
 					return false
 				}
 			}
 			return true
 		}
-	case *PySet:
-		// Set can equal another set or frozenset
-		switch bv := b.(type) {
-		case *PySet:
-			if len(av.Items) != len(bv.Items) {
-				return false
-			}
-			for k := range av.Items {
-				if !bv.SetContains(k, vm) {
-					return false
-				}
-			}
-			return true
-		case *PyFrozenSet:
-			if len(av.Items) != len(bv.Items) {
-				return false
-			}
-			for k := range av.Items {
-				if !bv.FrozenSetContains(k, vm) {
-					return false
-				}
-			}
-			return true
+	case *PySet, *PyFrozenSet:
+		// A set can equal another set or frozenset
+		if bt := asSetTable(b); bt != nil {
+			return setTablesEqual(asSetTable(a), bt, vm)
 		}
-	case *PyFrozenSet:
-		// FrozenSet can equal another frozenset or set
-		switch bv := b.(type) {
-		case *PyFrozenSet:
-			if len(av.Items) != len(bv.Items) {
-				return false
-			}
-			for k := range av.Items {
-				if !bv.FrozenSetContains(k, vm) {
-					return false
-				}
-			}
-			return true
-		case *PySet:
-			if len(av.Items) != len(bv.Items) {
-				return false
-			}
-			for k := range av.Items {
-				if !bv.SetContains(k, vm) {
-					return false
-				}
-			}
-			return true
+		if isSetLikeView(b) {
+			return vm.equalWithCycleDetection(b, a, seen)
 		}
+	case *PyDictView:
+		// Values views only equal themselves; keys and items views are set-like
+		if av.Kind == dictViewValues || (!isSetLikeView(b) && asSetTable(b) == nil) {
+			return a == b
+		}
+		at, aErr := vm.setTableOf(a)
+		bt, bErr := vm.setTableOf(b)
+		return aErr == nil && bErr == nil && setTablesEqual(at, bt, vm)
 	case *PyRange:
 		if bv, ok := b.(*PyRange); ok {
 			// Two ranges are equal if they produce the same sequence
@@ -633,6 +622,9 @@ func (vm *VM) compare(a, b Value) int {
 	case *PyInt:
 		switch bv := b.(type) {
 		case *PyInt:
+			if av.BigValue != nil || bv.BigValue != nil {
+				return av.BigIntValue().Cmp(bv.BigIntValue())
+			}
 			if av.Value < bv.Value {
 				return -1
 			} else if av.Value > bv.Value {
@@ -640,13 +632,7 @@ func (vm *VM) compare(a, b Value) int {
 			}
 			return 0
 		case *PyFloat:
-			af := float64(av.Value)
-			if af < bv.Value {
-				return -1
-			} else if af > bv.Value {
-				return 1
-			}
-			return 0
+			return compareIntFloat(av, bv.Value)
 		}
 	case *PyFloat:
 		switch bv := b.(type) {
@@ -658,13 +644,7 @@ func (vm *VM) compare(a, b Value) int {
 			}
 			return 0
 		case *PyInt:
-			bf := float64(bv.Value)
-			if av.Value < bf {
-				return -1
-			} else if av.Value > bf {
-				return 1
-			}
-			return 0
+			return -compareIntFloat(bv, av.Value)
 		}
 	case *PyString:
 		if bv, ok := b.(*PyString); ok {
@@ -824,13 +804,26 @@ func (vm *VM) contains(container, item Value) bool {
 				return true
 			}
 		}
-	case *PySet:
+	case *PySet, *PyFrozenSet:
 		// Use hash-based lookup for O(1) average case
-		return c.SetContains(item, vm)
-	case *PyFrozenSet:
-		// Use hash-based lookup for O(1) average case
-		return c.FrozenSetContains(item, vm)
+		h, err := vm.setKeyHash(item)
+		if err != nil {
+			vm.currentException = vm.wrapGoError(err)
+			return false
+		}
+		return asSetTable(c).lookup(item, h, vm) >= 0
+	case *PyDictView:
+		found, err := vm.viewContains(c, item)
+		if err != nil {
+			vm.currentException = vm.wrapGoError(err)
+			return false
+		}
+		return found
 	case *PyDict:
+		if !isHashable(item) {
+			vm.currentException = &PyException{TypeName: "TypeError", Message: "unhashable type: '" + vm.typeName(item) + "'"}
+			return false
+		}
 		// Use hash-based lookup for O(1) average case
 		return c.DictContains(item, vm)
 	case *PyRange:
