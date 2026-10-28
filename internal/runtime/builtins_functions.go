@@ -67,7 +67,11 @@ func (vm *VM) initBuiltinsFunctions() {
 					if i > 0 {
 						buf.WriteString(sep)
 					}
-					buf.WriteString(vm.str(arg))
+					s, err := vm.strValue(arg)
+					if err != nil {
+						return nil, err
+					}
+					buf.WriteString(s)
 				}
 				buf.WriteString(end)
 				_, err = vm.Call(writeMethod, []Value{NewString(buf.String())}, nil)
@@ -80,14 +84,21 @@ func (vm *VM) initBuiltinsFunctions() {
 					}
 				}
 			} else {
-				// Write to stdout (default)
+				// Write to stdout (default). Convert every argument first so
+				// an exception from __str__ leaves no partial output.
+				var buf strings.Builder
 				for i, arg := range args {
 					if i > 0 {
-						fmt.Print(sep)
+						buf.WriteString(sep)
 					}
-					fmt.Print(vm.str(arg))
+					s, err := vm.strValue(arg)
+					if err != nil {
+						return nil, err
+					}
+					buf.WriteString(s)
 				}
-				fmt.Print(end)
+				buf.WriteString(end)
+				fmt.Print(buf.String())
 			}
 			return None, nil
 		},
@@ -135,7 +146,11 @@ func (vm *VM) initBuiltinsFunctions() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("repr() takes exactly 1 argument (%d given)", len(args))
 			}
-			return &PyString{Value: vm.repr(args[0])}, nil
+			s, err := vm.reprValue(args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: s}, nil
 		},
 	}
 
@@ -145,7 +160,11 @@ func (vm *VM) initBuiltinsFunctions() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("ascii() takes exactly 1 argument (%d given)", len(args))
 			}
-			return &PyString{Value: vm.ascii(args[0])}, nil
+			s, err := vm.asciiValue(args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: s}, nil
 		},
 	}
 

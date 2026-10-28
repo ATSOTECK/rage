@@ -78,7 +78,7 @@ func (vm *VM) getItem(obj Value, index Value) (Value, error) {
 		if val, found := o.DictGet(index, vm); found {
 			return val, nil
 		}
-		return nil, fmt.Errorf("KeyError: %v", index)
+		return nil, vm.newKeyError(index)
 	case *PyUserData:
 		// Check for __getitem__ method in metatable
 		if o.Metatable != nil {
@@ -549,7 +549,7 @@ func (vm *VM) delItem(obj Value, index Value) error {
 	case *PyDict:
 		// Use hash-based deletion for O(1) average case
 		if !o.DictDelete(index, vm) {
-			return fmt.Errorf("KeyError: %s", vm.repr(index))
+			return vm.newKeyError(index)
 		}
 		return nil
 	case *PyInstance:

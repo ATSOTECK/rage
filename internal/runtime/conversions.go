@@ -79,14 +79,14 @@ func (vm *VM) tryToInt(v Value) (int64, error) {
 	case *PyString:
 		s := strings.TrimSpace(val.Value)
 		if s == "" {
-			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
 		}
 		// Remove underscores
 		s = strings.ReplaceAll(s, "_", "")
 		// Try parsing as integer
 		i, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			return 0, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
 		}
 		return i, nil
 	case *PyInstance:
@@ -117,7 +117,7 @@ func (vm *VM) tryToIntValue(v Value) (Value, error) {
 	case *PyString:
 		s := strings.TrimSpace(val.Value)
 		if s == "" {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
 		}
 		s = strings.ReplaceAll(s, "_", "")
 		i, err := strconv.ParseInt(s, 10, 64)
@@ -129,7 +129,7 @@ func (vm *VM) tryToIntValue(v Value) (Value, error) {
 			bi := new(big.Int)
 			_, ok := bi.SetString(s, 10)
 			if !ok {
-				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %q", val.Value)
+				return nil, fmt.Errorf("ValueError: invalid literal for int() with base 10: %s", strRepr(val.Value))
 			}
 			return MakeBigInt(bi), nil
 		}
@@ -192,7 +192,7 @@ func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
 		negative = s[0] == '-'
 		s = s[1:]
 		if s == "" {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %s", base, strRepr(s))
 		}
 	}
 
@@ -247,7 +247,7 @@ func (vm *VM) intFromStringBase(s string, base int64) (Value, error) {
 		bi := new(big.Int)
 		_, ok := bi.SetString(s, int(base))
 		if !ok {
-			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %q", base, s)
+			return nil, fmt.Errorf("ValueError: invalid literal for int() with base %d: %s", base, strRepr(s))
 		}
 		if negative {
 			bi.Neg(bi)
@@ -288,7 +288,7 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 	case *PyString:
 		s := strings.TrimSpace(val.Value)
 		if s == "" {
-			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
+			return 0, fmt.Errorf("ValueError: could not convert string to float: %s", strRepr(val.Value))
 		}
 		// Handle Python-style special values (case-insensitive)
 		lower := strings.ToLower(s)
@@ -308,7 +308,7 @@ func (vm *VM) tryToFloat(v Value) (float64, error) {
 			if math.IsInf(f, 0) {
 				return f, nil
 			}
-			return 0, fmt.Errorf("ValueError: could not convert string to float: %q", val.Value)
+			return 0, fmt.Errorf("ValueError: could not convert string to float: %s", strRepr(val.Value))
 		}
 		return f, nil
 	case *PyInstance:
@@ -501,258 +501,36 @@ func (vm *VM) truthy(v Value) bool {
 	}
 }
 
+// str returns str(v) for internal callers that cannot propagate errors (for
+// example when building error messages). Python-visible conversions use
+// strValue, which reports exceptions raised by __str__/__repr__.
 func (vm *VM) str(v Value) string {
-	switch val := v.(type) {
-	case *PyNone:
-		return "None"
-	case *PyNotImplementedType:
-		_ = val
-		return "NotImplemented"
-	case *PyBool:
-		if val.Value {
-			return "True"
-		}
-		return "False"
-	case *PyInt:
-		return fmt.Sprintf("%d", val.Value)
-	case *PyFloat:
-		s := strconv.FormatFloat(val.Value, 'g', -1, 64)
-		// Python always shows at least one decimal for floats
-		if !strings.ContainsAny(s, ".eEn") {
-			s += ".0"
-		}
-		return s
-	case *PyComplex:
-		return formatComplex(val.Real, val.Imag)
-	case *PyString:
-		return val.Value
-	case *PyBytes:
-		return bytesRepr(val.Value)
-	case *PyList:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.repr(item)
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case *PyTuple:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.repr(item)
-		}
-		if len(parts) == 1 {
-			return "(" + parts[0] + ",)"
-		}
-		return "(" + strings.Join(parts, ", ") + ")"
-	case *PyDict:
-		orderedKeys := val.Keys(vm)
-		parts := make([]string, 0, len(orderedKeys))
-		for _, k := range orderedKeys {
-			if v, ok := val.DictGet(k, vm); ok {
-				parts = append(parts, vm.repr(k)+": "+vm.repr(v))
-			}
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	case *PySet:
-		if len(val.Items) == 0 {
-			return "set()"
-		}
-		parts := make([]string, 0, len(val.Items))
-		for k := range val.Items {
-			parts = append(parts, vm.repr(k))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	case *PyFrozenSet:
-		if len(val.Items) == 0 {
-			return "frozenset()"
-		}
-		parts := make([]string, 0, len(val.Items))
-		for k := range val.Items {
-			parts = append(parts, vm.repr(k))
-		}
-		return "frozenset({" + strings.Join(parts, ", ") + "})"
-	case *PyFunction:
-		return fmt.Sprintf("<function %s>", val.Name)
-	case *PyBuiltinFunc:
-		return fmt.Sprintf("<built-in function %s>", val.Name)
-	case *PyGoFunc:
-		return fmt.Sprintf("<go function %s>", val.Name)
-	case *PyUserData:
-		return fmt.Sprintf("<userdata %T>", val.Value)
-	case *PyModule:
-		return fmt.Sprintf("<module '%s'>", val.Name)
-	case *PyInstance:
-		// Check if this is an exception instance — use formatExceptionInstance
-		// unless the class defines its own __str__ (like ExceptionGroup)
-		if vm.isExceptionClass(val.Class) {
-			if _, hasStr := val.Class.Dict["__str__"]; !hasStr {
-				return vm.formatExceptionInstance(val)
-			}
-		}
-		// Check for __str__ method via MRO
-		if result, found, err := vm.callDunder(val, "__str__"); found && err == nil {
-			if s, ok := result.(*PyString); ok {
-				return s.Value
-			}
-		}
-		// Check for __repr__ method via MRO
-		if result, found, err := vm.callDunder(val, "__repr__"); found && err == nil {
-			if s, ok := result.(*PyString); ok {
-				return s.Value
-			}
-		}
-		return fmt.Sprintf("<%s object>", val.Class.Name)
-	case *PyClass:
-		return fmt.Sprintf("<class '%s'>", val.Name)
-	case *GenericAlias:
-		return val.formatRepr()
-	case *UnionType:
-		return val.formatRepr()
-	case *PyException:
-		return vm.formatException(val)
-	default:
-		return fmt.Sprintf("%v", v)
+	s, err := vm.strValue(v)
+	if err != nil {
+		return vm.textFallback(v)
 	}
+	return s
 }
 
-// formatExceptionInstance formats an exception instance for str().
-// In CPython, str(e) returns just the message, not "Type: message".
-func (vm *VM) formatExceptionInstance(inst *PyInstance) string {
-	// Get args from the instance
-	if args, ok := inst.Dict["args"]; ok {
-		if t, ok := args.(*PyTuple); ok && len(t.Items) > 0 {
-			if len(t.Items) == 1 {
-				return vm.str(t.Items[0])
-			}
-			// Multiple arguments - show as tuple
-			parts := make([]string, len(t.Items))
-			for i, item := range t.Items {
-				parts[i] = vm.repr(item)
-			}
-			return fmt.Sprintf("(%s)", strings.Join(parts, ", "))
-		}
+// repr returns repr(v) for internal callers that cannot propagate errors.
+// Python-visible conversions use reprValue.
+func (vm *VM) repr(v Value) string {
+	s, err := vm.reprValue(v)
+	if err != nil {
+		return vm.textFallback(v)
 	}
-
-	// No args
-	return ""
+	return s
 }
 
-// formatException formats a PyException for str().
-// In CPython, str(e) returns just the message, not "Type: message".
-func (vm *VM) formatException(exc *PyException) string {
-	if exc.Args != nil && len(exc.Args.Items) > 0 {
-		if len(exc.Args.Items) == 1 {
-			return vm.str(exc.Args.Items[0])
-		}
-		parts := make([]string, len(exc.Args.Items))
-		for i, item := range exc.Args.Items {
-			parts[i] = vm.repr(item)
-		}
-		return fmt.Sprintf("(%s)", strings.Join(parts, ", "))
-	}
-
-	if exc.Message != "" {
-		return exc.Message
-	}
-
-	return ""
-}
-
-// bytesRepr produces the Python repr for a bytes object
-func bytesRepr(data []byte) string {
-	var b strings.Builder
-	b.WriteString("b'")
-	for _, c := range data {
-		switch {
-		case c == '\\':
-			b.WriteString("\\\\")
-		case c == '\'':
-			b.WriteString("\\'")
-		case c == '\t':
-			b.WriteString("\\t")
-		case c == '\n':
-			b.WriteString("\\n")
-		case c == '\r':
-			b.WriteString("\\r")
-		case c >= 32 && c < 127:
-			b.WriteByte(c)
-		default:
-			fmt.Fprintf(&b, "\\x%02x", c)
-		}
-	}
-	b.WriteByte('\'')
-	return b.String()
-}
-
-// asciiRepr returns a string representation with non-ASCII characters escaped.
-func asciiRepr(s string) string {
-	var b strings.Builder
-	b.WriteByte('\'')
-	for _, r := range s {
-		switch {
-		case r == '\\':
-			b.WriteString("\\\\")
-		case r == '\'':
-			b.WriteString("\\'")
-		case r == '\t':
-			b.WriteString("\\t")
-		case r == '\n':
-			b.WriteString("\\n")
-		case r == '\r':
-			b.WriteString("\\r")
-		case r >= 32 && r < 127:
-			b.WriteRune(r)
-		case r <= 0xff:
-			fmt.Fprintf(&b, "\\x%02x", r)
-		case r <= 0xffff:
-			fmt.Fprintf(&b, "\\u%04x", r)
-		default:
-			fmt.Fprintf(&b, "\\U%08x", r)
-		}
-	}
-	b.WriteByte('\'')
-	return b.String()
-}
-
+// ascii returns ascii(v) for internal callers that cannot propagate errors.
 func (vm *VM) ascii(v Value) string {
-	switch val := v.(type) {
-	case *PyString:
-		return asciiRepr(val.Value)
-	case *PyList:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.ascii(item)
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case *PyTuple:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.ascii(item)
-		}
-		if len(parts) == 1 {
-			return "(" + parts[0] + ",)"
-		}
-		return "(" + strings.Join(parts, ", ") + ")"
-	case *PyDict:
-		orderedKeys := val.Keys(vm)
-		parts := make([]string, 0, len(orderedKeys))
-		for _, k := range orderedKeys {
-			if v, ok := val.DictGet(k, vm); ok {
-				parts = append(parts, vm.ascii(k)+": "+vm.ascii(v))
-			}
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	case *PySet:
-		if len(val.Items) == 0 {
-			return "set()"
-		}
-		parts := make([]string, 0, len(val.Items))
-		for k := range val.Items {
-			parts = append(parts, vm.ascii(k))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	default:
-		return vm.repr(v)
-	}
+	return asciiEscape(vm.repr(v))
+}
+
+// textFallback is the text used when a user-defined __repr__/__str__ fails
+// and the caller has no way to report the error.
+func (vm *VM) textFallback(v Value) string {
+	return fmt.Sprintf("<%s object>", vm.typeName(v))
 }
 
 func (vm *VM) typeName(v Value) string {
@@ -820,69 +598,5 @@ func (vm *VM) typeName(v Value) string {
 		return "types.UnionType"
 	default:
 		return "object"
-	}
-}
-
-func (vm *VM) repr(v Value) string {
-	switch val := v.(type) {
-	case *PyComplex:
-		return formatComplex(val.Real, val.Imag)
-	case *PyString:
-		return fmt.Sprintf("'%s'", val.Value)
-	case *PyBytes:
-		return bytesRepr(val.Value)
-	case *PyNone:
-		return "None"
-	case *PyBool:
-		if val.Value {
-			return "True"
-		}
-		return "False"
-	case *PyList:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.repr(item)
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case *PyTuple:
-		parts := make([]string, len(val.Items))
-		for i, item := range val.Items {
-			parts[i] = vm.repr(item)
-		}
-		if len(parts) == 1 {
-			return "(" + parts[0] + ",)"
-		}
-		return "(" + strings.Join(parts, ", ") + ")"
-	case *PyDict:
-		orderedKeys := val.Keys(vm)
-		parts := make([]string, 0, len(orderedKeys))
-		for _, k := range orderedKeys {
-			if v, ok := val.DictGet(k, vm); ok {
-				parts = append(parts, vm.repr(k)+": "+vm.repr(v))
-			}
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	case *PySet:
-		if len(val.Items) == 0 {
-			return "set()"
-		}
-		parts := make([]string, 0, len(val.Items))
-		for k := range val.Items {
-			parts = append(parts, vm.repr(k))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	case *PyInstance:
-		if result, found, err := vm.callDunder(val, "__repr__"); found && err == nil {
-			if s, ok := result.(*PyString); ok {
-				return s.Value
-			}
-		}
-		return fmt.Sprintf("<%s object>", val.Class.Name)
-	case *GenericAlias:
-		return val.formatRepr()
-	case *UnionType:
-		return val.formatRepr()
-	default:
-		return vm.str(v)
 	}
 }

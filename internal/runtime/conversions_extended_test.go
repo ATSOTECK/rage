@@ -440,8 +440,8 @@ func TestStrGoFunc(t *testing.T) {
 	vm := NewVM()
 	gf := &PyGoFunc{Name: "myfunc"}
 	got := vm.str(gf)
-	if got != "<go function myfunc>" {
-		t.Errorf("str(gofunc) = %q, want %q", got, "<go function myfunc>")
+	if got != "<built-in function myfunc>" {
+		t.Errorf("str(gofunc) = %q, want %q", got, "<built-in function myfunc>")
 	}
 }
 
@@ -1162,9 +1162,14 @@ func TestAsciiInt(t *testing.T) {
 // =====================================
 
 func TestBytesReprSingleQuote(t *testing.T) {
+	// Like CPython, switch to double quotes when only ' appears
 	got := bytesRepr([]byte("it's"))
-	if got != `b'it\'s'` {
-		t.Errorf("bytesRepr with quote = %q, want %q", got, `b'it\'s'`)
+	if got != `b"it's"` {
+		t.Errorf("bytesRepr with quote = %q, want %q", got, `b"it's"`)
+	}
+	got = bytesRepr([]byte(`'"`))
+	if got != `b'\'"'` {
+		t.Errorf("bytesRepr with both quotes = %q, want %q", got, `b'\'"'`)
 	}
 }
 
@@ -1181,8 +1186,8 @@ func TestBytesReprEmpty(t *testing.T) {
 
 func TestAsciiReprSpecialChars(t *testing.T) {
 	got := asciiRepr("a\tb\nc\\d'e")
-	if got != `'a\tb\nc\\d\'e'` {
-		t.Errorf("asciiRepr = %q, want %q", got, `'a\tb\nc\\d\'e'`)
+	if got != `"a\tb\nc\\d'e"` {
+		t.Errorf("asciiRepr = %q, want %q", got, `"a\tb\nc\\d'e"`)
 	}
 }
 

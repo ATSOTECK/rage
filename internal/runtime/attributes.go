@@ -257,6 +257,12 @@ func builtinHasDunder(typeName, dunder string) bool {
 // Attribute access
 
 func (vm *VM) getAttr(obj Value, name string) (Value, error) {
+	switch name {
+	case "__repr__", "__str__", "__format__":
+		if m := vm.builtinTextMethod(obj, name); m != nil {
+			return m, nil
+		}
+	}
 	switch o := obj.(type) {
 	case *PyGenerator:
 		return vm.getAttrGenerator(o, name)

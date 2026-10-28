@@ -778,6 +778,28 @@ func (vm *VM) Truthy(v Value) bool {
 	return vm.truthy(v)
 }
 
+// StrValue returns str(v), propagating exceptions raised by __str__/__repr__
+// (exported wrapper)
+func (vm *VM) StrValue(v Value) (string, error) {
+	return vm.strValue(v)
+}
+
+// ReprValue returns repr(v), propagating exceptions raised by __repr__
+// (exported wrapper)
+func (vm *VM) ReprValue(v Value) (string, error) {
+	return vm.reprValue(v)
+}
+
+// FormatValue returns format(v, spec) (exported wrapper)
+func (vm *VM) FormatValue(v Value, spec string) (string, error) {
+	return vm.formatValue(v, spec)
+}
+
+// FloatRepr returns repr() of a float: the shortest round-tripping text.
+func FloatRepr(f float64) string {
+	return floatRepr(f)
+}
+
 // Equal tests equality of two Python values (exported wrapper)
 func (vm *VM) Equal(a, b Value) bool {
 	return vm.equal(a, b)

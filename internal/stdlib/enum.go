@@ -526,6 +526,37 @@ func InitEnumModule() {
 					}
 					cls.Dict["__str__"] = strFn
 
+					// __format__: int-valued enums format their value like an
+					// int; others format str(member) like a string.
+					cls.Dict["__format__"] = &runtime.PyBuiltinFunc{
+						Name: "__format__",
+						Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+							if len(args) != 2 {
+								return nil, fmt.Errorf("TypeError: __format__() takes exactly one argument (%d given)", len(args)-1)
+							}
+							inst, ok := args[0].(*runtime.PyInstance)
+							spec, specOK := args[1].(*runtime.PyString)
+							if !ok || !specOK {
+								return nil, fmt.Errorf("TypeError: __format__() argument must be str")
+							}
+							var target runtime.Value
+							if isIntEnumType(cls) {
+								target = inst.Dict["_value_"]
+							} else {
+								s, err := vm.StrValue(inst)
+								if err != nil {
+									return nil, err
+								}
+								target = runtime.NewString(s)
+							}
+							s, err := vm.FormatValue(target, spec.Value)
+							if err != nil {
+								return nil, err
+							}
+							return runtime.NewString(s), nil
+						},
+					}
+
 					// __eq__: identity-based for regular enums
 					cls.Dict["__eq__"] = &runtime.PyBuiltinFunc{
 						Name: "__eq__",
@@ -614,6 +645,21 @@ func InitEnumModule() {
 
 					// ── IntEnum / IntFlag specific dunders ──────────────
 					if isIntEnumType(cls) {
+						// __str__ is int.__repr__ (Python 3.11+): str(member) is the value
+						cls.Dict["__str__"] = &runtime.PyBuiltinFunc{
+							Name: "__str__",
+							Fn: func(args []runtime.Value, kwargs map[string]runtime.Value) (runtime.Value, error) {
+								if len(args) < 1 {
+									return runtime.NewString(""), nil
+								}
+								inst, ok := args[0].(*runtime.PyInstance)
+								if !ok {
+									return runtime.NewString(""), nil
+								}
+								return runtime.NewString(vm.Repr(inst.Dict["_value_"])), nil
+							},
+						}
+
 						// __int__
 						cls.Dict["__int__"] = &runtime.PyBuiltinFunc{
 							Name: "__int__",

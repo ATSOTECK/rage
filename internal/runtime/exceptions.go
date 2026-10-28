@@ -397,10 +397,28 @@ func (vm *VM) wrapGoError(err error) *PyException {
 		}
 	}
 
+	// Go code reports a missing key as "KeyError: 'key'"; store the bare key
+	// so str(e) (repr of the key, for KeyError) does not quote it twice.
+	if excClass != nil && excClass.Name == "KeyError" && len(msg) >= 2 &&
+		(msg[0] == '\'' || msg[0] == '"') && msg[len(msg)-1] == msg[0] {
+		msg = msg[1 : len(msg)-1]
+	}
+
 	return &PyException{
 		ExcType: excClass,
 		Args:    &PyTuple{Items: []Value{&PyString{Value: msg}}},
 		Message: msg,
+	}
+}
+
+// newKeyError creates a KeyError for key. Its single argument is the key
+// itself, so str(e) shows repr(key) like CPython.
+func (vm *VM) newKeyError(key Value) *PyException {
+	return &PyException{
+		ExcType:  vm.builtinClass("KeyError"),
+		TypeName: "KeyError",
+		Args:     &PyTuple{Items: []Value{key}},
+		Message:  plainRepr(key),
 	}
 }
 

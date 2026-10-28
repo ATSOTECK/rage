@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"math"
 	"unicode/utf8"
 )
 
@@ -157,6 +158,7 @@ func (vm *VM) initBuiltinsTypes() {
 			// Convert real part
 			realPart := 0.0
 			imagPart := 0.0
+			firstIsComplex := false
 			if len(args) >= 1 {
 				switch v := args[0].(type) {
 				case *PyInt:
@@ -170,6 +172,7 @@ func (vm *VM) initBuiltinsTypes() {
 				case *PyComplex:
 					realPart = v.Real
 					imagPart = v.Imag
+					firstIsComplex = true
 				case *PyInstance:
 					if result, found, err := vm.callDunder(v, "__float__"); found {
 						if err != nil {
@@ -187,7 +190,14 @@ func (vm *VM) initBuiltinsTypes() {
 					return nil, fmt.Errorf("TypeError: complex() first argument must be a string or a number, not '%s'", vm.typeName(args[0]))
 				}
 			}
-			// Convert imag part
+			// Convert imag part. When the first argument is real, the imaginary
+			// part is exactly the second argument; starting from -0.0 makes the
+			// addition below preserve its sign, so complex(0, -0.0) is -0j.
+			if len(args) >= 2 && !firstIsComplex {
+				if _, ok := args[1].(*PyComplex); !ok {
+					imagPart = math.Copysign(0, -1)
+				}
+			}
 			if len(args) >= 2 {
 				switch v := args[1].(type) {
 				case *PyInt:
@@ -227,9 +237,40 @@ func (vm *VM) initBuiltinsTypes() {
 		Name: "str",
 		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
 			if len(args) == 0 {
-				return &PyString{Value: ""}, nil
+				if obj, ok := kwargs["object"]; ok {
+					args = []Value{obj}
+				} else {
+					return &PyString{Value: ""}, nil
+				}
 			}
-			return &PyString{Value: vm.str(args[0])}, nil
+			_, hasEncoding := kwargs["encoding"]
+			_, hasErrors := kwargs["errors"]
+			if len(args) > 1 || hasEncoding || hasErrors {
+				// str(bytes, encoding, errors) decodes like bytes.decode()
+				switch args[0].(type) {
+				case *PyBytes:
+				case *PyString:
+					return nil, fmt.Errorf("TypeError: decoding str is not supported")
+				default:
+					return nil, fmt.Errorf("TypeError: decoding to str: need a bytes-like object, %s found", vm.typeName(args[0]))
+				}
+				decode, err := vm.getAttr(args[0], "decode")
+				if err != nil {
+					return nil, err
+				}
+				decodeKwargs := make(map[string]Value, len(kwargs))
+				for k, v := range kwargs {
+					if k != "object" {
+						decodeKwargs[k] = v
+					}
+				}
+				return vm.call(decode, args[1:], decodeKwargs)
+			}
+			s, err := vm.strValue(args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &PyString{Value: s}, nil
 		},
 	}
 

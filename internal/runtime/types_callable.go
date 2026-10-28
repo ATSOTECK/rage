@@ -147,25 +147,26 @@ func (e *PyException) formatError() string {
 	typeName := e.Type()
 	var msg string
 
-	// If we have args, format with them
-	if e.Args != nil && len(e.Args.Items) > 0 {
+	// If we have args, format with them (like str(e))
+	if e.ExcType != nil && e.Message != typeName && classDefinesDunder(e.ExcType, "__str__") {
+		// Message holds the result of the class's own __str__
+		msg = typeName
+		if e.Message != "" {
+			msg = fmt.Sprintf("%s: %s", typeName, e.Message)
+		}
+	} else if e.Args != nil && len(e.Args.Items) > 0 {
 		if len(e.Args.Items) == 1 {
-			if s, ok := e.Args.Items[0].(*PyString); ok {
+			if e.isKeyError() {
+				// KeyError shows the repr of the missing key
+				msg = fmt.Sprintf("%s: %s", typeName, plainRepr(e.Args.Items[0]))
+			} else if s, ok := e.Args.Items[0].(*PyString); ok {
 				msg = fmt.Sprintf("%s: %s", typeName, s.Value)
 			} else {
 				msg = fmt.Sprintf("%s: %v", typeName, e.Args.Items[0])
 			}
 		} else {
-			// Multiple args
-			parts := make([]string, len(e.Args.Items))
-			for i, item := range e.Args.Items {
-				if s, ok := item.(*PyString); ok {
-					parts[i] = s.Value
-				} else {
-					parts[i] = fmt.Sprintf("%v", item)
-				}
-			}
-			msg = fmt.Sprintf("%s: (%s)", typeName, strings.Join(parts, ", "))
+			// Multiple args show as a tuple
+			msg = fmt.Sprintf("%s: %s", typeName, plainRepr(e.Args))
 		}
 	} else if e.Message != "" && e.Message != typeName {
 		// If we have a message that's different from just the type name
@@ -223,6 +224,41 @@ func (e *PyException) formatError() string {
 	}
 
 	return msg
+}
+
+// isKeyError reports whether the exception is a KeyError (or a subclass).
+func (e *PyException) isKeyError() bool {
+	if e.ExcType == nil {
+		return e.TypeName == "KeyError"
+	}
+	for _, cls := range e.ExcType.Mro {
+		if cls.Name == "KeyError" {
+			return true
+		}
+	}
+	return false
+}
+
+// plainRepr is a VM-free repr() for error messages, where user-defined
+// __repr__ methods cannot be called.
+func plainRepr(v Value) string {
+	switch x := v.(type) {
+	case *PyString:
+		return strRepr(x.Value)
+	case *PyTuple:
+		parts := make([]string, len(x.Items))
+		for i, item := range x.Items {
+			parts[i] = plainRepr(item)
+		}
+		if len(parts) == 1 {
+			return "(" + parts[0] + ",)"
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	case *PyInstance:
+		return fmt.Sprintf("<%s object>", x.Class.Name)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // TracebackEntry represents a single frame in a traceback

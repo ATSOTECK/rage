@@ -325,7 +325,7 @@ func (vm *VM) getAttrDict(d *PyDict, name string) (Value, error) {
 			if len(args) > 1 {
 				return args[1], nil
 			}
-			return nil, fmt.Errorf("KeyError: %s", vm.str(key))
+			return nil, vm.newKeyError(key)
 		}}, nil
 	case "popitem":
 		return &PyBuiltinFunc{Name: "dict.popitem", Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
@@ -434,7 +434,7 @@ func (vm *VM) getAttrSet(s *PySet, name string) (Value, error) {
 				return nil, fmt.Errorf("remove() takes exactly 1 argument")
 			}
 			if !s.SetContains(args[0], vm) {
-				return nil, fmt.Errorf("KeyError: %s", vm.str(args[0]))
+				return nil, vm.newKeyError(args[0])
 			}
 			s.SetRemove(args[0], vm)
 			return None, nil

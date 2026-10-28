@@ -48,6 +48,10 @@ type VM struct {
 
 	// Pending memory error from stack growth (checked in run loop)
 	pendingMemError bool
+
+	// Text conversion state (see conversions_repr.go)
+	reprActive map[Value]struct{} // containers currently being repr'd, for cycle detection
+	reprDepth  int                // nesting budget used by repr()/str() conversions
 }
 
 // TimeoutError is returned when script execution exceeds the time limit

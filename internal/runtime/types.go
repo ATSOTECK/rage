@@ -328,7 +328,7 @@ type PyFloat struct {
 }
 
 func (f *PyFloat) Type() string   { return "float" }
-func (f *PyFloat) String() string { return fmt.Sprintf("%g", f.Value) }
+func (f *PyFloat) String() string { return floatRepr(f.Value) }
 
 // PyComplex represents a Python complex number
 type PyComplex struct {
@@ -342,26 +342,6 @@ func (c *PyComplex) String() string { return formatComplex(c.Real, c.Imag) }
 // MakeComplex creates a PyComplex value
 func MakeComplex(real, imag float64) *PyComplex {
 	return &PyComplex{Real: real, Imag: imag}
-}
-
-// formatComplex formats a complex number matching CPython output
-func formatComplex(real, imag float64) string {
-	formatPart := func(v float64) string {
-		s := fmt.Sprintf("%g", v)
-		return s
-	}
-
-	if real == 0 && !math.Signbit(real) {
-		// Pure imaginary: just show the imaginary part
-		return formatPart(imag) + "j"
-	}
-	// Full form with parens: (real+imagj)
-	imagStr := formatPart(imag)
-	sign := "+"
-	if imag < 0 || math.IsNaN(imag) {
-		sign = ""
-	}
-	return "(" + formatPart(real) + sign + imagStr + "j)"
 }
 
 // PyString represents a Python string
@@ -378,4 +358,4 @@ type PyBytes struct {
 }
 
 func (b *PyBytes) Type() string   { return "bytes" }
-func (b *PyBytes) String() string { return fmt.Sprintf("b'%s'", string(b.Value)) }
+func (b *PyBytes) String() string { return bytesRepr(b.Value) }

@@ -494,61 +494,6 @@ func (c *Compiler) compileCall(e *model.Call) {
 	}
 }
 
-func (c *Compiler) compileFString(e *model.FStringLit) {
-	if len(e.Parts) == 0 {
-		// Empty f-string
-		c.emitLoadConst("")
-		return
-	}
-
-	// Compile each part
-	for i, part := range e.Parts {
-		if part.IsExpr {
-			if part.FormatSpec != "" {
-				// Has format spec: use format(value, spec)
-				// If there's also a conversion, apply it first
-				formatIdx := c.addName("format")
-				c.emitArg(runtime.OpLoadGlobal, formatIdx)
-
-				if part.Conversion != 0 {
-					// Apply conversion: str(expr) or repr(expr)
-					convName := "str"
-					if part.Conversion == 'r' {
-						convName = "repr"
-					}
-					convIdx := c.addName(convName)
-					c.emitArg(runtime.OpLoadGlobal, convIdx)
-					c.compileExpr(part.Expr)
-					c.emitArg(runtime.OpCall, 1)
-				} else {
-					c.compileExpr(part.Expr)
-				}
-
-				c.emitLoadConst(part.FormatSpec)
-				c.emitArg(runtime.OpCall, 2)
-			} else {
-				// No format spec: just apply conversion
-				convName := "str"
-				if part.Conversion == 'r' {
-					convName = "repr"
-				}
-				convIdx := c.addName(convName)
-				c.emitArg(runtime.OpLoadGlobal, convIdx)
-				c.compileExpr(part.Expr)
-				c.emitArg(runtime.OpCall, 1)
-			}
-		} else {
-			// Load literal string
-			c.emitLoadConst(part.Value)
-		}
-
-		// Concatenate with previous part
-		if i > 0 {
-			c.emit(runtime.OpBinaryAdd)
-		}
-	}
-}
-
 // Variable access compilation
 
 func (c *Compiler) compileLoad(name string) {

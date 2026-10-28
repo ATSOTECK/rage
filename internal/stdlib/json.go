@@ -273,7 +273,7 @@ func encodeJSON(v runtime.Value, indent, itemSep, keySep string, sortKeys bool, 
 		if math.IsInf(val.Value, 0) {
 			return "", fmt.Errorf("Infinity is not JSON serializable")
 		}
-		return strconv.FormatFloat(val.Value, 'g', -1, 64), nil
+		return runtime.FloatRepr(val.Value), nil
 
 	case *runtime.PyString:
 		return encodeString(val.Value), nil
@@ -450,7 +450,7 @@ func keyToString(k runtime.Value) (string, error) {
 	case *runtime.PyInt:
 		return strconv.FormatInt(v.Value, 10), nil
 	case *runtime.PyFloat:
-		return strconv.FormatFloat(v.Value, 'g', -1, 64), nil
+		return runtime.FloatRepr(v.Value), nil
 	case *runtime.PyBool:
 		if v.Value {
 			return "true", nil

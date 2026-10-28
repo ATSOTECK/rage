@@ -500,6 +500,10 @@ func captureWalkExpr(expr model.Expr, refs map[string]bool, collecting bool) {
 			if part.Expr != nil {
 				captureWalkExpr(part.Expr, refs, collecting)
 			}
+			// Nested replacement fields in the format spec ("{x:{width}}")
+			for _, specExpr := range fstringSpecExprs(part.FormatSpec) {
+				captureWalkExpr(specExpr, refs, collecting)
+			}
 		}
 	}
 }

@@ -7,248 +7,300 @@ import (
 	"unicode/utf8"
 )
 
+// strFormatter implements str.format() and str.format_map() (PEP 3101).
+type strFormatter struct {
+	vm      *VM
+	args    []Value
+	kwargs  map[string]Value
+	mapping Value // non-nil for format_map: named fields are looked up here
+
+	autoIndex int
+	numbering byte // 0 until the first field, then 'a' (automatic) or 'm' (manual)
+}
+
 // strFormat implements Python's str.format() method
 func (vm *VM) strFormat(template string, args []Value, kwargs map[string]Value) (Value, error) {
-	var result strings.Builder
-	argIdx := 0
+	f := &strFormatter{vm: vm, args: args, kwargs: kwargs}
+	s, err := f.format(template, 2)
+	if err != nil {
+		return nil, err
+	}
+	return &PyString{Value: s}, nil
+}
 
-	i := 0
-	for i < len(template) {
-		if template[i] == '{' {
-			if i+1 < len(template) && template[i+1] == '{' {
-				result.WriteByte('{')
+// strFormatMap implements Python's str.format_map() method
+func (vm *VM) strFormatMap(template string, mapping Value) (Value, error) {
+	f := &strFormatter{vm: vm, mapping: mapping}
+	s, err := f.format(template, 2)
+	if err != nil {
+		return nil, err
+	}
+	return &PyString{Value: s}, nil
+}
+
+// format expands template. depth limits how deeply format specs may nest
+// replacement fields ("{x:{width}}").
+func (f *strFormatter) format(template string, depth int) (string, error) {
+	if depth <= 0 {
+		return "", fmt.Errorf("ValueError: Max string recursion exceeded")
+	}
+	var b strings.Builder
+	i, n := 0, len(template)
+	for i < n {
+		c := template[i]
+		if c == '}' {
+			if i+1 < n && template[i+1] == '}' {
+				b.WriteByte('}')
 				i += 2
 				continue
 			}
-			// Find closing brace
-			j := i + 1
-			for j < len(template) && template[j] != '}' {
-				j++
-			}
-			if j >= len(template) {
-				return nil, fmt.Errorf("ValueError: Single '{' encountered in format string")
-			}
-			field := template[i+1 : j]
-
-			// Parse field name and format spec
-			var fieldName, formatSpec string
-			if colonIdx := strings.Index(field, ":"); colonIdx >= 0 {
-				fieldName = field[:colonIdx]
-				formatSpec = field[colonIdx+1:]
-			} else {
-				fieldName = field
-			}
-
-			// Get value
-			var val Value
-			if fieldName == "" {
-				if argIdx >= len(args) {
-					return nil, fmt.Errorf("IndexError: Replacement index %d out of range", argIdx)
-				}
-				val = args[argIdx]
-				argIdx++
-			} else if idx, err := strconv.Atoi(fieldName); err == nil {
-				if idx >= len(args) {
-					return nil, fmt.Errorf("IndexError: Replacement index %d out of range", idx)
-				}
-				val = args[idx]
-			} else {
-				if v, ok := kwargs[fieldName]; ok {
-					val = v
-				} else {
-					return nil, fmt.Errorf("KeyError: '%s'", fieldName)
-				}
-			}
-
-			// Apply format spec
-			formatted, fmtErr := vm.formatValue(val, formatSpec)
-			if fmtErr != nil {
-				return nil, fmtErr
-			}
-			result.WriteString(formatted)
-			i = j + 1
-		} else if template[i] == '}' {
-			if i+1 < len(template) && template[i+1] == '}' {
-				result.WriteByte('}')
-				i += 2
-				continue
-			}
-			return nil, fmt.Errorf("ValueError: Single '}' encountered in format string")
-		} else {
-			result.WriteByte(template[i])
-			i++
+			return "", fmt.Errorf("ValueError: Single '}' encountered in format string")
 		}
+		if c != '{' {
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		if i+1 < n && template[i+1] == '{' {
+			b.WriteByte('{')
+			i += 2
+			continue
+		}
+		if i+1 >= n {
+			return "", fmt.Errorf("ValueError: Single '{' encountered in format string")
+		}
+
+		fieldName, conversion, spec, end, err := parseReplacementField(template, i+1)
+		if err != nil {
+			return "", err
+		}
+		i = end
+		s, err := f.renderField(fieldName, conversion, spec, depth)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(s)
 	}
-	return &PyString{Value: result.String()}, nil
+	return b.String(), nil
 }
 
-// formatValue formats a value with the given format spec, checking __format__ first.
-func (vm *VM) formatValue(val Value, spec string) (string, error) {
-	if inst, ok := val.(*PyInstance); ok {
-		if result, found, err := vm.callDunder(inst, "__format__", &PyString{Value: spec}); found {
-			if err != nil {
-				return "", err
+// parseReplacementField parses the field starting at template[start] (just
+// after the opening brace) and returns its parts and the index just past the
+// closing brace.
+func parseReplacementField(template string, start int) (fieldName string, conversion rune, spec string, end int, err error) {
+	n := len(template)
+	i := start
+	var c byte
+	terminated := false
+	for i < n && !terminated {
+		c = template[i]
+		i++
+		switch c {
+		case '{':
+			return "", 0, "", 0, fmt.Errorf("ValueError: unexpected '{' in field name")
+		case '[':
+			// An index may contain any character except ']'.
+			for i < n && template[i] != ']' {
+				i++
 			}
-			if s, ok := result.(*PyString); ok {
-				return s.Value, nil
-			}
-			return "", fmt.Errorf("TypeError: __format__ must return a str, not %s", vm.typeName(result))
+		case '}', ':', '!':
+			terminated = true
 		}
 	}
-	return vm.applyFormatSpec(val, spec), nil
+	if !terminated {
+		return "", 0, "", 0, fmt.Errorf("ValueError: expected '}' before end of string")
+	}
+	fieldName = template[start : i-1]
+	if c == '}' {
+		return fieldName, 0, "", i, nil
+	}
+	if c == '!' {
+		if i >= n {
+			return "", 0, "", 0, fmt.Errorf("ValueError: end of string while looking for conversion specifier")
+		}
+		r, size := utf8.DecodeRuneInString(template[i:])
+		conversion = r
+		i += size
+		if i < n {
+			next := template[i]
+			i++
+			if next == '}' {
+				return fieldName, conversion, "", i, nil
+			}
+			if next != ':' {
+				return "", 0, "", 0, fmt.Errorf("ValueError: expected ':' after conversion specifier")
+			}
+		}
+	}
+	specStart := i
+	count := 1
+	for i < n {
+		switch template[i] {
+		case '{':
+			count++
+		case '}':
+			count--
+			if count == 0 {
+				return fieldName, conversion, template[specStart:i], i + 1, nil
+			}
+		}
+		i++
+	}
+	return "", 0, "", 0, fmt.Errorf("ValueError: unmatched '{' in format spec")
 }
 
-// applyFormatSpec applies a format spec like ">10", "<10", "^10", ".2f", "05d"
-func (vm *VM) applyFormatSpec(val Value, spec string) string {
-	if len(spec) == 0 {
-		return vm.str(val)
+// renderField looks up, converts and formats a single replacement field.
+func (f *strFormatter) renderField(fieldName string, conversion rune, spec string, depth int) (string, error) {
+	val, err := f.lookupField(fieldName)
+	if err != nil {
+		return "", err
 	}
-
-	// Parse alignment and fill
-	fill := " "
-	align := byte(0)
-	i := 0
-
-	// Check for fill+align or just align
-	if len(spec) > 1 && (spec[1] == '<' || spec[1] == '>' || spec[1] == '^') {
-		fill = string(spec[0])
-		align = spec[1]
-		i = 2
-	} else if len(spec) > 0 && (spec[0] == '<' || spec[0] == '>' || spec[0] == '^') {
-		align = spec[0]
-		i = 1
-	}
-
-	// Check for sign
-	sign := byte(0)
-	if i < len(spec) && (spec[i] == '+' || spec[i] == '-' || spec[i] == ' ') {
-		sign = spec[i]
-		i++
-	}
-
-	// Check for zero-fill
-	zeroFill := false
-	if i < len(spec) && spec[i] == '0' {
-		zeroFill = true
-		fill = "0"
-		if align == 0 {
-			align = '>'
+	vm := f.vm
+	switch conversion {
+	case 0:
+	case 'r':
+		s, err := vm.reprValue(val)
+		if err != nil {
+			return "", err
 		}
-		i++
-	}
-
-	// Parse width
-	width := 0
-	for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-		width = width*10 + int(spec[i]-'0')
-		i++
-	}
-
-	// Parse precision
-	precision := -1
-	if i < len(spec) && spec[i] == '.' {
-		i++
-		precision = 0
-		for i < len(spec) && spec[i] >= '0' && spec[i] <= '9' {
-			precision = precision*10 + int(spec[i]-'0')
-			i++
+		val = &PyString{Value: s}
+	case 's':
+		s, err := vm.strValue(val)
+		if err != nil {
+			return "", err
 		}
-	}
-
-	// Parse type
-	typeChar := byte(0)
-	if i < len(spec) {
-		typeChar = spec[i]
-	}
-
-	// Format the value
-	var s string
-	switch typeChar {
-	case 'f', 'F':
-		f := vm.toFloat(val)
-		if precision < 0 {
-			precision = 6
+		val = &PyString{Value: s}
+	case 'a':
+		s, err := vm.asciiValue(val)
+		if err != nil {
+			return "", err
 		}
-		s = strconv.FormatFloat(f, 'f', precision, 64)
-	case 'd':
-		n := vm.toInt(val)
-		s = strconv.FormatInt(n, 10)
-	case 'x':
-		n := vm.toInt(val)
-		s = strconv.FormatInt(n, 16)
-	case 'X':
-		n := vm.toInt(val)
-		s = strings.ToUpper(strconv.FormatInt(n, 16))
-	case 'o':
-		n := vm.toInt(val)
-		s = strconv.FormatInt(n, 8)
-	case 'b':
-		n := vm.toInt(val)
-		s = strconv.FormatInt(n, 2)
-	case 'e', 'E':
-		f := vm.toFloat(val)
-		if precision < 0 {
-			precision = 6
-		}
-		s = strconv.FormatFloat(f, byte(typeChar), precision, 64)
-	case 'g', 'G':
-		f := vm.toFloat(val)
-		if precision < 0 {
-			precision = 6
-		}
-		s = strconv.FormatFloat(f, byte(typeChar), precision, 64)
-	case 's', 0:
-		s = vm.str(val)
-		if precision >= 0 && len(s) > precision {
-			s = s[:precision]
-		}
+		val = &PyString{Value: s}
 	default:
-		s = vm.str(val)
-	}
-
-	// Apply sign for numeric types
-	if sign == '+' && len(s) > 0 && s[0] != '-' {
-		s = "+" + s
-	} else if sign == ' ' && len(s) > 0 && s[0] != '-' {
-		s = " " + s
-	}
-
-	// Apply zero-fill for numeric types
-	if zeroFill && width > 0 {
-		prefix := ""
-		if len(s) > 0 && (s[0] == '-' || s[0] == '+' || s[0] == ' ') {
-			prefix = string(s[0])
-			s = s[1:]
+		if conversion < utf8.RuneSelf && conversion > ' ' {
+			return "", fmt.Errorf("ValueError: Unknown conversion specifier %c", conversion)
 		}
-		for len(s) < width-len(prefix) {
-			s = "0" + s
-		}
-		s = prefix + s
-		return s
+		return "", fmt.Errorf("ValueError: Unknown conversion specifier \\x%x", conversion)
 	}
+	if strings.ContainsRune(spec, '{') {
+		spec, err = f.format(spec, depth-1)
+		if err != nil {
+			return "", err
+		}
+	}
+	return vm.formatValue(val, spec)
+}
 
-	// Apply width and alignment
-	if width > utf8.RuneCountInString(s) {
-		padding := width - utf8.RuneCountInString(s)
-		switch align {
-		case '<':
-			s = s + strings.Repeat(fill, padding)
-		case '>':
-			s = strings.Repeat(fill, padding) + s
-		case '^':
-			left := padding / 2
-			right := padding - left
-			s = strings.Repeat(fill, left) + s + strings.Repeat(fill, right)
-		default:
-			// Default: right-align for numbers, left-align for strings
-			switch val.(type) {
-			case *PyInt, *PyFloat:
-				s = strings.Repeat(fill, padding) + s
-			default:
-				s = s + strings.Repeat(fill, padding)
+// lookupField resolves a field name such as "", "0", "name", "0.attr" or
+// "name[key][0]" against the positional and keyword arguments.
+func (f *strFormatter) lookupField(fieldName string) (Value, error) {
+	vm := f.vm
+	first := len(fieldName)
+	if i := strings.IndexAny(fieldName, ".["); i >= 0 {
+		first = i
+	}
+	argName, rest := fieldName[:first], fieldName[first:]
+
+	var val Value
+	if argName == "" || isDecimalDigits(argName) {
+		var index int
+		if argName == "" {
+			if f.numbering == 'm' {
+				return nil, fmt.Errorf("ValueError: cannot switch from manual field specification to automatic field numbering")
 			}
+			f.numbering = 'a'
+			index = f.autoIndex
+			f.autoIndex++
+		} else {
+			if f.numbering == 'a' {
+				return nil, fmt.Errorf("ValueError: cannot switch from automatic field numbering to manual field specification")
+			}
+			f.numbering = 'm'
+			n, err := strconv.Atoi(argName)
+			if err != nil {
+				return nil, fmt.Errorf("ValueError: Too many decimal digits in format string")
+			}
+			index = n
 		}
+		if f.mapping != nil {
+			return nil, fmt.Errorf("ValueError: Format string contains positional fields")
+		}
+		if index >= len(f.args) {
+			return nil, fmt.Errorf("IndexError: Replacement index %d out of range for positional args tuple", index)
+		}
+		val = f.args[index]
+	} else if f.mapping != nil {
+		v, err := vm.getItem(f.mapping, &PyString{Value: argName})
+		if err != nil {
+			return nil, err
+		}
+		val = v
+	} else {
+		v, ok := f.kwargs[argName]
+		if !ok {
+			return nil, vm.newKeyError(&PyString{Value: argName})
+		}
+		val = v
 	}
 
-	return s
+	// Attribute and index accessors.
+	for rest != "" {
+		switch rest[0] {
+		case '.':
+			rest = rest[1:]
+			end := len(rest)
+			if i := strings.IndexAny(rest, ".["); i >= 0 {
+				end = i
+			}
+			name := rest[:end]
+			if name == "" {
+				return nil, fmt.Errorf("ValueError: Empty attribute in format string")
+			}
+			rest = rest[end:]
+			v, err := vm.getAttr(val, name)
+			if err != nil {
+				return nil, err
+			}
+			val = v
+		case '[':
+			end := strings.IndexByte(rest, ']')
+			if end < 0 {
+				return nil, fmt.Errorf("ValueError: Missing ']' in format string")
+			}
+			key := rest[1:end]
+			if key == "" {
+				return nil, fmt.Errorf("ValueError: Empty attribute in format string")
+			}
+			rest = rest[end+1:]
+			if rest != "" && rest[0] != '.' && rest[0] != '[' {
+				return nil, fmt.Errorf("ValueError: Only '.' or '[' may follow ']' in format field specifier")
+			}
+			var index Value = &PyString{Value: key}
+			if isDecimalDigits(key) {
+				if n, err := strconv.ParseInt(key, 10, 64); err == nil {
+					index = MakeInt(n)
+				}
+			}
+			v, err := vm.getItem(val, index)
+			if err != nil {
+				return nil, err
+			}
+			val = v
+		default:
+			return nil, fmt.Errorf("ValueError: Only '.' or '[' may follow ']' in format field specifier")
+		}
+	}
+	return val, nil
+}
+
+func isDecimalDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

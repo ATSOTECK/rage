@@ -718,63 +718,7 @@ func (vm *VM) getAttrString(str *PyString, name string) (Value, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("TypeError: format_map() takes exactly one argument (%d given)", len(args))
 			}
-			mapping, ok := args[0].(*PyDict)
-			if !ok {
-				return nil, fmt.Errorf("TypeError: format_map() argument must be a mapping, not '%s'", vm.typeName(args[0]))
-			}
-			// Build format args from the mapping
-			template := str.Value
-			var result strings.Builder
-			i := 0
-			for i < len(template) {
-				if template[i] == '{' {
-					if i+1 < len(template) && template[i+1] == '{' {
-						result.WriteByte('{')
-						i += 2
-						continue
-					}
-					j := i + 1
-					for j < len(template) && template[j] != '}' {
-						j++
-					}
-					if j >= len(template) {
-						return nil, fmt.Errorf("ValueError: Single '{' encountered in format string")
-					}
-					field := template[i+1 : j]
-					var fieldName, formatSpec string
-					if colonIdx := strings.Index(field, ":"); colonIdx >= 0 {
-						fieldName = field[:colonIdx]
-						formatSpec = field[colonIdx+1:]
-					} else {
-						fieldName = field
-					}
-					val, found := mapping.DictGet(&PyString{Value: fieldName}, vm)
-					if !found {
-						return nil, fmt.Errorf("KeyError: '%s'", fieldName)
-					}
-					if formatSpec != "" {
-						formatted, err := vm.formatValue(val, formatSpec)
-						if err != nil {
-							return nil, err
-						}
-						result.WriteString(formatted)
-					} else {
-						result.WriteString(vm.str(val))
-					}
-					i = j + 1
-				} else if template[i] == '}' {
-					if i+1 < len(template) && template[i+1] == '}' {
-						result.WriteByte('}')
-						i += 2
-						continue
-					}
-					return nil, fmt.Errorf("ValueError: Single '}' encountered in format string")
-				} else {
-					result.WriteByte(template[i])
-					i++
-				}
-			}
-			return &PyString{Value: result.String()}, nil
+			return vm.strFormatMap(str.Value, args[0])
 		}}, nil
 
 	case "maketrans":

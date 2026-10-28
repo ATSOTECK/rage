@@ -77,8 +77,9 @@ test("ascii backslash", test_ascii_backslash)
 
 # Test 14: ascii with single quote
 def test_ascii_quote():
+    # Like repr(), ascii() switches to double quotes when only ' appears
     result = ascii("it's")
-    expect(result).to_be("'it\\'s'")
+    expect(result).to_be("\"it's\"")
 test("ascii single quote", test_ascii_quote)
 
 # Test 15: ascii with empty string

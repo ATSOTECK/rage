@@ -594,6 +594,7 @@ func (vm *VM) initBuiltinsClasses() {
 		return
 	}
 	objectClass.Mro = []*PyClass{objectClass}
+	vm.initObjectTextMethods(objectClass)
 
 	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
 	objectClass.Dict["__getattribute__"] = &PyBuiltinFunc{

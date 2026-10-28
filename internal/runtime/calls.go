@@ -125,12 +125,16 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value, kwargs map[string]Value
 	// Call the Go function - it returns number of results
 	var nResults int
 	var panicErr *PyPanicError
+	var panicExc *PyException
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				// Check if it's a typed PyPanicError for better exception mapping
 				if pe, ok := r.(*PyPanicError); ok {
 					panicErr = pe
+				} else if exc, ok := r.(*PyException); ok {
+					// A Python exception raised as-is (e.g. from a user __repr__)
+					panicExc = exc
 				} else {
 					// Generic panic - convert to string
 					panicErr = &PyPanicError{
@@ -149,6 +153,9 @@ func (vm *VM) callGoFunction(fn *PyGoFunc, args []Value, kwargs map[string]Value
 
 	// Handle error case
 	if nResults < 0 {
+		if panicExc != nil {
+			return nil, panicExc
+		}
 		return nil, fmt.Errorf("%s: %s", panicErr.ExcType, panicErr.Message)
 	}
 
