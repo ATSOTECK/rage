@@ -258,32 +258,45 @@ func functoolsWraps(vm *runtime.VM) int {
 func getFunctionAttr(fn runtime.Value, attr string) runtime.Value {
 	switch f := fn.(type) {
 	case *runtime.PyFunction:
+		if f.Dict != nil {
+			if v, ok := f.Dict[attr]; ok {
+				return v
+			}
+		}
 		switch attr {
-		case "__name__":
+		case "__name__", "__qualname__":
 			return runtime.NewString(f.Name)
 		case "__doc__":
 			return runtime.None
+		case "__module__":
+			if mod, ok := f.Globals["__name__"]; ok {
+				return mod
+			}
 		}
 	case *runtime.PyBuiltinFunc:
 		switch attr {
-		case "__name__":
+		case "__name__", "__qualname__":
 			return runtime.NewString(f.Name)
 		}
 	}
 	return nil
 }
 
-// Helper to set function attribute
+// Helper to set function attribute. __name__ renames the function; anything
+// else (__wrapped__, __doc__, __qualname__, ...) is stored as a function
+// attribute so it can be read back.
 func setFunctionAttr(fn runtime.Value, attr string, val runtime.Value) {
-	switch f := fn.(type) {
-	case *runtime.PyFunction:
-		switch attr {
-		case "__name__":
+	if f, ok := fn.(*runtime.PyFunction); ok {
+		if attr == "__name__" {
 			if s, ok := val.(*runtime.PyString); ok {
 				f.Name = s.Value
 			}
-		// __doc__ is not currently writable as CodeObject doesn't store it
+			return
 		}
+		if f.Dict == nil {
+			f.Dict = make(map[string]runtime.Value)
+		}
+		f.Dict[attr] = val
 	}
 }
 

@@ -428,6 +428,11 @@ func (vm *VM) classCall(fn *PyClass, slotArgs []Value, kwargs map[string]Value) 
 func (vm *VM) createFunctionFrame(fn *PyFunction, args []Value, kwargs map[string]Value) (*Frame, error) {
 	code := fn.Code
 
+	// Without *args, surplus positional arguments are an error, not dropped.
+	if code.Flags&FlagVarArgs == 0 && len(args) > code.ArgCount {
+		return nil, tooManyPositionalError(fn, len(args))
+	}
+
 	// Create new frame. Locals and the operand stack share a single backing
 	// allocation (locals first, capacity-capped so they can never grow into
 	// the stack); the stack is replaced with a fresh slice if it ever grows.
@@ -659,4 +664,26 @@ func (vm *VM) createCoroutine(fn *PyFunction, args []Value, kwargs map[string]Va
 		Name:  fn.Name,
 		State: GenCreated,
 	}, nil
+}
+
+// tooManyPositionalError builds CPython's TypeError for a call passing more
+// positional arguments than fn accepts.
+func tooManyPositionalError(fn *PyFunction, given int) error {
+	maxArgs := fn.Code.ArgCount
+	minArgs := maxArgs
+	if fn.Defaults != nil {
+		minArgs -= len(fn.Defaults.Items)
+	}
+	takes := fmt.Sprintf("%d positional argument", maxArgs)
+	if minArgs != maxArgs {
+		takes = fmt.Sprintf("from %d to %d positional argument", minArgs, maxArgs)
+	}
+	if maxArgs != 1 {
+		takes += "s"
+	}
+	verb := "were"
+	if given == 1 {
+		verb = "was"
+	}
+	return fmt.Errorf("TypeError: %s() takes %s but %d %s given", fn.Name, takes, given, verb)
 }

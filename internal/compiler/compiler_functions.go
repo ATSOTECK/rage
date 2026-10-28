@@ -27,24 +27,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		}
 	}
 
-	// Define parameters
-	if s.Args != nil {
-		for _, arg := range s.Args.Args {
-			funcCompiler.symbolTable.Define(arg.Arg.Name)
-		}
-		for _, arg := range s.Args.PosOnlyArgs {
-			funcCompiler.symbolTable.Define(arg.Arg.Name)
-		}
-		for _, arg := range s.Args.KwOnlyArgs {
-			funcCompiler.symbolTable.Define(arg.Arg.Name)
-		}
-		if s.Args.VarArg != nil {
-			funcCompiler.symbolTable.Define(s.Args.VarArg.Arg.Name)
-		}
-		if s.Args.KwArg != nil {
-			funcCompiler.symbolTable.Define(s.Args.KwArg.Arg.Name)
-		}
-	}
+	defineParams(funcCompiler.symbolTable, s.Args)
 
 	// Pre-scan: identify all assigned names in the function body and pre-define
 	// them as locals. This ensures that variables assigned anywhere in the function
@@ -71,16 +54,7 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 
 	// Set up code object
 	funcCode := funcCompiler.code
-	if s.Args != nil {
-		funcCode.ArgCount = len(s.Args.Args) + len(s.Args.PosOnlyArgs)
-		funcCode.KwOnlyArgCount = len(s.Args.KwOnlyArgs)
-		if s.Args.VarArg != nil {
-			funcCode.Flags |= runtime.FlagVarArgs
-		}
-		if s.Args.KwArg != nil {
-			funcCode.Flags |= runtime.FlagVarKeywords
-		}
-	}
+	setParamCounts(funcCode, s.Args)
 
 	// Check if function is a generator or coroutine
 	isGenerator := containsYield(s.Body)
@@ -94,43 +68,10 @@ func (c *Compiler) compileFunctionDef(s *model.FunctionDef) {
 		funcCode.Flags |= runtime.FlagGenerator
 	}
 
-	// Load defaults
-	if s.Args != nil && len(s.Args.Defaults) > 0 {
-		for _, def := range s.Args.Defaults {
-			c.compileExpr(def)
-		}
-		c.emitArg(runtime.OpBuildTuple, len(s.Args.Defaults))
-	}
-
-	// Load kwonly defaults as a dict
-	hasKwDefaults := false
-	if s.Args != nil && len(s.Args.KwDefaults) > 0 {
-		// Build a dict of kwonly param name -> default value
-		count := 0
-		for i, def := range s.Args.KwDefaults {
-			if def != nil && i < len(s.Args.KwOnlyArgs) {
-				c.emitLoadConst(s.Args.KwOnlyArgs[i].Arg.Name)
-				c.compileExpr(def)
-				count++
-			}
-		}
-		if count > 0 {
-			c.emitArg(runtime.OpBuildMap, count)
-			hasKwDefaults = true
-		}
-	}
-
-	// Load code object and make function
+	// Load defaults, then code object, and make function
+	flags := c.emitParamDefaults(s.Args)
 	c.emitLoadConst(funcCode)
 	c.emitLoadConst(s.Name.Name)
-
-	flags := 0
-	if s.Args != nil && len(s.Args.Defaults) > 0 {
-		flags |= 1 // Has defaults
-	}
-	if hasKwDefaults {
-		flags |= 2 // Has kwonly defaults
-	}
 	c.emitArg(runtime.OpMakeFunction, flags)
 
 	// Apply decorators (in reverse order)
@@ -218,13 +159,7 @@ func (c *Compiler) compileClassDef(s *model.ClassDef) {
 func (c *Compiler) compileLambda(e *model.Lambda) {
 	// Create lambda function code
 	lambdaCompiler := c.newChildCompiler("<lambda>", e.StartPos.Line, ScopeFunction, 0)
-
-	// Define parameters
-	if e.Args != nil {
-		for _, arg := range e.Args.Args {
-			lambdaCompiler.symbolTable.Define(arg.Arg.Name)
-		}
-	}
+	defineParams(lambdaCompiler.symbolTable, e.Args)
 
 	// Compile body expression and return it
 	lambdaCompiler.setLine(e.Body.Pos().Line)
@@ -233,31 +168,86 @@ func (c *Compiler) compileLambda(e *model.Lambda) {
 	c.finalizeAndOptimize(lambdaCompiler)
 
 	lambdaCode := lambdaCompiler.code
-	if e.Args != nil {
-		lambdaCode.ArgCount = len(e.Args.Args)
-	}
+	setParamCounts(lambdaCode, e.Args)
 
 	// Check if the lambda body contains yield (making it a generator lambda)
 	if containsYieldExpr(e.Body) {
 		lambdaCode.Flags |= runtime.FlagGenerator
 	}
 
-	// Load defaults
-	if e.Args != nil && len(e.Args.Defaults) > 0 {
-		for _, def := range e.Args.Defaults {
-			c.compileExpr(def)
-		}
-		c.emitArg(runtime.OpBuildTuple, len(e.Args.Defaults))
-	}
-
+	flags := c.emitParamDefaults(e.Args)
 	c.emitLoadConst(lambdaCode)
 	c.emitLoadConst("<lambda>")
+	c.emitArg(runtime.OpMakeFunction, flags)
+}
 
+// defineParams defines a function's parameters as locals in the slot order
+// createFunctionFrame binds them: positional-only, positional-or-keyword,
+// keyword-only, then *args and **kwargs.
+func defineParams(st *SymbolTable, args *model.Arguments) {
+	if args == nil {
+		return
+	}
+	for _, arg := range args.PosOnlyArgs {
+		st.Define(arg.Arg.Name)
+	}
+	for _, arg := range args.Args {
+		st.Define(arg.Arg.Name)
+	}
+	for _, arg := range args.KwOnlyArgs {
+		st.Define(arg.Arg.Name)
+	}
+	if args.VarArg != nil {
+		st.Define(args.VarArg.Arg.Name)
+	}
+	if args.KwArg != nil {
+		st.Define(args.KwArg.Arg.Name)
+	}
+}
+
+// setParamCounts records a function's parameter shape on its code object.
+func setParamCounts(code *runtime.CodeObject, args *model.Arguments) {
+	if args == nil {
+		return
+	}
+	code.ArgCount = len(args.Args) + len(args.PosOnlyArgs)
+	code.KwOnlyArgCount = len(args.KwOnlyArgs)
+	if args.VarArg != nil {
+		code.Flags |= runtime.FlagVarArgs
+	}
+	if args.KwArg != nil {
+		code.Flags |= runtime.FlagVarKeywords
+	}
+}
+
+// emitParamDefaults pushes a function's default values for MAKE_FUNCTION and
+// returns its flags: 1 = a tuple of positional defaults, 2 = a dict of
+// keyword-only defaults (pushed after the tuple).
+func (c *Compiler) emitParamDefaults(args *model.Arguments) int {
+	if args == nil {
+		return 0
+	}
 	flags := 0
-	if e.Args != nil && len(e.Args.Defaults) > 0 {
+	if len(args.Defaults) > 0 {
+		for _, def := range args.Defaults {
+			c.compileExpr(def)
+		}
+		c.emitArg(runtime.OpBuildTuple, len(args.Defaults))
 		flags |= 1
 	}
-	c.emitArg(runtime.OpMakeFunction, flags)
+	count := 0
+	for i, def := range args.KwDefaults {
+		if def != nil && i < len(args.KwOnlyArgs) {
+			c.emitLoadConst(args.KwOnlyArgs[i].Arg.Name)
+			c.compileExpr(def)
+			count++
+		}
+	}
+	if count > 0 {
+		c.emitArg(runtime.OpBuildMap, count)
+		flags |= 2
+	}
+	return flags
 }
 
 // Comprehension compilation

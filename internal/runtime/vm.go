@@ -125,6 +125,10 @@ func NewVM() *VM {
 	}
 	vm.initBuiltins()
 
+	// Code run directly by the VM is the main module, so scripts can use the
+	// `if __name__ == "__main__":` idiom.
+	vm.Globals["__name__"] = NewString("__main__")
+
 	// Add pending builtins registered by stdlib modules (e.g., open() from IO module)
 	for name, fn := range GetPendingBuiltins() {
 		vm.builtins[name] = NewGoFunction(name, fn)

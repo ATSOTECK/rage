@@ -13,7 +13,7 @@ try:
     test_unbound()()
 except:
     caught = True
-test("assignment without nonlocal raises error", lambda: expect(caught, True))
+test("assignment without nonlocal raises error", lambda: expect(caught).to_be(True))
 
 # With nonlocal, rebinding works
 def test_nonlocal_rebind():
@@ -25,9 +25,9 @@ def test_nonlocal_rebind():
     return inc
 
 c = test_nonlocal_rebind()
-test("nonlocal rebind call 1", lambda: expect(c(), 1))
-test("nonlocal rebind call 2", lambda: expect(c(), 2))
-test("nonlocal rebind call 3", lambda: expect(c(), 3))
+test("nonlocal rebind call 1", lambda: expect(c()).to_be(1))
+test("nonlocal rebind call 2", lambda: expect(c()).to_be(2))
+test("nonlocal rebind call 3", lambda: expect(c()).to_be(3))
 
 # Read-only closure doesn't need nonlocal
 def test_readonly():
@@ -36,7 +36,7 @@ def test_readonly():
         return val
     return get
 
-test("read-only closure works", lambda: expect(test_readonly()(), 42))
+test("read-only closure works", lambda: expect(test_readonly()()).to_be(42))
 
 # Simple unbound local in function
 def test_simple_unbound():
@@ -49,7 +49,7 @@ def test_simple_unbound():
         caught = True
     return caught
 
-test("simple unbound local", lambda: expect(test_simple_unbound(), True))
+test("simple unbound local", lambda: expect(test_simple_unbound()).to_be(True))
 
 # for loop variable is properly local
 def test_for_local():
@@ -58,21 +58,21 @@ def test_for_local():
         result = result + [i]
     return result
 
-test("for loop variable is local", lambda: expect(test_for_local(), [0, 1, 2]))
+test("for loop variable is local", lambda: expect(test_for_local()).to_be([0, 1, 2]))
 
 # import inside function works
 def test_import():
     import math
     return math.sqrt(16)
 
-test("import inside function", lambda: expect(test_import(), 4.0))
+test("import inside function", lambda: expect(test_import()).to_be(4.0))
 
 # from import inside function works
 def test_from_import():
     from math import floor
     return floor(3.7)
 
-test("from import inside function", lambda: expect(test_from_import(), 3))
+test("from import inside function", lambda: expect(test_from_import()).to_be(3))
 
 # Assignment in except handler
 def test_except_local():
@@ -84,7 +84,7 @@ def test_except_local():
         return x
     return f()
 
-test("except handler assignment", lambda: expect(test_except_local(), -1))
+test("except handler assignment", lambda: expect(test_except_local()).to_be(-1))
 
 # Global declaration prevents local treatment
 x_global = 100
@@ -93,8 +93,8 @@ def test_global():
     x_global = 200
     return x_global
 
-test("global declaration", lambda: expect(test_global(), 200))
-test("global actually modified", lambda: expect(x_global, 200))
+test("global declaration", lambda: expect(test_global()).to_be(200))
+test("global actually modified", lambda: expect(x_global).to_be(200))
 
 # Multiple closures with nonlocal sharing state
 def test_shared_nonlocal():
@@ -109,4 +109,4 @@ def test_shared_nonlocal():
     inc()
     return get()
 
-test("shared nonlocal state", lambda: expect(test_shared_nonlocal(), 3))
+test("shared nonlocal state", lambda: expect(test_shared_nonlocal()).to_be(3))

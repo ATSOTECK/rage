@@ -1564,7 +1564,9 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 			if packageName == "" {
 				if nameVal, ok := frame.Globals["__name__"]; ok {
 					if nameStr, ok := nameVal.(*PyString); ok {
-						packageName = nameStr.Value
+						if nameStr.Value != "__main__" { // the main script has no parent package
+							packageName = nameStr.Value
+						}
 					}
 				}
 			}

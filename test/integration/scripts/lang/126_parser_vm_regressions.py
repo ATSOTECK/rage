@@ -66,6 +66,26 @@ def test_semicolons():
     a = 1; b = 2; c = a + b
     expect((a, b, c)).to_be((1, 2, 3))
 
+def test_lambda_signatures():
+    f = lambda a, *b, c=3, **d: (a, b, c, d)
+    expect(f(1, 2, c=4, e=5)).to_be((1, (2,), 4, {"e": 5}))
+    g = lambda *, k: k
+    expect(g(k=2)).to_be(2)
+    h = lambda a, /, b: (a, b)
+    expect(h(1, b=2)).to_be((1, 2))
+
+def test_positional_only_params():
+    def f(a, b, /, c, *, d=4):
+        return a, b, c, d
+    expect(f(1, 2, 3)).to_be((1, 2, 3, 4))
+    expect(f(1, 2, c=3, d=5)).to_be((1, 2, 3, 5))
+
+def test_kwargs_keep_call_order():
+    def f(**kw):
+        return list(kw)
+    expect(f(e=1, b=2, a=3, d=4, c=5)).to_be(["e", "b", "a", "d", "c"])
+    expect(list(dict(z=3, y=2, x=1))).to_be(["z", "y", "x"])
+
 # === Compiler / peephole optimizer ===
 
 def test_short_circuit_in_call_args():
@@ -287,6 +307,20 @@ def test_compare_in_finally_during_unwind():
         return out
     expect(g(1, 2)).to_be(["lt", "in", "v"])
 
+def test_function_attributes():
+    import functools
+    def f(a, b=2, *, c=3):
+        return a
+    def deco(fn):
+        @functools.wraps(fn)
+        def inner(*a):
+            return fn(*a)
+        return inner
+    @deco
+    def h(x):
+        return x
+    expect((f.__defaults__, f.__kwdefaults__, h.__name__, h.__wrapped__(5))).to_be(((2,), {"c": 3}, "h", 5))
+
 def test_bare_name_of_deleted_local_raises():
     def f():
         x = 5
@@ -320,6 +354,9 @@ test("elif_chain_no_else", test_elif_chain_no_else)
 test("single_line_suites", test_single_line_suites)
 test("comments_in_odd_places", test_comments_in_odd_places)
 test("semicolons", test_semicolons)
+test("lambda_signatures", test_lambda_signatures)
+test("positional_only_params", test_positional_only_params)
+test("kwargs_keep_call_order", test_kwargs_keep_call_order)
 test("short_circuit_in_call_args", test_short_circuit_in_call_args)
 test("typed_except_inside_loop", test_typed_except_inside_loop)
 test("builtin_errors_have_python_types", test_builtin_errors_have_python_types)
@@ -335,6 +372,7 @@ test("soft_keywords", test_soft_keywords)
 test("fstring_forms", test_fstring_forms)
 test("nested_with_outer_suppresses", test_nested_with_outer_suppresses)
 test("compare_in_finally_during_unwind", test_compare_in_finally_during_unwind)
+test("function_attributes", test_function_attributes)
 test("bare_name_of_deleted_local_raises", test_bare_name_of_deleted_local_raises)
 test("instance_class_attribute", test_instance_class_attribute)
 test("generator_recursion_is_catchable", test_generator_recursion_is_catchable)

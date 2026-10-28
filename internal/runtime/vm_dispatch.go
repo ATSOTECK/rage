@@ -1931,6 +1931,7 @@ func (vm *VM) runDispatch() (Value, error) {
 				kwargs[name] = vm.pop()
 				totalArgs--
 			}
+			vm.RecordKwargNames(kwargs, kwNames)
 			args := make([]Value, totalArgs)
 			for i := totalArgs - 1; i >= 0; i-- {
 				args[i] = vm.pop()
@@ -1957,12 +1958,15 @@ func (vm *VM) runDispatch() (Value, error) {
 				kwargsVal := vm.pop()
 				if kwargsDict, ok := kwargsVal.(*PyDict); ok {
 					kwargs = make(map[string]Value)
+					var names []string
 					for _, key := range kwargsDict.Keys(vm) {
 						if ks, ok := key.(*PyString); ok {
 							val, _ := kwargsDict.DictGet(key, vm)
 							kwargs[ks.Value] = val
+							names = append(names, ks.Value)
 						}
 					}
+					vm.RecordKwargOrder(kwargs, names)
 				}
 			}
 			argsTuple := vm.pop()
@@ -2432,13 +2436,7 @@ func (vm *VM) runDispatch() (Value, error) {
 			vm.push(result)
 
 		case OpLoadLocals:
-			locals := &PyDict{Items: make(map[Value]Value)}
-			for i, name := range frame.Code.VarNames {
-				if frame.Locals[i] != nil {
-					locals.Items[&PyString{Value: name}] = frame.Locals[i]
-				}
-			}
-			vm.push(locals)
+			vm.push(vm.localsDict(frame.Code.VarNames, frame.Locals))
 
 		case OpSetupExcept:
 			// Push exception handler block onto block stack
@@ -2770,7 +2768,9 @@ func (vm *VM) runDispatch() (Value, error) {
 						if nameStr, ok := nameVal.(*PyString); ok {
 							// For a module like "pkg.sub.module", the package is "pkg.sub"
 							// For a package like "pkg.sub", the package is "pkg.sub" itself
-							packageName = nameStr.Value
+							if nameStr.Value != "__main__" { // the main script has no parent package
+								packageName = nameStr.Value
+							}
 						}
 					}
 				}

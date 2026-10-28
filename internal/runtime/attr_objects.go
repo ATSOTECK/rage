@@ -497,29 +497,48 @@ func (vm *VM) getAttrClass(o *PyClass, name string) (Value, error) {
 
 // getAttrFunction handles attribute access on *PyFunction values.
 func (vm *VM) getAttrFunction(o *PyFunction, name string) (Value, error) {
-	switch name {
-	case "__name__":
-		return &PyString{Value: o.Name}, nil
-	case "__doc__":
-		return None, nil
-	case "__isabstractmethod__":
-		return &PyBool{Value: o.IsAbstract}, nil
-	case "__wrapped__":
-		// Check if we have __wrapped__ stored in closure
-		if o.Closure != nil {
-			for _, cell := range o.Closure {
-				if cell != nil {
-					return cell, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '__wrapped__'")
-	}
-	// Check custom attributes
+	// Attributes set on the function (e.g. by functools.wraps: __wrapped__,
+	// __doc__, __qualname__) take precedence over the computed defaults.
 	if o.Dict != nil {
 		if val, ok := o.Dict[name]; ok {
 			return val, nil
 		}
+	}
+	switch name {
+	case "__name__", "__qualname__":
+		return &PyString{Value: o.Name}, nil
+	case "__doc__":
+		return None, nil
+	case "__module__":
+		if mod, ok := o.Globals["__name__"]; ok {
+			return mod, nil
+		}
+		return None, nil
+	case "__isabstractmethod__":
+		return &PyBool{Value: o.IsAbstract}, nil
+	case "__defaults__":
+		if o.Defaults == nil || len(o.Defaults.Items) == 0 {
+			return None, nil
+		}
+		return o.Defaults, nil
+	case "__kwdefaults__":
+		if len(o.KwDefaults) == 0 {
+			return None, nil
+		}
+		d := &PyDict{Items: make(map[Value]Value)}
+		for _, k := range vm.kwargNames(o.KwDefaults) {
+			d.DictSet(&PyString{Value: k}, o.KwDefaults[k], vm)
+		}
+		return d, nil
+	case "__dict__":
+		if o.Dict == nil {
+			o.Dict = make(map[string]Value)
+		}
+		d := &PyDict{Items: make(map[Value]Value)}
+		for k, v := range o.Dict {
+			d.DictSet(&PyString{Value: k}, v, vm)
+		}
+		return d, nil
 	}
 	return nil, fmt.Errorf("AttributeError: 'function' object has no attribute '%s'", name)
 }

@@ -89,7 +89,9 @@ func (vm *VM) initBuiltinsClasses() {
 					if packageName == "" {
 						if nameVal, ok := globalsDict["__name__"]; ok {
 							if nameStr, ok := nameVal.(*PyString); ok {
-								packageName = nameStr.Value
+								if nameStr.Value != "__main__" { // the main script has no parent package
+									packageName = nameStr.Value
+								}
 							}
 						}
 					}
