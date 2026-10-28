@@ -696,16 +696,27 @@ func (vm *VM) initBuiltinsFunctions() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("all() takes exactly one argument (%d given)", len(args))
 			}
-			items, err := vm.toList(args[0])
+			// Iterate lazily so evaluation stops at the deciding element
+			iter, err := vm.getIter(args[0])
 			if err != nil {
 				return nil, err
 			}
-			for _, item := range items {
-				if !vm.truthy(item) {
+			for {
+				item, done, err := vm.iterNext(iter)
+				if err != nil {
+					return nil, err
+				}
+				if done {
+					return True, nil
+				}
+				truth, err := vm.truthyChecked(item)
+				if err != nil {
+					return nil, err
+				}
+				if !truth {
 					return False, nil
 				}
 			}
-			return True, nil
 		},
 	}
 
@@ -716,16 +727,27 @@ func (vm *VM) initBuiltinsFunctions() {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("any() takes exactly one argument (%d given)", len(args))
 			}
-			items, err := vm.toList(args[0])
+			// Iterate lazily so evaluation stops at the deciding element
+			iter, err := vm.getIter(args[0])
 			if err != nil {
 				return nil, err
 			}
-			for _, item := range items {
-				if vm.truthy(item) {
+			for {
+				item, done, err := vm.iterNext(iter)
+				if err != nil {
+					return nil, err
+				}
+				if done {
+					return False, nil
+				}
+				truth, err := vm.truthyChecked(item)
+				if err != nil {
+					return nil, err
+				}
+				if truth {
 					return True, nil
 				}
 			}
-			return False, nil
 		},
 	}
 
