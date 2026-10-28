@@ -177,9 +177,31 @@ func (vm *VM) getAttrException(o *PyException, name string) (Value, error) {
 			},
 		}, nil
 	}
-	// Delegate to Instance for ExceptionGroup attributes (message, exceptions, subgroup, etc.)
+	// Delegate to Instance for user-defined attributes and ExceptionGroup
+	// attributes (message, exceptions, subgroup, etc.)
 	if o.Instance != nil {
-		return vm.getAttr(o.Instance, name)
+		if v, err := vm.getAttr(o.Instance, name); err == nil || name != "value" {
+			return v, err
+		}
+	}
+	// StopIteration.value / StopAsyncIteration.value: the first arg, or None.
+	// Internally raised StopIterations may carry only TypeName, not ExcType.
+	if name == "value" {
+		isStop := o.Type() == "StopIteration" || o.Type() == "StopAsyncIteration"
+		if !isStop && o.ExcType != nil {
+			for _, cls := range o.ExcType.Mro {
+				if cls.Name == "StopIteration" || cls.Name == "StopAsyncIteration" {
+					isStop = true
+					break
+				}
+			}
+		}
+		if isStop {
+			if o.Args != nil && len(o.Args.Items) > 0 {
+				return o.Args.Items[0], nil
+			}
+			return None, nil
+		}
 	}
 	return nil, fmt.Errorf("AttributeError: '%s' object has no attribute '%s'", o.Type(), name)
 }

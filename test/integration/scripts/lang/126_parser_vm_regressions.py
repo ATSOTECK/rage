@@ -117,6 +117,57 @@ def test_raw_errors_caught_in_same_frame():
         caught.append("type")
     expect(caught).to_be(["name", "type"])
 
+def test_custom_exception_attributes_survive_raise():
+    class E(Exception):
+        def __init__(self, code):
+            super().__init__("code %d" % code)
+            self.code = code
+        def describe(self):
+            return "E%d" % self.code
+    try:
+        raise E(42)
+    except E as e:
+        expect((e.code, e.describe(), str(e), e.args)).to_be((42, "E42", "code 42", ("code 42",)))
+
+def test_inherited_exception_str():
+    class Base(Exception):
+        def __str__(self):
+            return "custom"
+    class Child(Base):
+        pass
+    try:
+        raise Child("m")
+    except Exception as e:
+        expect(str(e)).to_be("custom")
+
+def test_super_init_reaches_object():
+    class A:
+        def __init__(self):
+            super().__init__()
+            self.x = 1
+    class B:
+        pass
+    class C(B):
+        def __init__(self):
+            B.__init__(self)
+            self.y = 2
+    expect((A().x, C().y)).to_be((1, 2))
+
+def test_stop_iteration_value():
+    def gen():
+        yield 1
+        return "done"
+    g = gen()
+    next(g)
+    try:
+        next(g)
+    except StopIteration as e:
+        expect(e.value).to_be("done")
+    def outer():
+        r = yield from gen()
+        yield r
+    expect(list(outer())).to_be([1, "done"])
+
 def test_finally_state_is_per_frame():
     def finally_return():
         try:
@@ -247,6 +298,11 @@ def test_bare_name_of_deleted_local_raises():
         return "no error"
     expect(f()).to_be("unbound")
 
+def test_instance_class_attribute():
+    class C:
+        pass
+    expect(C().__class__ is C).to_be(True)
+
 def test_generator_recursion_is_catchable():
     # Unbounded recursion through generators used to overflow the Go stack
     # and kill the host process.
@@ -268,6 +324,10 @@ test("short_circuit_in_call_args", test_short_circuit_in_call_args)
 test("typed_except_inside_loop", test_typed_except_inside_loop)
 test("builtin_errors_have_python_types", test_builtin_errors_have_python_types)
 test("raw_errors_caught_in_same_frame", test_raw_errors_caught_in_same_frame)
+test("custom_exception_attributes_survive_raise", test_custom_exception_attributes_survive_raise)
+test("inherited_exception_str", test_inherited_exception_str)
+test("super_init_reaches_object", test_super_init_reaches_object)
+test("stop_iteration_value", test_stop_iteration_value)
 test("finally_state_is_per_frame", test_finally_state_is_per_frame)
 test("call_inside_finally_keeps_callers_return", test_call_inside_finally_keeps_callers_return)
 test("pending_return_vs_exceptions", test_pending_return_vs_exceptions)
@@ -276,6 +336,7 @@ test("fstring_forms", test_fstring_forms)
 test("nested_with_outer_suppresses", test_nested_with_outer_suppresses)
 test("compare_in_finally_during_unwind", test_compare_in_finally_during_unwind)
 test("bare_name_of_deleted_local_raises", test_bare_name_of_deleted_local_raises)
+test("instance_class_attribute", test_instance_class_attribute)
 test("generator_recursion_is_catchable", test_generator_recursion_is_catchable)
 
 print("Parser/VM regression tests completed")

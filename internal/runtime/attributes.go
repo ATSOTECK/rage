@@ -61,6 +61,10 @@ func (vm *VM) defaultGetAttribute(o *PyInstance, name string) (Value, error) {
 		}
 	}
 
+	if name == "__class__" {
+		return o.Class, nil
+	}
+
 	// Handle __dict__ access on instances
 	if name == "__dict__" && o.Dict != nil {
 		d := &PyDict{Items: make(map[Value]Value), instanceOwner: o}
@@ -515,6 +519,9 @@ func (vm *VM) setAttr(obj Value, name string, val Value) error {
 		case "__suppress_context__":
 			o.SuppressContext = vm.truthy(val)
 			return nil
+		}
+		if o.Instance != nil {
+			return vm.setAttr(o.Instance, name, val)
 		}
 		return fmt.Errorf("'%s' object attribute '%s' is read-only", o.Type(), name)
 	}

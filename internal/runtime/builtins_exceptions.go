@@ -14,6 +14,22 @@ func (vm *VM) initExceptionClasses() {
 		Dict:  make(map[string]Value),
 	}
 	baseException.Mro = []*PyClass{baseException}
+	// __init__(*args) — stores args, so super().__init__(msg) and
+	// Exception.__init__(self, msg) in subclasses set the exception's args.
+	baseException.Dict["__init__"] = &PyBuiltinFunc{
+		Name: "BaseException.__init__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			if len(args) < 1 {
+				return nil, fmt.Errorf("TypeError: BaseException.__init__() needs an argument")
+			}
+			if self, ok := args[0].(*PyInstance); ok {
+				items := make([]Value, len(args)-1)
+				copy(items, args[1:])
+				self.Dict["args"] = &PyTuple{Items: items}
+			}
+			return None, nil
+		},
+	}
 	// add_note(note) — appends a note string to __notes__
 	baseException.Dict["add_note"] = &PyBuiltinFunc{
 		Name: "BaseException.add_note",

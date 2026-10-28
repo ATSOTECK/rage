@@ -64,10 +64,9 @@ func (vm *VM) createException(excVal Value, cause Value) *PyException {
 				exc.Args = &PyTuple{Items: []Value{}}
 			}
 			exc.Message = vm.str(v)
-			// Link back to instance for ExceptionGroup attribute access
-			if vm.isBaseExceptionGroup(v.Class) {
-				exc.Instance = v
-			}
+			// Link back to the instance so user-defined attributes, methods,
+			// and __str__ remain reachable from the caught exception.
+			exc.Instance = v
 			// Copy __notes__ from instance to PyException
 			if notes, ok := v.Dict["__notes__"]; ok {
 				if notesList, ok := notes.(*PyList); ok {

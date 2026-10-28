@@ -596,6 +596,15 @@ func (vm *VM) initBuiltinsClasses() {
 	objectClass.Mro = []*PyClass{objectClass}
 	vm.initObjectTextMethods(objectClass)
 
+	// object.__init__(self, ...) - no-op terminus for super().__init__() chains
+	// and explicit Base.__init__(self) calls. Extra arguments are accepted.
+	objectClass.Dict["__init__"] = &PyBuiltinFunc{
+		Name: "object.__init__",
+		Fn: func(args []Value, kwargs map[string]Value) (Value, error) {
+			return None, nil
+		},
+	}
+
 	// object.__getattribute__(self, name) - default attribute lookup (descriptor protocol)
 	objectClass.Dict["__getattribute__"] = &PyBuiltinFunc{
 		Name: "object.__getattribute__",

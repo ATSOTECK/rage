@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 )
 
 // GeneratorSend resumes a generator with a value and returns the next yielded value
@@ -100,20 +99,7 @@ func (vm *VM) GeneratorSend(gen *PyGenerator, value Value) (Value, bool, error) 
 func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, bool, error) {
 	if gen.State == GenClosed {
 		// Re-raise the exception
-		if pyExc, ok := excType.(*PyException); ok {
-			return nil, true, pyExc
-		}
-		if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
-			return nil, true, vm.createException(inst, nil)
-		}
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		return nil, true, &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	if gen.State == GenRunning {
@@ -125,46 +111,11 @@ func (vm *VM) GeneratorThrow(gen *PyGenerator, excType, excValue Value) (Value, 
 
 	if gen.State == GenCreated {
 		gen.State = GenClosed
-		if pyExc, ok := excType.(*PyException); ok {
-			return nil, true, pyExc
-		}
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		return nil, true, &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	// Generator is suspended at a yield point - throw the exception there
-	var exc *PyException
-
-	// Check if excType is already a PyException
-	if pyExc, ok := excType.(*PyException); ok {
-		exc = pyExc
-	} else if inst, ok := excType.(*PyInstance); ok && vm.isExceptionClass(inst.Class) {
-		// Already-instantiated exception instance (e.g., ValueError("xyz"))
-		exc = vm.createException(inst, nil)
-	} else {
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		} else if excValue != nil && excValue != None {
-			excMsg = fmt.Sprintf("%v", excValue)
-		}
-
-		exc = &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-
-		// Check if excType is a class and set ExcType appropriately
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-	}
+	exc := vm.thrownException(excType, excValue)
 
 	// Set the pending exception on the VM for the generator to handle
 	vm.generatorThrow = exc
@@ -349,18 +300,7 @@ func (vm *VM) CoroutineSend(coro *PyCoroutine, value Value) (Value, bool, error)
 func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value, bool, error) {
 	if coro.State == GenClosed {
 		// Re-raise the exception
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		exc := &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-		return nil, true, exc
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	if coro.State == GenRunning {
@@ -372,38 +312,11 @@ func (vm *VM) CoroutineThrow(coro *PyCoroutine, excType, excValue Value) (Value,
 
 	if coro.State == GenCreated {
 		coro.State = GenClosed
-		excMsg := "exception"
-		if str, ok := excValue.(*PyString); ok {
-			excMsg = str.Value
-		}
-		exc := &PyException{
-			TypeName: fmt.Sprintf("%v", excType),
-			Message:  excMsg,
-		}
-		if cls, ok := excType.(*PyClass); ok {
-			exc.ExcType = cls
-		}
-		return nil, true, exc
+		return nil, true, vm.thrownException(excType, excValue)
 	}
 
 	// Coroutine is suspended at an await point - throw the exception there
-	// Create the exception to throw
-	excMsg := "exception"
-	if str, ok := excValue.(*PyString); ok {
-		excMsg = str.Value
-	} else if excValue != nil && excValue != None {
-		excMsg = fmt.Sprintf("%v", excValue)
-	}
-
-	exc := &PyException{
-		TypeName: fmt.Sprintf("%v", excType),
-		Message:  excMsg,
-	}
-
-	// Check if excType is a class and set ExcType appropriately
-	if cls, ok := excType.(*PyClass); ok {
-		exc.ExcType = cls
-	}
+	exc := vm.thrownException(excType, excValue)
 
 	// Set the pending exception on the VM for the coroutine to handle
 	vm.generatorThrow = exc
@@ -801,4 +714,25 @@ func (vm *VM) callClassBody(fn *PyFunction) (map[string]Value, []*PyCell, []stri
 	}
 
 	return classNamespace, frame.Cells, frame.OrderedGlobalKeys, nil
+}
+
+// thrownException converts the arguments of generator.throw(typ[, val]) /
+// coroutine.throw into the exception to raise: an exception instance as-is,
+// or an exception class instantiated with val (if given).
+func (vm *VM) thrownException(excType, excValue Value) *PyException {
+	if pyExc, ok := excType.(*PyException); ok {
+		return pyExc
+	}
+	if cls, ok := excType.(*PyClass); ok && vm.isExceptionClass(cls) {
+		var args []Value
+		if excValue != nil && excValue != None {
+			args = []Value{excValue}
+		}
+		if inst, err := vm.call(cls, args, nil); err == nil {
+			return vm.createException(inst, nil)
+		} else {
+			return vm.wrapGoError(err)
+		}
+	}
+	return vm.createException(excType, nil)
 }
