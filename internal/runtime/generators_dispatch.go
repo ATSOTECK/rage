@@ -1545,15 +1545,31 @@ func (vm *VM) executeOpcodeForGenerator(op Opcode, arg int) (Value, error) {
 	case OpListToTuple:
 		vm.opListToTuple()
 
+	case OpMatchSequence:
+		vm.opMatchSequence(arg)
+
+	case OpMatchStar:
+		vm.opMatchStar(arg)
+
+	case OpExtractStar:
+		vm.opExtractStar(arg)
+
+	case OpMatchMapping:
+		vm.opMatchMapping()
+
+	case OpMatchKeys:
+		vm.opMatchKeys()
+
 	case OpCopyDict:
-		keyCount := int(vm.pop().(*PyInt).Value)
-		keysToRemove := make([]Value, keyCount)
-		for i := keyCount - 1; i >= 0; i-- {
-			keysToRemove[i] = vm.pop()
+		vm.opCopyDict()
+
+	case OpMatchClass:
+		vm.opMatchClass(arg)
+
+	case OpGetLen:
+		if err := vm.opGetLen(); err != nil {
+			return nil, err
 		}
-		subject := vm.top()
-		dict := subject.(*PyDict)
-		vm.push(vm.copyDictWithout(dict, keysToRemove))
 
 	case OpLoadBuildClass:
 		vm.push(vm.builtins["__build_class__"])

@@ -21,6 +21,28 @@ func (vm *VM) isSubclassOf(cls, target *PyClass) bool {
 	return false
 }
 
+// selfMatchingTypes are the builtin types whose class pattern with a single
+// positional sub-pattern matches the subject itself (PEP 634).
+var selfMatchingTypes = map[string]bool{
+	"bool": true, "bytearray": true, "bytes": true, "dict": true, "float": true,
+	"frozenset": true, "int": true, "list": true, "set": true, "str": true, "tuple": true,
+}
+
+// isSelfMatchingClass reports whether cls is one of the builtin types in
+// selfMatchingTypes (the builtin itself, not a user-defined namesake).
+func (vm *VM) isSelfMatchingClass(cls Value) bool {
+	var name string
+	switch c := cls.(type) {
+	case *PyBuiltinFunc:
+		name = c.Name
+	case *PyClass:
+		name = c.Name
+	default:
+		return false
+	}
+	return selfMatchingTypes[name] && vm.builtins[name] == cls
+}
+
 // hasMethod checks if an instance has a method via MRO lookup.
 func (vm *VM) hasMethod(instance *PyInstance, name string) bool {
 	for _, cls := range instance.Class.Mro {

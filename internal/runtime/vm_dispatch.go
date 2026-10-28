@@ -2130,282 +2130,30 @@ func (vm *VM) runDispatch() (Value, error) {
 			vm.opListToTuple()
 
 		case OpMatchSequence:
-			// Check if TOS is a sequence with the expected length
-			// arg = expected length (-1 means any length is ok)
-			// Does NOT pop subject - leaves it for element access
-			subject := vm.top()
-			expectedLen := arg
-
-			// Check if it's a matchable sequence (list or tuple, not string/bytes)
-			var length int
-			isSequence := false
-			switch s := subject.(type) {
-			case *PyList:
-				length = len(s.Items)
-				isSequence = true
-			case *PyTuple:
-				length = len(s.Items)
-				isSequence = true
-			}
-
-			// expectedLen of 65535 (0xFFFF) means any length is acceptable (star pattern)
-			anyLength := expectedLen == 65535 || expectedLen == -1
-
-			if !isSequence {
-				vm.push(False)
-			} else if !anyLength && length != expectedLen {
-				vm.push(False)
-			} else {
-				vm.push(True)
-			}
+			vm.opMatchSequence(arg)
 
 		case OpMatchStar:
-			// Check minimum length for star pattern
-			// arg = minLength (beforeStar + afterStar)
-			// Does NOT pop subject
-			subject := vm.top()
-			minLen := arg
-
-			var length int
-			switch s := subject.(type) {
-			case *PyList:
-				length = len(s.Items)
-			case *PyTuple:
-				length = len(s.Items)
-			default:
-				vm.push(False)
-				continue
-			}
-
-			if length < minLen {
-				vm.push(False)
-			} else {
-				vm.push(True)
-			}
+			vm.opMatchStar(arg)
 
 		case OpExtractStar:
-			// Extract star slice from sequence
-			// arg = beforeStar << 8 | afterStar
-			beforeStar := arg >> 8
-			afterStar := arg & 0xFF
-			subject := vm.top()
-
-			var items []Value
-			switch s := subject.(type) {
-			case *PyList:
-				items = s.Items
-			case *PyTuple:
-				items = s.Items
-			default:
-				vm.push(&PyList{Items: nil})
-				continue
-			}
-
-			// Extract slice: items[beforeStar : len(items) - afterStar]
-			start := beforeStar
-			end := len(items) - afterStar
-			if end < start {
-				end = start
-			}
-			slice := make([]Value, end-start)
-			copy(slice, items[start:end])
-			vm.push(&PyList{Items: slice})
+			vm.opExtractStar(arg)
 
 		case OpMatchMapping:
-			// Check if TOS is a mapping (dict)
-			subject := vm.top()
-			if _, ok := subject.(*PyDict); ok {
-				vm.push(True)
-			} else {
-				vm.pop()
-				vm.push(False)
-			}
+			vm.opMatchMapping()
 
 		case OpMatchKeys:
-			// Check if mapping has all required keys
-			// Stack: subject, key1, key2, ..., keyN, N
-			// (True from MATCH_MAPPING was already consumed by POP_JUMP_IF_FALSE)
-			keyCount := int(vm.pop().(*PyInt).Value)
-			keys := make([]Value, keyCount)
-			for i := keyCount - 1; i >= 0; i-- {
-				keys[i] = vm.pop()
-			}
-
-			subject := vm.top()
-			dict, ok := subject.(*PyDict)
-			if !ok {
-				vm.pop()
-				vm.push(False)
-				continue
-			}
-
-			// Check all keys exist and collect values
-			values := make([]Value, keyCount)
-			allPresent := true
-			for i, key := range keys {
-				found := false
-				for k, v := range dict.Items {
-					if vm.equal(k, key) {
-						values[i] = v
-						found = true
-						break
-					}
-				}
-				if !found {
-					allPresent = false
-					break
-				}
-			}
-
-			if !allPresent {
-				vm.pop() // remove subject
-				vm.push(False)
-			} else {
-				// Push values in reverse order (so values[0] is on top after True is popped)
-				// Stack after: [subject, valueN, ..., value2, value1, True]
-				// After PopJumpIfFalse: [subject, valueN, ..., value2, value1]
-				// Now value1 is on TOS for the first pattern
-				for i := len(values) - 1; i >= 0; i-- {
-					vm.push(values[i])
-				}
-				vm.push(True)
-			}
+			vm.opMatchKeys()
 
 		case OpCopyDict:
-			// Copy dict, optionally removing specified keys
-			// Stack: subject, key1, ..., keyN, N
-			// (True was already consumed by POP_JUMP_IF_FALSE)
-			keyCount := int(vm.pop().(*PyInt).Value)
-			keysToRemove := make([]Value, keyCount)
-			for i := keyCount - 1; i >= 0; i-- {
-				keysToRemove[i] = vm.pop()
-			}
-
-			subject := vm.top()
-			dict := subject.(*PyDict)
-
-			// Create a copy without the specified keys
-			newDict := &PyDict{Items: make(map[Value]Value)}
-			for k, v := range dict.Items {
-				shouldRemove := false
-				for _, removeKey := range keysToRemove {
-					if vm.equal(k, removeKey) {
-						shouldRemove = true
-						break
-					}
-				}
-				if !shouldRemove {
-					newDict.Items[k] = v
-				}
-			}
-			vm.push(newDict)
+			vm.opCopyDict()
 
 		case OpMatchClass:
-			// Match class pattern
-			// Stack: subject, class
-			// arg = number of positional patterns
-			cls := vm.pop()
-			subject := vm.top()
-			positionalCount := arg
-
-			// Check isinstance
-			isInstance := false
-			var matchedClass *PyClass
-			switch c := cls.(type) {
-			case *PyClass:
-				matchedClass = c
-				if inst, ok := subject.(*PyInstance); ok {
-					// Check if instance's class matches or is subclass
-					isInstance = vm.isInstanceOf(inst, c)
-				}
-			}
-
-			if !isInstance {
-				vm.pop() // remove subject
-				vm.push(False)
-				continue
-			}
-
-			// Get __match_args__ for positional pattern mapping
-			var matchArgs []string
-			if matchedClass != nil && positionalCount > 0 {
-				if maVal, ok := matchedClass.Dict["__match_args__"]; ok {
-					if maTuple, ok := maVal.(*PyTuple); ok {
-						for _, item := range maTuple.Items {
-							if s, ok := item.(*PyString); ok {
-								matchArgs = append(matchArgs, s.Value)
-							}
-						}
-					} else if maList, ok := maVal.(*PyList); ok {
-						for _, item := range maList.Items {
-							if s, ok := item.(*PyString); ok {
-								matchArgs = append(matchArgs, s.Value)
-							}
-						}
-					}
-				}
-			}
-
-			// Extract attributes based on positional patterns
-			if positionalCount > len(matchArgs) && matchedClass != nil {
-				vm.pop()
-				vm.push(False)
-				continue
-			}
-
-			// Get attribute values
-			attrs := make([]Value, positionalCount)
-			allFound := true
-			inst, isInst := subject.(*PyInstance)
-			for i := 0; i < positionalCount; i++ {
-				if i < len(matchArgs) {
-					attrName := matchArgs[i]
-					if isInst {
-						if val, ok := inst.Dict[attrName]; ok {
-							attrs[i] = val
-						} else {
-							allFound = false
-							break
-						}
-					} else {
-						allFound = false
-						break
-					}
-				} else {
-					allFound = false
-					break
-				}
-			}
-
-			if !allFound {
-				vm.pop()
-				vm.push(False)
-			} else {
-				// Push attrs in reverse order first
-				for i := len(attrs) - 1; i >= 0; i-- {
-					vm.push(attrs[i])
-				}
-				// Push True last so it's on top for POP_JUMP_IF_FALSE
-				vm.push(True)
-			}
+			vm.opMatchClass(arg)
 
 		case OpGetLen:
-			// Get length of TOS without consuming it (for pattern matching length checks)
-			subject := vm.top()
-			var length int64
-			switch s := subject.(type) {
-			case *PyList:
-				length = int64(len(s.Items))
-			case *PyTuple:
-				length = int64(len(s.Items))
-			case *PyString:
-				length = int64(utf8.RuneCountInString(s.Value))
-			case *PyDict:
-				length = int64(len(s.Items))
-			default:
-				return nil, fmt.Errorf("object of type '%s' has no len()", vm.typeName(subject))
+			if err := vm.opGetLen(); err != nil {
+				return nil, err
 			}
-			vm.push(MakeInt(length))
 
 		case OpLoadBuildClass:
 			vm.push(vm.builtins["__build_class__"])

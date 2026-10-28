@@ -128,6 +128,36 @@ def test_typed_except_inside_loop():
             total += 100
     expect(total).to_be(206)
 
+def test_match_in_loop():
+    out = []
+    for s in [0, 5, "abc", [1, 2], {"k": 1}, 2.5, None]:
+        match s:
+            case 0:
+                out.append("zero")
+            case int(n) if n > 3:
+                out.append("big")
+            case str() as t if len(t) > 2:
+                out.append("lstr")
+            case [a, *rest]:
+                out.append("seq")
+            case {"k": v, **others}:
+                out.append("k")
+            case float() | int():
+                out.append("num")
+            case _:
+                out.append("other")
+    expect(out).to_be(["zero", "big", "lstr", "seq", "k", "num", "other"])
+
+def test_match_in_generator():
+    def g(items):
+        for it in items:
+            match it:
+                case [x, *_]:
+                    yield x
+                case _:
+                    yield None
+    expect(list(g([[1, 2], 3, (4,)]))).to_be([1, None, 4])
+
 # === Exceptions ===
 
 def test_builtin_errors_have_python_types():
@@ -382,6 +412,8 @@ test("positional_only_params", test_positional_only_params)
 test("kwargs_keep_call_order", test_kwargs_keep_call_order)
 test("short_circuit_in_call_args", test_short_circuit_in_call_args)
 test("typed_except_inside_loop", test_typed_except_inside_loop)
+test("match_in_loop", test_match_in_loop)
+test("match_in_generator", test_match_in_generator)
 test("builtin_errors_have_python_types", test_builtin_errors_have_python_types)
 test("raw_errors_caught_in_same_frame", test_raw_errors_caught_in_same_frame)
 test("custom_exception_attributes_survive_raise", test_custom_exception_attributes_survive_raise)

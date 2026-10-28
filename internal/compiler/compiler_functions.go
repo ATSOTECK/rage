@@ -424,39 +424,31 @@ func (c *Compiler) compileMatch(s *model.Match) {
 
 	var caseEnds []int
 
+	// Each case is entered with [subject] on the stack. Patterns leave the
+	// element they test in place and push a bool, so a failed pattern or
+	// guard falls through to the next case with exactly [subject] again; the
+	// subject is popped only once a case (and its guard) has matched, so the
+	// body runs with the stack as it was before the match statement.
 	for _, matchCase := range s.Cases {
-		// Duplicate subject for pattern matching
-		c.emit(runtime.OpDup)
-
-		// Compile pattern (simplified)
-		c.compilePattern(matchCase.Pattern)
-
+		c.compilePattern(matchCase.Pattern) // [subject, bool]
 		nextCase := c.emitJump(runtime.OpPopJumpIfFalse)
 
-		// Pop subject if matched
-		c.emit(runtime.OpPop)
-
-		// Guard
+		var guardFail int
 		if matchCase.Guard != nil {
 			c.compileExpr(matchCase.Guard)
-			guardFail := c.emitJump(runtime.OpPopJumpIfFalse)
-
-			// Compile body
-			for _, stmt := range matchCase.Body {
-				c.compileStmt(stmt)
-			}
-			caseEnds = append(caseEnds, c.emitJump(runtime.OpJump))
-
-			c.patchJump(guardFail, c.currentOffset())
-		} else {
-			// Compile body
-			for _, stmt := range matchCase.Body {
-				c.compileStmt(stmt)
-			}
-			caseEnds = append(caseEnds, c.emitJump(runtime.OpJump))
+			guardFail = c.emitJump(runtime.OpPopJumpIfFalse)
 		}
 
+		c.emit(runtime.OpPop) // matched: discard the subject
+		for _, stmt := range matchCase.Body {
+			c.compileStmt(stmt)
+		}
+		caseEnds = append(caseEnds, c.emitJump(runtime.OpJump))
+
 		c.patchJump(nextCase, c.currentOffset())
+		if matchCase.Guard != nil {
+			c.patchJump(guardFail, c.currentOffset())
+		}
 	}
 
 	// Pop subject if no case matched
@@ -620,7 +612,7 @@ func (c *Compiler) compileSequencePattern(p *model.MatchSequence) {
 		starPat := p.Patterns[starIndex].(*model.MatchStar)
 		if starPat.Name != nil {
 			// Extract and bind the star slice: subject[beforeStar : len(subject) - afterStar]
-			c.emit(runtime.OpDup) // Dup subject
+			// (EXTRACT_STAR peeks at the subject and pushes the slice.)
 			c.emitArg(runtime.OpExtractStar, (beforeStar<<8)|afterStar)
 			c.compileStore(starPat.Name)
 		}
@@ -812,12 +804,11 @@ func (c *Compiler) compileClassPattern(p *model.MatchClass) {
 }
 
 func (c *Compiler) compileOrPattern(p *model.MatchOr) {
-	// Try each pattern, short-circuit on first match
+	// Try each pattern, short-circuit on first match. Each alternative leaves
+	// the subject in place, so a failed alternative's bool is simply popped
+	// before trying the next: [subject] -> [subject, bool].
 	var orJumps []int
 	for i, subPattern := range p.Patterns {
-		if i < len(p.Patterns)-1 {
-			c.emit(runtime.OpDup)
-		}
 		c.compilePattern(subPattern)
 		if i < len(p.Patterns)-1 {
 			orJumps = append(orJumps, c.emitJump(runtime.OpJumpIfTrueOrPop))
